@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0005 · MDP 的五个要素：状态、动作、状态转移、策略 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0005" data-slug="mdp-elements" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 1 ／ 基础工具</p>
+    <h1>MDP 的五个要素：状态、动作、状态转移、策略</h1>
+    <p class="lede">强化学习的最小零件一共五个：状态、动作、状态转移（做完动作后，环境从当前状态跳到下一个状态）、策略（一套"看到什么状态就选什么动作"的规则），以及下一课要讲的奖励。本课用一个 3×3 的网格世界（grid world）把这些零件逐个摆清楚，每个定义都配这个场地上能手算的例子。最后讲清马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关）。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出状态空间与动作空间，并分清 $S_t$ 与 $s$ 各自代表什么</li>
+        <li>能说清状态转移概率 $p(s'|s,a)$ 的含义，并检查它有没有归一化</li>
+        <li>能判断一个策略是随机策略还是确定性策略，并由它算出 $p_\pi(s'|s)$</li>
+        <li>能陈述马尔可夫性，并证明「更早的历史可以整段丢掉」</li>
+        <li>能按顺序说出马尔可夫决策过程的五个要素，并解释奖励为什么单独留到下一课</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 网格世界：本课的工作台</h2>
+    <p>后面所有的基础课都用同一个例子：网格世界（grid world）。它是一个 3×3 的方格场地，一个智能体（做决策的那一方，就是你写的程序）每个时刻占据其中一个格子。</p>
+    <p>格子分三类：普通格子可以自由进出，$s_5$ 是目标区域，$s_2$ 是禁止区域，走进去要扣分。编号按行优先，第一行 $s_1,s_2,s_3$，第二行 $s_4,s_5,s_6$，第三行 $s_7,s_8,s_9$。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 560 250" role="img" aria-label="3×3 网格世界：九个格子按行优先编号，中间格 s5 是目标区域，格子 s2 是禁止区域">
+        <rect x="34" y="34" width="76" height="62" class="box"/>
+        <rect x="114" y="34" width="76" height="62" class="bar"/>
+        <rect x="194" y="34" width="76" height="62" class="box"/>
+        <rect x="34" y="100" width="76" height="62" class="box"/>
+        <rect x="114" y="100" width="76" height="62" class="box-a"/>
+        <rect x="194" y="100" width="76" height="62" class="box"/>
+        <rect x="34" y="166" width="76" height="62" class="box"/>
+        <rect x="114" y="166" width="76" height="62" class="box"/>
+        <rect x="194" y="166" width="76" height="62" class="box"/>
+        <text x="60" y="70" class="val-b">s1</text>
+        <text x="140" y="70" class="val-b">s2</text>
+        <text x="220" y="70" class="val-b">s3</text>
+        <text x="60" y="136" class="val-b">s4</text>
+        <text x="140" y="136" class="val-b">s5</text>
+        <text x="220" y="136" class="val-b">s6</text>
+        <text x="60" y="202" class="val-b">s7</text>
+        <text x="140" y="202" class="val-b">s8</text>
+        <text x="220" y="202" class="val-b">s9</text>
+        <text x="304" y="52" class="val-b">s5 目标区域：走到得 +1 分</text>
+        <text x="304" y="76" class="val-b">s2 禁止区域：走到得 −1 分</text>
+        <text x="304" y="100" class="lbl">编号按行优先</text>
+        <text x="304" y="124" class="lbl">动作：a1 上 · a2 右 · a3 下 · a4 左 · a5 不动</text>
+        <text x="304" y="148" class="lbl">走出场外的动作无效，留在原格</text>
+        <path d="M254 65 H296" class="arrow-a"/>
+        <path d="M254 131 H296" class="arrow-a"/>
+        <text x="34" y="238" class="lbl">没有终点格，可以一直走</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 5.1</span>
+        第一部分前三课共用的网格世界。九格对应九个状态，中间的 s5 是目标区域，s2 是禁止区域，其余格子地位相同。场地没有终点格，智能体可以一直走下去。</figcaption>
+    </figure>
+
+    <div class="def">
+      <span class="label">定义 5.1（网格世界的规则）</span>
+      <p>第一部分的前三课都用这一套规则。后面几课会换成一个只有四个状态的更小场地用于手算，奖励与终止状态的设定在那时按新问题重新给出。</p>
+      <p>(i) 场地有 9 个格子，状态按行优先编号为 $s_1,\dots,s_9$。</p>
+      <p>(ii) 每个时刻智能体只占一个格子，可选动作有 5 个：上 $a_1$、右 $a_2$、下 $a_3$、左 $a_4$、不动 $a_5$。</p>
+      <p>(iii) 动作指向的格子在场内时就移过去；指向场外时动作无效，留在原格。</p>
+      <p>(iv) 走到 $s_5$ 得 $+1$ 分，走到 $s_2$ 得 $-1$ 分，其余情况得 $0$ 分。</p>
+      <p>(v) 智能体永远不会被迫停下。这种任务叫连续任务，下一课细讲。</p>
+    </div>
+
+    <div class="rem">
+      <span class="label">注记 5.2（为什么用一个这么小的场地）</span>
+      <p>课程里的每一步推导都要能手算验算。3×3 只有九个状态、五个动作，矩阵能完整写出，数值能用纸笔核对。真实问题的状态数上百万，公式一个都不变。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 状态与动作</h2>
+    <p>智能体每一步要先看清现在在哪，再选动作。前者用状态描述。</p>
+    <div class="def">
+      <span class="label">定义 5.3（状态）</span>
+      <p>描述当前局面的一条信息叫状态（此刻智能体看到的信息，是做决定的依据），记作 $s$。所有可能的状态放在一起叫状态空间（所有可能状态组成的集合），记作 $\mathcal{S}=\{s_1,\dots,s_9\}$。第 $t$ 步的状态记作 $S_t$，它是随机变量；小写 $s$ 表示它取到的某个具体值。时刻从 $t=0$ 开始数。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.4（大写与小写不能混用）</span>
+      <p>$S_t$ 与 $A_t$ 都是随机变量，走完这一步之后才成为具体的 $s$ 与 $a$。写期望时必须写 $E[\cdot\mid S_t=s]$，意思是「在已知第 $t$ 步站在 $s$ 的条件下求平均」；写成 $E[\cdot\mid S_t]$ 没有意义。</p>
+    </div>
+    <p>第二件事是选动作。</p>
+    <div class="def">
+      <span class="label">定义 5.5（动作）</span>
+      <p>智能体一步里可以做的选择叫动作（这一步能做的选择），记作 $a$。本课程网格世界的动作空间（所有可能动作组成的集合）是 $\mathcal{A}=\{a_1,a_2,a_3,a_4,a_5\}$，依次代表上、右、下、左、不动。对每个状态都有 $\mathcal{A}(s)=\mathcal{A}$。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="左侧是五个动作：上右下左与不动；右侧是九格编号，每个格子都是一个状态">
+        <text x="30" y="24" class="lbl">动作空间 A 的五个动作</text>
+        <rect x="66" y="60" width="80" height="70" class="box"/>
+        <text x="96" y="100" class="val-b">s</text>
+        <path d="M106 54 V26" class="arrow-a"/><path d="M102 32 l4 -8 l4 8" class="arrow-a"/>
+        <text x="120" y="34" class="lbl">a1 上</text>
+        <path d="M152 95 H190" class="arrow-a"/><path d="M184 91 l8 4 l-8 4" class="arrow-a"/>
+        <text x="160" y="86" class="lbl">a2 右</text>
+        <path d="M106 136 V168" class="arrow-a"/><path d="M102 162 l4 8 l4 -8" class="arrow-a"/>
+        <text x="120" y="166" class="lbl">a3 下</text>
+        <path d="M60 95 H22" class="arrow-a"/><path d="M28 91 l-8 4 l8 4" class="arrow-a"/>
+        <text x="14" y="86" class="lbl">a4 左</text>
+        <circle cx="106" cy="95" r="7" class="dot-a"/>
+        <text x="120" y="120" class="lbl">a5 不动</text>
+        <text x="30" y="196" class="lbl">同一个状态上，五个动作都允许执行</text>
+
+        <line x1="252" y1="26" x2="252" y2="196" class="grid"/>
+
+        <text x="286" y="24" class="lbl">状态空间 S 的九个状态</text>
+        <rect x="292" y="44" width="58" height="42" class="box"/><text x="314" y="71" class="val">s1</text>
+        <rect x="350" y="44" width="58" height="42" class="box"/><text x="372" y="71" class="val">s2</text>
+        <rect x="408" y="44" width="58" height="42" class="box"/><text x="430" y="71" class="val">s3</text>
+        <rect x="292" y="86" width="58" height="42" class="box"/><text x="314" y="113" class="val">s4</text>
+        <rect x="350" y="86" width="58" height="42" class="box-a"/><text x="372" y="113" class="val-b">s5</text>
+        <rect x="408" y="86" width="58" height="42" class="box"/><text x="430" y="113" class="val">s6</text>
+        <rect x="292" y="128" width="58" height="42" class="box"/><text x="314" y="155" class="val">s7</text>
+        <rect x="350" y="128" width="58" height="42" class="box"/><text x="372" y="155" class="val">s8</text>
+        <rect x="408" y="128" width="58" height="42" class="box"/><text x="430" y="155" class="val">s9</text>
+        <text x="292" y="192" class="lbl">S = { s1, s2, s3, s4, s5, s6, s7, s8, s9 }</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 5.2</span>
+        左图是动作空间：任何格子上都有五个动作，包括会撞到场外的 a1 与 a4。右图是状态空间：一个格子就是一个状态。动作是智能体选的，状态是环境给的。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 5.6（为什么保留撞墙的动作）</span>
+      <p>站在 $s_1$ 时向上或向左都会撞到场外，看起来可以直接删掉。本课程选择保留：哪个动作好应当由智能体从数据里学出来，不能由人预先替它筛掉，否则等于把答案提前塞给它。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.7</span>
+      <p>站在 $s_1$：$a_2$（右）到 $s_2$，$a_3$（下）到 $s_4$，$a_1$（上）与 $a_4$（左）越出场地，动作无效，留在 $s_1$。四种情况都确定发生。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 状态转移</h2>
+    <p>动作选完，落点由环境决定。这件事写成条件概率。</p>
+    <div class="def">
+      <span class="label">定义 5.8（状态转移）</span>
+      <p>固定状态 $s$ 与动作 $a$，下一个状态的分布用条件概率表示，见式 (5.1)。</p>
+      <div class="eq">
+        <span class="eq-body">$$p(s'|s,a)\doteq P(S_{t+1}=s'\mid S_t=s,\ A_t=a)$$</span>
+        <span class="eq-num">(5.1)</span>
+      </div>
+      <p>式中 $s'$ 是下一步可能落到的状态，$p(s'|s,a)$ 是在状态 $s$ 执行动作 $a$ 之后落到 $s'$ 的概率。它是一个转移概率（这个跳转不一定落到同一个格子，结果是一组各带概率的可能性），满足 $p(s'|s,a)\ge0$ 以及</p>
+      <div class="eq">
+        <span class="eq-body">$$\sum_{s'\in\mathcal{S}}p(s'|s,a)=1 .$$</span>
+        <span class="eq-num">(5.2)</span>
+      </div>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 200" role="img" aria-label="左图确定性转移：s1 执行 a2 一定到 s2；右图随机转移：s1 执行 a2 有 0.8 概率到 s2，0.2 概率留在 s1">
+        <text x="26" y="24" class="lbl">确定性转移：一个动作只指向一个落点</text>
+        <circle cx="70" cy="106" r="26" class="box"/><text x="62" y="112" class="val">s1</text>
+        <circle cx="228" cy="106" r="26" class="box"/><text x="220" y="112" class="val">s2</text>
+        <path d="M98 106 H192" class="arrow-a"/><path d="M186 101 l9 5 l-9 5" class="arrow-a"/>
+        <text x="118" y="96" class="lbl">a2 右</text>
+        <text x="106" y="132" class="val-b">概率 1</text>
+        <text x="26" y="176" class="lbl">p(s2 | s1, a2) = 1，其他落点概率为 0</text>
+
+        <line x1="270" y1="20" x2="270" y2="184" class="grid"/>
+
+        <text x="300" y="24" class="lbl">随机转移：地面会打滑</text>
+        <circle cx="340" cy="106" r="26" class="box"/><text x="332" y="112" class="val">s1</text>
+        <circle cx="486" cy="106" r="26" class="box"/><text x="478" y="112" class="val">s2</text>
+        <path d="M368 106 H450" class="arrow-a"/><path d="M444 101 l9 5 l-9 5" class="arrow-a"/>
+        <text x="384" y="96" class="lbl">a2 右</text>
+        <text x="376" y="132" class="val-b">0.8</text>
+        <path d="M340 74 C340 50 352 44 366 46" class="arrow"/>
+        <path d="M360 42 l8 3 l-6 6" class="arrow"/>
+        <text x="374" y="52" class="val-b">0.2 打滑留在原地</text>
+        <text x="300" y="176" class="lbl">两个概率相加 = 1，这就是归一化条件</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 5.3</span>
+        左图的落点分布只在一个状态上取 1，是确定性转移。右图把总概率 1 分给两个落点，这才是随机转移的一般样子。本课程用左边那一种。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">命题 5.9（确定性转移是特例）</span>
+      <p>若存在函数 $f$ 使得 $S_{t+1}=f(S_t,A_t)$ 必然成立，则 $p(s'|s,a)=\mathbf{1}\{s'=f(s,a)\}$，并且它满足式 (5.2) 的归一化条件。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>由 $S_{t+1}=f(s,a)$ 必然成立，事件 $\{S_{t+1}=s'\}$ 在 $s'=f(s,a)$ 时的概率为 1，在其他 $s'$ 上概率为 0，这就是 $p(s'|s,a)=\mathbf{1}\{s'=f(s,a)\}$。非负性显然。求和时只有 $s'=f(s,a)$ 这一项为 1，其余为 0，所以 $\sum_{s'\in\mathcal{S}}p(s'|s,a)=1$，式 (5.2) 成立。</p>
+      <span class="qed">∎</span>
+    </div>
+
+    <div class="eg">
+      <span class="label">例 5.10（网格世界的转移表）</span>
+      <p>把定义 5.1 的规则逐格写开，就得到下面这张表。行是当前状态，列是动作，格子里是下一步落到哪。</p>
+      <table>
+        <thead><tr><th>当前状态</th><th>$a_1$ 上</th><th>$a_2$ 右</th><th>$a_3$ 下</th><th>$a_4$ 左</th><th>$a_5$ 不动</th></tr></thead>
+        <tbody>
+          <tr><td>$s_1$</td><td>$s_1$</td><td>$s_2$</td><td>$s_4$</td><td>$s_1$</td><td>$s_1$</td></tr>
+          <tr><td>$s_2$</td><td>$s_2$</td><td>$s_3$</td><td>$s_5$</td><td>$s_1$</td><td>$s_2$</td></tr>
+          <tr><td>$s_3$</td><td>$s_3$</td><td>$s_3$</td><td>$s_6$</td><td>$s_2$</td><td>$s_3$</td></tr>
+          <tr><td>$s_4$</td><td>$s_1$</td><td>$s_5$</td><td>$s_7$</td><td>$s_4$</td><td>$s_4$</td></tr>
+          <tr><td>$s_5$</td><td>$s_2$</td><td>$s_6$</td><td>$s_8$</td><td>$s_4$</td><td>$s_5$</td></tr>
+          <tr><td>$s_6$</td><td>$s_3$</td><td>$s_6$</td><td>$s_9$</td><td>$s_5$</td><td>$s_6$</td></tr>
+          <tr><td>$s_7$</td><td>$s_4$</td><td>$s_8$</td><td>$s_7$</td><td>$s_7$</td><td>$s_7$</td></tr>
+          <tr><td>$s_8$</td><td>$s_5$</td><td>$s_9$</td><td>$s_8$</td><td>$s_7$</td><td>$s_8$</td></tr>
+          <tr><td>$s_9$</td><td>$s_6$</td><td>$s_9$</td><td>$s_9$</td><td>$s_8$</td><td>$s_9$</td></tr>
+        </tbody>
+      </table>
+      <p>读法：从 $s_5$ 执行 $a_1$（上）落到 $s_2$，所以 $p(s_2|s_5,a_1)=1$；从 $s_3$ 执行 $a_2$（右）会越界，所以 $p(s_3|s_3,a_2)=1$。每行只有一个落点，这就是确定性转移。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.11（打滑版本）</span>
+      <p>把规则 (iii) 改一改就能看到随机转移。设从 $s_1$ 执行 $a_2$（右）时，有 0.8 的概率成功走到 $s_2$，有 0.2 的概率打滑留在 $s_1$。于是 $p(s_2|s_1,a_2)=0.8$，$p(s_1|s_1,a_2)=0.2$，其余落点的概率为 0。两个数相加正好等于 1。本课程其余部分仍用确定性版本，方便手算。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 策略</h2>
+    <p>环境决定「做完动作之后去哪」，智能体决定「在状态里挑哪个动作」。后者的数学名字是策略。</p>
+    <div class="def">
+      <span class="label">定义 5.12（策略）</span>
+      <p>策略（一套"看到什么状态就选什么动作"的规则）是一个条件概率，见式 (5.3)。</p>
+      <div class="eq">
+        <span class="eq-body">$$\pi(a|s)\doteq P(A_t=a\mid S_t=s)$$</span>
+        <span class="eq-num">(5.3)</span>
+      </div>
+      <p>式中 $\pi(a|s)$ 是在状态 $s$ 选动作 $a$ 的概率，满足 $\pi(a|s)\ge0$ 与 $\sum_{a\in\mathcal{A}}\pi(a|s)=1$。若每个状态上都只有一个动作的概率为 1，其余为 0，这样的策略叫确定性策略（每个状态只固定选一个动作的策略）；若某个状态上有两个以上的动作概率为正，就叫随机策略（每个状态下按概率挑动作的策略）。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.13（策略与转移概率的分工）</span>
+      <p>$p(s'|s,a)$ 由环境决定，训练时不会改。$\pi(a|s)$ 由智能体决定，学习改的就是它。两者相乘才是「这一步实际会怎么走」。这个分工贯穿整门课：环境是题目，策略是答案。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 240" role="img" aria-label="左图是确定性策略，每格只有一个箭头；右图是随机策略，s1 上有两个各带 0.5 的箭头">
+        <text x="26" y="22" class="lbl">确定性策略：每格只画一个箭头</text>
+        <rect x="52" y="40" width="52" height="44" class="box"/><text x="70" y="67" class="val">s1</text>
+        <rect x="104" y="40" width="52" height="44" class="box"/><text x="122" y="67" class="val">s2</text>
+        <rect x="156" y="40" width="52" height="44" class="box"/><text x="174" y="67" class="val">s3</text>
+        <rect x="52" y="92" width="52" height="44" class="box"/><text x="70" y="119" class="val">s4</text>
+        <rect x="104" y="92" width="52" height="44" class="box-a"/><text x="122" y="119" class="val-b">s5</text>
+        <rect x="156" y="92" width="52" height="44" class="box"/><text x="174" y="119" class="val">s6</text>
+        <rect x="52" y="144" width="52" height="44" class="box"/><text x="70" y="171" class="val">s7</text>
+        <rect x="104" y="144" width="52" height="44" class="box"/><text x="122" y="171" class="val">s8</text>
+        <rect x="156" y="144" width="52" height="44" class="box"/><text x="174" y="171" class="val">s9</text>
+        <path d="M78 88 V98" class="arrow-a"/><path d="M74 94 l4 8 l4 -8" class="arrow-a"/>
+        <path d="M108 84 V98" class="arrow-a"/><path d="M104 94 l4 8 l4 -8" class="arrow-a"/>
+        <path d="M182 88 V98" class="arrow-a"/><path d="M178 94 l4 8 l4 -8" class="arrow-a"/>
+        <path d="M156 114 H132" class="arrow-a"/><path d="M138 110 l-8 4 l8 4" class="arrow-a"/>
+        <path d="M104 114 H130" class="arrow-a"/><path d="M124 110 l8 4 l-8 4" class="arrow-a"/>
+        <path d="M78 140 V128" class="arrow-a"/><path d="M74 132 l4 -8 l4 8" class="arrow-a"/>
+        <path d="M130 140 V130" class="arrow-a"/><path d="M126 134 l4 -8 l4 8" class="arrow-a"/>
+        <path d="M182 140 V126" class="arrow-a"/><path d="M178 132 l4 -8 l4 8" class="arrow-a"/>
+        <text x="52" y="212" class="lbl">每格一个箭头，</text>
+        <text x="52" y="230" class="lbl">走向完全确定</text>
+
+        <line x1="256" y1="20" x2="256" y2="228" class="grid"/>
+
+        <text x="286" y="22" class="lbl">随机策略：s1 上掷一次硬币</text>
+        <rect x="292" y="40" width="52" height="44" class="box"/><text x="310" y="67" class="val">s1</text>
+        <rect x="344" y="40" width="52" height="44" class="box"/><text x="362" y="67" class="val">s2</text>
+        <rect x="396" y="40" width="52" height="44" class="box"/><text x="414" y="67" class="val">s3</text>
+        <rect x="292" y="92" width="52" height="44" class="box"/><text x="310" y="119" class="val">s4</text>
+        <rect x="344" y="92" width="52" height="44" class="box-a"/><text x="362" y="119" class="val-b">s5</text>
+        <rect x="396" y="92" width="52" height="44" class="box"/><text x="414" y="119" class="val">s6</text>
+        <rect x="292" y="144" width="52" height="44" class="box"/><text x="310" y="171" class="val">s7</text>
+        <rect x="344" y="144" width="52" height="44" class="box"/><text x="362" y="171" class="val">s8</text>
+        <rect x="396" y="144" width="52" height="44" class="box"/><text x="414" y="171" class="val">s9</text>
+        <path d="M318 88 V98" class="arrow-a"/><path d="M314 94 l4 8 l4 -8" class="arrow-a"/>
+        <text x="324" y="106" class="val-b">0.5</text>
+        <path d="M344 62 H336" class="arrow-a"/><path d="M342 58 l-8 4 l8 4" class="arrow-a"/>
+        <text x="300" y="34" class="val-b">0.5</text>
+        <path d="M294 116 H288" class="arrow"/>
+        <text x="286" y="212" class="lbl">同一个起点会走出不同的路，</text>
+        <text x="286" y="230" class="lbl">所以收益也变成一个随机变量</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 5.4</span>
+        确定性策略每格只有一个动作概率为 1，画出来是一格一个箭头。随机策略在 s1 上给两个动作各 0.5 的概率，画出来是两个箭头。两种都能写成 π(a|s)。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">命题 5.14（给定策略后，状态自己会走）</span>
+      <p>把策略与环境合起来，状态之间的转移概率见式 (5.4)，它同样是一个归一化的概率分布。</p>
+      <div class="eq">
+        <span class="eq-body">$$p_\pi(s'|s)\doteq\sum_{a\in\mathcal{A}}\pi(a|s)\,p(s'|s,a),\qquad \sum_{s'\in\mathcal{S}}p_\pi(s'|s)=1$$</span>
+        <span class="eq-num">(5.4)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>每一项都非负，有限项求和可以交换次序，于是
+        $$\begin{aligned}
+        \sum_{s'\in\mathcal{S}}p_\pi(s'|s)
+        &=\sum_{s'}\sum_{a}\pi(a|s)\,p(s'|s,a)\\
+        &=\sum_{a}\pi(a|s)\sum_{s'}p(s'|s,a)
+        =\sum_{a}\pi(a|s)\cdot1=1 .
+        \end{aligned}$$
+        第二个等号用了有限项求和的交换律，第三个等号用了式 (5.2) 的归一化，最后一个等号用了定义 5.12 里 $\sum_a\pi(a|s)=1$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.15（算一个 $p_\pi$）</span>
+      <p>取一个策略：在 $s_1$ 上 $\pi(a_3|s_1)=0.5$、$\pi(a_2|s_1)=0.5$，其他状态随便定。查例 5.10 的表：从 $s_1$ 执行 $a_3$ 到 $s_4$，执行 $a_2$ 到 $s_2$。于是
+        $$p_\pi(s_4|s_1)=0.5\times1+0.5\times0=0.5,\qquad p_\pi(s_2|s_1)=0.5\times0+0.5\times1=0.5 .$$
+        两个数加起来是 1，与式 (5.4) 相符。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 马尔可夫性：历史可以整段丢掉</h2>
+    <div class="def">
+      <span class="label">定义 5.16（马尔可夫性）</span>
+      <p>记 $h_t=(s_0,a_0,s_1,a_1,\dots,s_{t-1},a_{t-1})$ 为第 $t$ 步之前的整段历史。若对任意时刻 $t$ 与任意历史都有式 (5.5)，则称这个环境满足马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关）。式中 $h_t$ 是此前走过的状态与动作串起来的记录。</p>
+      <div class="eq">
+        <span class="eq-body">$$p(s_{t+1}\mid s_t,a_t,h_t)=p(s_{t+1}\mid s_t,a_t)$$</span>
+        <span class="eq-num">(5.5)</span>
+      </div>
+    </div>
+    <p>说人话：下一步落在哪，只看现在站在哪个格子、现在做了什么动作，跟你是从哪条路绕过来的没有关系。这就是「无记忆」的意思。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="上面一行写明完整历史加当前动作指向下一步；下面一行只剩当前状态与动作，指向同一步，落点分布相同">
+        <text x="26" y="22" class="lbl">有记忆的写法：条件里挂着一长串历史</text>
+        <rect x="30" y="38" width="46" height="32" class="box"/><text x="44" y="60" class="val">s0</text>
+        <rect x="80" y="38" width="46" height="32" class="box"/><text x="94" y="60" class="val">a0</text>
+        <rect x="130" y="38" width="46" height="32" class="box"/><text x="144" y="60" class="val">s1</text>
+        <rect x="180" y="38" width="46" height="32" class="box"/><text x="194" y="60" class="val">a1</text>
+        <text x="232" y="60" class="lbl">…</text>
+        <rect x="252" y="38" width="60" height="32" class="box-a"/><text x="264" y="60" class="val-b">s(t)</text>
+        <rect x="316" y="38" width="60" height="32" class="box-a"/><text x="328" y="60" class="val-b">a(t)</text>
+        <path d="M380 54 H446" class="arrow-a"/><path d="M440 49 l9 5 l-9 5" class="arrow-a"/>
+        <rect x="462" y="38" width="62" height="32" class="box"/><text x="470" y="60" class="val">s(t+1)</text>
+        <path d="M30 84 H378" class="mark"/>
+        <text x="30" y="100" class="lbl">这段历史对着色部分没有额外影响</text>
+
+        <line x1="26" y1="116" x2="514" y2="116" class="grid"/>
+
+        <text x="26" y="142" class="lbl">马尔可夫性的写法：历史整段删掉，分布不变</text>
+        <rect x="252" y="158" width="60" height="32" class="box-a"/><text x="264" y="180" class="val-b">s(t)</text>
+        <rect x="316" y="158" width="60" height="32" class="box-a"/><text x="328" y="180" class="val-b">a(t)</text>
+        <path d="M380 174 H446" class="arrow-a"/><path d="M440 169 l9 5 l-9 5" class="arrow-a"/>
+        <rect x="462" y="158" width="62" height="32" class="box"/><text x="470" y="180" class="val">s(t+1)</text>
+        <text x="26" y="180" class="lbl">两种写法给出的</text>
+        <text x="26" y="198" class="lbl">落点分布完全一样</text>
+        <text x="252" y="216" class="lbl">p(s(t+1) | s(t), a(t)) 一个式子就够</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 5.5</span>
+        上面一行把整段历史写进条件，下面一行只留当前状态与动作。马尔可夫性说的就是两行算出的概率相同，灰色短线标出了被丢掉的那段历史。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">命题 5.17（历史可以整段丢掉）</span>
+      <p>设马尔可夫性成立，则对任意 $n\ge1$，式 (5.6) 成立。</p>
+      <div class="eq">
+        <span class="eq-body">$$p(s_{t+1},\dots,s_{t+n}\mid s_t,h_t,a_t,\dots,a_{t+n-1})=p(s_{t+1},\dots,s_{t+n}\mid s_t,a_t,\dots,a_{t+n-1})$$</span>
+        <span class="eq-num">(5.6)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明（对 $n$ 归纳）</span>
+      <p>记 $a_t^{t+n-1}=(a_t,\dots,a_{t+n-1})$。$n=1$ 时这就是式 (5.5)。</p>
+      <p>设 $n$ 时成立，看 $n+1$。由链式法则 $p(x,y\mid z)=p(y\mid x,z)\,p(x\mid z)$，取 $y=s_{t+n+1}$ 与 $x=(s_{t+1},\dots,s_{t+n})$，得
+        $$\begin{aligned}
+        &p(s_{t+1},\dots,s_{t+n+1}\mid s_t,h_t,a_t^{t+n})\\
+        &\quad=p(s_{t+n+1}\mid s_{t+1},\dots,s_{t+n},s_t,h_t,a_t^{t+n})\;p(s_{t+1},\dots,s_{t+n}\mid s_t,h_t,a_t^{t+n-1}).
+        \end{aligned}$$
+        第一个因子里 $s_t,h_t,a_t,\dots,a_{t+n-1}$ 都在 $S_{t+n}$ 之前，由式 (5.5) 只剩 $p(s_{t+n+1}\mid s_{t+n},a_{t+n})$；第二个因子由归纳假设等于 $p(s_{t+1},\dots,s_{t+n}\mid s_t,a_t^{t+n-1})$。两个因子里的 $h_t$ 都消失，归纳完成。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">推论 5.18（确定性策略下，轨迹概率是乘积）</span>
+      <p>若策略是确定性策略 $a_k=\mu(s_k)$，则对 $T>t$ 有式 (5.7)。</p>
+      <div class="eq">
+        <span class="eq-body">$$p(s_{t+1},\dots,s_T\mid s_t)=\prod_{k=t}^{T-1}p(s_{k+1}\mid s_k,\mu(s_k))$$</span>
+        <span class="eq-num">(5.7)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>对时域长度 $T-t$ 用链式法则逐步展开：
+        $$p(s_{t+1},\dots,s_T\mid s_t)=p(s_T\mid s_{t+1},\dots,s_{T-1},s_t)\,p(s_{t+1},\dots,s_{T-1}\mid s_t).$$
+        第一个因子里 $s_t,\dots,s_{T-2}$ 都在 $S_{T-1}$ 之前，动作由 $a_{T-1}=\mu(s_{T-1})$ 确定，由式 (5.6) 它等于 $p(s_T\mid s_{T-1},\mu(s_{T-1}))$。对第二个因子重复同样步骤，每次剥掉最后一步，直到剩下 $p(s_{t+1}\mid s_t,\mu(s_t))$，乘起来就是式 (5.7)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.19（状态没装够信息时，马尔可夫性会失效）</span>
+      <p>设环境在开局时随机选一个隐藏的风向，之后每一步的落点都受它影响，而状态只记录位置。这时风大与风小对应两套落点分布，同一对 $(s_t,a_t)$ 说不出下一步，式 (5.5) 不成立。把风向写进状态，马尔可夫性就回来了。状态设计的目标就是装够信息。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. MDP 的五个要素</h2>
+    <div class="def">
+      <span class="label">定义 5.20（MDP 的五个要素）</span>
+      <p>马尔可夫决策过程（MDP，满足马尔可夫性的那类标准问题设定）由五个要素组成：</p>
+      <p>(1) 状态空间 $\mathcal{S}$；(2) 动作空间 $\mathcal{A}$；(3) 状态转移概率 $p(s'|s,a)$；(4) 策略 $\pi(a|s)$；(5) 奖励与折扣因子（越往后的奖励，算进总分时权重越小）。</p>
+      <p>前四个要素本课已定义完。第五个要素决定任务的目标，下一课专门讲，MDP 的正式定义也在下一课给出。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 250" role="img" aria-label="智能体与环境互相传递动作与状态奖励的闭环，旁边列出五个要素">
+        <rect x="40" y="60" width="130" height="70" rx="6" class="box-a"/>
+        <text x="66" y="92" class="val-b">智能体</text>
+        <text x="60" y="114" class="lbl">按 π(a|s) 挑动作</text>
+        <rect x="300" y="60" width="150" height="70" rx="6" class="box"/>
+        <text x="334" y="92" class="val-b">环境</text>
+        <text x="316" y="114" class="lbl">按 p(s'|s,a) 决定落点</text>
+        <path d="M172 78 H296" class="arrow-a"/><path d="M288 73 l10 5 l-10 5" class="arrow-a"/>
+        <text x="196" y="70" class="val-b">动作 a</text>
+        <path d="M296 118 H176" class="arrow"/><path d="M184 113 l-10 5 l10 5" class="arrow"/>
+        <text x="196" y="136" class="val-b">新状态 s' 与奖励 r</text>
+        <text x="40" y="176" class="lbl">五个要素：</text>
+        <text x="140" y="176" class="lbl">(1) 状态空间 S</text>
+        <text x="270" y="176" class="lbl">(2) 动作空间 A</text>
+        <text x="404" y="176" class="lbl">(3) 转移概率 p</text>
+        <text x="140" y="202" class="lbl">(4) 策略 π 由智能体决定</text>
+        <text x="356" y="202" class="lbl">(5) 奖励 r 与折扣因子 γ</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 5.6</span>
+        强化学习的交互闭环：智能体按策略送出动作，环境按转移概率送回新状态与奖励。五个要素里只有策略属于智能体这一侧，是学习要改的东西。</figcaption>
+    </figure>
+
+    <p>五个要素连起来就是一句话：智能体在状态 $s$ 按 $\pi$ 挑动作 $a$，环境按 $p$ 把它送到 $s'$ 并给出奖励。这个循环逐步重复，价值与算法都从这里长出来。</p>
+    <div class="rem">
+      <span class="label">注记 5.21（「决策」二字的分量）</span>
+      <p>给定策略之后，$p_\pi(s'|s)$ 里已经没有动作，剩下的只是一条马尔可夫链（只有状态、没有动作的随机过程）。MDP 比它多出来的就是动作，以及「动作会改变落点分布」这件事。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>状态是决定依据，动作是可选操作；$S_t,A_t$ 是随机变量，$s,a$ 是具体取值。</li>
+      <li>环境用 $p(s'|s,a)$ 描述落点分布，对 $s'$ 求和必须等于 1；撞边界就留在原格。</li>
+      <li>策略 $\pi(a|s)$ 是智能体自己的规则，对 $a$ 求和等于 1，确定性策略是它的特例。</li>
+      <li>给定 $\pi$ 之后 $p_\pi(s'|s)=\sum_a\pi(a|s)p(s'|s,a)$，状态转移自己就成了一条链，见式 (5.4)。</li>
+      <li>马尔可夫性说：给定 $s_t$ 与 $a_t$ 之后，更早的历史不影响下一步，可以整段丢掉。</li>
+      <li>MDP 有五个要素，第五个是奖励与折扣因子，下一课补齐。</li>
+    </ul>
+    <p>下一课把奖励加进来，定义轨迹与折扣因子，给出回合与连续任务的区别，最后写出马尔可夫决策过程的正式定义。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 关于状态与动作，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>$S_t$ 是智能体可以随便挑的量，$A_t$ 是环境送给它的量</li>
+        <li>$S_t$ 与 $s$ 指的是同一个东西，只是写法上一个长一个短</li>
+        <li>$S_t$ 是随机变量，$s$ 是它在某一次实现中取到的具体值</li>
+        <li>动作空间 $\mathcal{A}$ 随时刻 $t$ 变化，所以每个时刻都能选更多动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：大写字母表示随机变量本身，小写字母表示它取到的一个值。这一步没走完之前，落在哪个格子不确定；走完之后就是一个具体的 $s$。</p>
+        <p>A 把两者调换了：状态由环境决定，动作才是智能体挑的。B 错在把随机变量和它的取值当成一回事，写期望时就分不清 $E[\cdot\mid S_t=s]$ 里的两个符号。D 说反了本课程的设定：定义 5.1 里对每个状态都有 $\mathcal{A}(s)=\mathcal{A}$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 关于状态转移概率 $p(s'|s,a)$，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>它是在 $s$ 执行 $a$ 后落到 $s'$ 的概率，对 $s'$ 求和等于 1</li>
+        <li>它是在 $s$ 执行 $a$ 的概率，对动作 $a$ 求和等于 1</li>
+        <li>它是状态 $s$ 与动作 $a$ 同时出现的联合概率，对两者求和等于 1</li>
+        <li>它一定只取 0 或 1，因为环境本身就是确定性的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$p(s'|s,a)$ 固定 $(s,a)$ 之后是 $s'$ 上的一个概率分布，非负且对全部 $s'$ 求和等于 1，这就是式 (5.2) 的归一化条件。</p>
+        <p>B 描述的是策略 $\pi(a|s)$，它对动作求和等于 1，是智能体的规则而不是环境。C 把条件概率与联合概率混在一起，条件概率里 $(s,a)$ 是给定的，不对它们求和。D 说反了：确定性转移只是 $p$ 取 0 或 1 的特例，一般情形可以是一组概率，例 5.11 的打滑版本就是反例。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 证明命题 5.14 时，从 $\sum_{s'}\sum_a\pi(a|s)p(s'|s,a)$ 写成 $\sum_a\pi(a|s)\sum_{s'}p(s'|s,a)$，这一步的依据是什么？</p>
+      <ol class="mcq-options">
+        <li>马尔可夫性，它允许把历史从条件里删掉</li>
+        <li>各步奖励相互独立，所以乘法可以拆开</li>
+        <li>期望的线性性，常数可以提到求和号外面</li>
+        <li>有限项求和可以交换次序，此处每一项都非负</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两个求和号都是有限项，交换次序只是把同一批数按另一种顺序相加，非负性保证结果不受顺序影响。</p>
+        <p>A 用错了地方：马尔可夫性管的是条件概率里能不能删历史，与求和次序无关。B 不需要也不成立，各步奖励在这条命题里根本没出现。C 说的是把与求和指标无关的因子提出来，那是下一步才用到的性质。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 命题 5.17 的归纳证明里，把第一个因子化到 $p(s_{t+n+1}\mid s_{t+n},a_{t+n})$ 用到了哪条性质？</p>
+      <ol class="mcq-options">
+        <li>贝叶斯公式，把条件概率的因果方向上下颠倒过来</li>
+        <li>马尔可夫性，给定当前的状态与动作后更早的历史不再影响</li>
+        <li>全概率公式，按下一个状态的所有可能取值求和展开</li>
+        <li>归一化条件，把所有落点上的概率加起来恰好等于 1</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：第一个因子的条件里除了 $s_{t+n},a_{t+n}$ 之外全是更早的历史，式 (5.5) 直接允许把它们删掉。</p>
+        <p>A 会引入一个与结论无关的反向概率。C 会把式子变成对 $s_{t+n}$ 的求和，与证明要做的事相反。D 讲的是 $p$ 对落点求和为 1，用在这里得不到那个因子。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 推论 5.18 把轨迹概率写成每一步跳转概率的乘积，靠的是哪条性质？</p>
+      <ol class="mcq-options">
+        <li>轨迹上的各个状态相互独立，所以概率可以直接相乘</li>
+        <li>大数定律，样本足够多时频率等于概率</li>
+        <li>链式法则，再配合马尔可夫性把每一步的历史削掉</li>
+        <li>归一化条件，每一步的概率加起来等于 1</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：先把联合概率按链式法则一层层拆开，再用式 (5.6) 把每个因子里的多余历史删掉，剩下的正好是一串单步概率的乘积。</p>
+        <p>A 说反了：轨迹上的状态并不独立，下一个状态强烈依赖当前状态，它们只是「给定前一步之后条件独立」。B 与这条恒等式无关。D 只说明每个单步概率是分布，不能让乘积等于联合概率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 设环境在开局时随机选定一个隐藏的风向，之后不变，而状态只记录位置。这时马尔可夫性还成立吗？</p>
+      <ol class="mcq-options">
+        <li>成立，因为风向选定后就不随时间变化了</li>
+        <li>不成立，同一个 $(s_t,a_t)$ 在两种风向下对应两套落点分布</li>
+        <li>不成立，因为状态空间太小，装不下九个格子</li>
+        <li>只要策略取成确定性策略，马尔可夫性就一定成立</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (5.5) 要求 $p(s_{t+1}|s_t,a_t)$ 是唯一确定的分布。风向不同时这个分布不同，只看 $(s_t,a_t)$ 无法确定下一步，条件不满足。</p>
+        <p>A 没有抓住要点：风向不变不代表它对落点没有影响，隐藏变量照样能让分布不唯一。C 弄错了原因，问题出在状态里缺信息，与格子多少无关。D 也不对：策略由智能体选，改策略改不了环境的落点分布。把风向写进状态才是正解。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 关于确定性策略与随机策略，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>确定性策略是随机策略的特例：某些 $\pi(a|s)$ 取 1，其余取 0</li>
+        <li>两者互不包含，确定性策略写不出 $\pi(a|s)$ 这种形式</li>
+        <li>随机策略一定优于确定性策略，因为它探索得更多</li>
+        <li>随机策略指的是环境的落点有随机性，与智能体的选择无关</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (5.3) 只要求 $\pi(a|s)$ 非负、对 $a$ 求和等于 1。让某个动作的概率等于 1，其余等于 0，就得到确定性策略，所以它是特例。</p>
+        <p>B 错在把确定性策略排除在 $\pi(a|s)$ 之外，后面讲最优策略时两种都要用同一个符号。C 是常见的错法：随机策略有时更好，但并非总是更好，好坏要由价值判断。D 把两处随机性混了：落点的随机性属于 $p$，策略的随机性属于 $\pi$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">8. 查例 5.10 的转移表：站在 $s_3$ 执行 $a_4$（左），下一步会落到哪个状态？</p>
+      <ol class="mcq-options">
+        <li>落到 $s_3$，因为向左会越出场地，动作无效</li>
+        <li>落到 $s_6$，因为向下才是越出场地的那一步</li>
+        <li>落到 $s_1$，因为左边一列只有 $s_1$ 可用</li>
+        <li>落到 $s_2$，因为 $s_3$ 的左边就是 $s_2$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$s_3$ 在右上角，它的左边是同一行的 $s_2$，仍在场内，所以正常走过去，即 $p(s_2|s_3,a_4)=1$。</p>
+        <p>A 错在把这一格当成了左边界，$s_3$ 的左边还有 $s_2$。B 混淆了 $a_3$（下）与 $a_4$（左），向下确实会越界，那不是本题问的动作。C 把列与行的关系记反了，$s_1$ 在 $s_3$ 的左下方，不是左邻格。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 某策略在 $s_5$ 上取 $\pi(a_1|s_5)=0.3$、$\pi(a_4|s_5)=0.7$，其余动作为 0。查表得 $a_1$ 从 $s_5$ 到 $s_2$，$a_4$ 从 $s_5$ 到 $s_4$。$p_\pi(s_2|s_5)$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>等于 $0.7$，也就是选 $a_4$ 的那个概率</li>
+        <li>等于 $1$，因为 $a_1$ 一定能把智能体送到 $s_2$</li>
+        <li>等于 $0.3$，也就是选 $a_1$ 的那个概率</li>
+        <li>等于 $0.5$，也就是两个动作概率的平均值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：按式 (5.4)，$p_\pi(s_2|s_5)=\sum_a\pi(a|s_5)p(s_2|s_5,a)$，只有 $a_1$ 这一项非零，它等于 $0.3\times1=0.3$。</p>
+        <p>A 算的是 $p_\pi(s_4|s_5)$，落点看错了。B 把「$a_1$ 一定会到 $s_2$」与「$a_1$ 一定被选」混为一谈，后者只有 0.3 的概率。D 是凭感觉取平均，$p_\pi$ 是加权求和，权重就是策略的概率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 为什么要把「撞边界」这种看起来没用的动作留在动作空间里？</p>
+      <ol class="mcq-options">
+        <li>因为撞边界会让状态真的发生变化，属于有效转移</li>
+        <li>因为删掉动作会破坏转移概率对落点求和等于 1 的条件</li>
+        <li>因为不保留这些动作，策略 $\pi(a|s)$ 就无法定义</li>
+        <li>为了把筛动作的活交给数据，而不是由人预先替智能体决定</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：本课程希望智能体从经验里分辨哪些动作吃亏。由人预先删掉动作，等于把一部分答案提前告诉它，学到的东西也就不好比较了。</p>
+        <p>A 说错了：撞边界时状态不变，仍停在原格，这是无效动作。B 不成立：删掉一个动作后，剩下的动作仍然构成一个完整的分布，归一化照旧。C 也不成立：动作空间小一点，$\pi(a|s)$ 照样能写成对剩余动作的概率分布。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025, 第 1 章第 1.1–1.4 节。网格世界的设定、状态与动作的定义、状态转移的讨论口径与之一致，表格与数值由本课程按书中规则整理并逐格核对。</p>
+      <p>想补更完整的背景，可读 R. S. Sutton &amp; A. G. Barto, <em>Reinforcement Learning: An Introduction</em>（第 2 版）第 3 章，那里把 MDP 的五元组写在最前面。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问："把 $p(s'|s,a)$ 和 $\pi(a|s)$ 的区别用一张表再讲一遍"，或者 "为什么撞边界时要留在原来的格子里，而不能随机弹到一个新格子？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

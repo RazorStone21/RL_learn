@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0010 · 最优策略与贝尔曼最优方程 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0010" data-slug="optimal-policy-boe" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 · 基础工具 6／15</p>
+    <h1>最优策略与贝尔曼最优方程</h1>
+    <p class="lede">前两课都在给定策略（一套"看到什么状态就选什么动作"的规则）的前提下算分。
+      本课把前提拿掉，去问最优动作价值（先选一个动作、之后走最好能拿到的最高分）是多少，
+      谁达到了这个分数。答案是一条与贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）
+      几乎一样的方程，只是把"按策略平均"换成了"取最大"，这条方程叫贝尔曼最优方程。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能说清最优状态价值与最优策略的定义，并判断这个最大值是否一定取得到</li>
+        <li>能证明贝尔曼最优方程，并说明它与贝尔曼方程的差别</li>
+        <li>能写出最优动作值 $q^*(s,a)$，并证明 $v^*(s)=\max_a q^*(s,a)$</li>
+        <li>能说明为什么存在一个确定性策略达到 $v^*$，并把它写出来</li>
+        <li>能在 2×2 网格世界上找出最优策略，并把四个状态代回验证</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 什么是最好的策略</h2>
+    <p>先把词汇备齐。状态（此刻你能看到的信息，是你做决定的依据）用 $s$ 表示，
+      动作（你这一步能做的选择）用 $a$ 表示，策略在状态 $s$ 下选动作 $a$ 的概率记作 $\pi(a\mid s)$。
+      奖励的期望记作 $r(s,a)$，转移概率（这个跳转有可能跳到好几个地方，每个地方各带一个概率）
+      记作 $p(s'\mid s,a)$。折扣因子（越往后的奖励，算进总分时权重越小）记作 $\gamma$，
+      读作"伽马"，它是一个 $[0,1)$ 里的数。状态价值记作 $v_\pi(s)$。</p>
+    <div class="def">
+      <span class="label">定义 1.1（最优状态价值与最优动作价值）</span>
+      <p>记 $\Pi$ 为所有策略的集合，取
+        $$v^*(s)=\sup_{\pi\in\Pi}v_\pi(s),\qquad q^*(s,a)=\sup_{\pi\in\Pi}q_\pi(s,a).$$
+        式中 $\sup$ 是上确界（最小的那个上界）。
+        $v^*$ 叫<em>最优状态价值</em>（在所有策略里，这个状态能达到的最高分），
+        $q^*$ 叫<em>最优动作价值</em>。
+        若某个策略 $\pi^*$ 使 $v_{\pi^*}(s)=v^*(s)$ 对所有 $s$ 同时成立，
+        就称 $\pi^*$ 是<em>最优策略</em>。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.2（为什么先用上确界）</span>
+      <p>定义里写的是上确界，不是最大值，因为还没证明"最高分"被某个策略取到。
+        定理 3.1 的最后一步会补上：有限状态与有限动作下确实取得到。
+        本课还假定奖励有界：$|r(s,a)|\le r_{\max}$，于是 $|v_\pi(s)|\le r_{\max}/(1-\gamma)$。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 1.3（贪婪策略）</span>
+      <p>给定价值估计 $v$，定义与它对应的<em>贪婪策略</em>（每步都挑当前估计里看起来最好的动作）：
+        $$\pi_g(s)=\argmax_{a}\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v(s')\Big].$$
+        式中 $\argmax$ 表示挑出让后面那个式子最大的动作。它返回一个动作，
+        所以 $\pi_g$ 是确定性策略（同一个状态下永远只选同一个动作）。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 最优贝尔曼算子：单调与压缩</h2>
+    <p>先定义一个算子，把"取最大"这件事装进去。上一课的 $T_\pi$ 是"按策略平均"。</p>
+    <div class="def">
+      <span class="label">定义 2.1（最优贝尔曼算子 $T$）</span>
+      <p>对任意 $v\in\R^n$（$n$ 是状态个数），定义
+        $$(Tv)(s)=\max_{a}\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v(s')\Big].$$
+        这个映射叫<em>最优贝尔曼算子</em> $T$。</p>
+    </div>
+    <div class="thm">
+      <span class="label">引理 2.2（$T$ 是单调的）</span>
+      <p>若 $u(s)\le v(s)$ 对所有 $s$ 成立，则 $(Tu)(s)\le(Tv)(s)$ 对所有 $s$ 成立。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>固定 $s$。对每个动作 $a$，因为 $u(s')\le v(s')$ 且 $\gamma\ge0$、$p\ge0$，所以
+        $$r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)u(s')\le r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v(s').$$
+        右端取最大后不小于左端的每一项，也就不小于其中最大者。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">引理 2.3（$T$ 是 $\gamma$-压缩）</span>
+      <p>对任意 $u,v\in\R^n$ 成立
+        $$\|Tu-Tv\|_\infty\le\gamma\,\|u-v\|_\infty,$$
+        其中 $\|x\|_\infty=\max_s|x(s)|$ 是无穷范数（取各分量绝对值里最大的那个）。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记 $d=\|u-v\|_\infty$，则 $u(s)\le v(s)+d$ 对所有 $s$ 成立。
+        把 $v+d$ 看成向量 $w$，由引理 2.2 得 $Tu\le Tw$。
+        把 $v$ 换成 $v+d$ 时，$T$ 的右边每个分量恰好增加 $\gamma d$，因为
+        $$\gamma\sum_{s'}p(s'\mid s,a)\big(v(s')+d\big)
+          =\gamma\sum_{s'}p(s'\mid s,a)v(s')+\gamma d,$$
+        最后一步用了行和 $\sum_{s'}p(s'\mid s,a)=1$。所以 $Tw=Tv+\gamma d$，
+        合起来得到 $Tu-Tv\le\gamma d$。</p>
+      <p>把 $u$ 与 $v$ 互换，同样得到 $Tv-Tu\le\gamma d$。两个方向的界合起来说明
+        差的绝对值逐分量不超过 $\gamma d$，取最大得
+        $\|Tu-Tv\|_\infty\le\gamma\|u-v\|_\infty$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 2.4（唯一稳定点）</span>
+      <p>不动点指的是再迭代一次也不变的那种解。当 $\gamma\in[0,1)$ 时，
+        $T$ 在 $\R^n$ 上有唯一不动点 $v^*_T$。
+        从任意 $v_0$ 出发迭代 $v_{k+1}=Tv_k$，序列都会稳定下来
+        （收敛指的是：一轮轮算下去，数值不再明显变化），误差满足</p>
+      <div class="eq">
+        <span class="eq-body">$$\|v_k-v^*_T\|_\infty\le\gamma^k\,\|v_0-v^*_T\|_\infty.$$</span>
+        <span class="eq-num">(10.1)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>存在性：由引理 2.3 反复作用，$\|v_{k+1}-v_k\|_\infty\le\gamma^k\|v_1-v_0\|_\infty$。
+        对 $m>k$ 用三角不等式，
+        $$\|v_m-v_k\|_\infty\le\sum_{i=k}^{m-1}\|v_{i+1}-v_i\|_\infty
+          \le\|v_1-v_0\|_\infty\frac{\gamma^k}{1-\gamma}.$$
+        因为 $\gamma$ 小于 1，右端随 $k$ 趋于 0，所以 $\{v_k\}$ 是柯西序列（第 0004 课），记极限为 $v^*_T$。
+        在 $v_{k+1}=Tv_k$ 两边令 $k\to\infty$：左端趋于 $v^*_T$，右端由压缩性趋于 $Tv^*_T$，
+        所以 $v^*_T=Tv^*_T$。式 (10.1) 由压缩性做归纳得到。</p>
+      <p>唯一性：若 $u,v$ 都是不动点，则 $\|u-v\|_\infty\le\gamma\|u-v\|_\infty$，
+        由 $\gamma$ 小于 1 只能 $u=v$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 240" role="img" aria-label="单调与压缩：两个估计之差的绝对值在取最大之后仍然不超过折扣因子倍">
+        <rect x="30" y="30" width="220" height="70" rx="4" class="box"/>
+        <text x="44" y="58" class="val-b">两个估计 u 与 v</text>
+        <text x="44" y="82" class="lbl">逐分量差不超过 d</text>
+        <rect x="310" y="30" width="220" height="70" rx="4" class="box-a"/>
+        <text x="324" y="58" class="val-b">都过一遍 T</text>
+        <text x="324" y="82" class="lbl">取最大不放大差距</text>
+        <path d="M250 65 H302" class="arrow-a"/>
+        <path d="M294 59 l10 6 l-10 6" class="arrow-a"/>
+        <path d="M420 100 V140" class="arrow-a"/>
+        <path d="M414 132 l6 10 l6 -10" class="arrow-a"/>
+        <rect x="140" y="146" width="280" height="66" rx="4" class="box-a"/>
+        <text x="154" y="174" class="val-b">新的差不超过 折扣因子 · d</text>
+        <text x="154" y="198" class="lbl">每步都乘折扣因子，所以必然稳定到一个点</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 10.1</span>
+        压缩性的来源：对动作取最大不会放大两个估计之间的差距，而后继价值前都带着折扣因子，
+        差距整体乘上它，反复作用后趋于 0。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 贝尔曼最优方程</h2>
+    <div class="thm">
+      <span class="label">定理 3.1（贝尔曼最优方程）</span>
+      <p>记 $v^*$ 为定义 1.1 中的最优状态价值。则 $v^*$ 满足</p>
+      <div class="eq">
+        <span class="eq-body">$$v^*(s)=\max_{a}\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)\,v^*(s')\Big],$$</span>
+        <span class="eq-num">(10.2)</span>
+      </div>
+      <p>也就是 $v^*=Tv^*$。反之 $T$ 的不动点唯一，所以式 (10.2) 的解就是 $v^*$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路分三步：先说明"任何策略都拿不到超过 $T^kv$ 的分数"，
+        再说明 $T^kv$ 收敛到 $T$ 的不动点，最后说明它确实被某个策略取到。</p>
+      <p>第一步，任取 $v\in\R^n$ 与策略 $\pi$。由定义 2.1，
+        $(Tv)(s)\ge r(s,\pi(s))+\gamma\sum_{s'}p(s'\mid s,\pi(s))v(s')=(T_\pi v)(s)$，
+        也就是 $T_\pi v\le Tv$ 逐分量成立。对 $k$ 做归纳：设 $v_\pi\le T^kv$，
+        则用引理 2.2 的单调性与 $T_\pi v\le Tv$，
+        $$v_\pi=T_\pi v_\pi\le T_\pi(T^kv)\le T(T^kv)=T^{k+1}v,$$
+        其中第一个等号是第 0009 课定义 3.1（$v_\pi$ 是 $T_\pi$ 的不动点）。
+        于是 $v_\pi(s)\le(T^kv)(s)$ 对所有 $k$ 与所有 $s$ 成立。</p>
+      <p>第二步，令 $k\to\infty$。由定理 2.4，$T^kv$ 收敛到 $T$ 的唯一不动点 $v^*_T$。
+        上式取极限得 $v_\pi(s)\le v^*_T(s)$ 对每个策略、每个状态成立。
+        两边对 $\pi$ 取上确界：$v^*(s)\le v^*_T(s)$。</p>
+      <p>第三步，构造达到它的策略。动作只有有限多个，所以对每个 $s$ 都能取到
+        $$\pi^*(s)\in\argmax_a\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*_T(s')\Big].$$
+        由取法得 $T_{\pi^*}v^*_T=Tv^*_T=v^*_T$，也就是 $v^*_T$ 满足策略 $\pi^*$ 的贝尔曼方程。
+        由第 0009 课定理 2.2（解唯一），$v_{\pi^*}=v^*_T$。于是
+        $v^*(s)\ge v_{\pi^*}(s)=v^*_T(s)$。</p>
+      <p>两个方向合起来 $v^*=v^*_T$，而 $v^*_T$ 满足 $Tv^*_T=v^*_T$，这就是式 (10.2)。
+        唯一性由定理 2.4。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>把式 (10.2) 与上一课的式 (9.1) 摆在一起看，右边结构都是"即时奖励 + 折扣后的后继价值"，
+      差别只在最外层：策略已知时按 $\pi(a\mid s)$ 加权平均，策略待定时对动作取最大。</p>
+    <div class="eq">
+      <span class="eq-body">$$\sum_a\pi(a\mid s)\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v_\pi(s')\Big]
+        \quad\text{与}\quad
+        \max_a\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')\Big]$$</span>
+      <span class="eq-num">(10.3)</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.2（在 2×2 网格世界上的具体形态）</span>
+      <p>第 0008 课定义的网格世界继续使用：四个状态 $s_1$ 到 $s_4$，
+        动作只有向右与向下，走成一步得 $+1$ 分、撞墙扣 $-1$ 分，$s_4$ 是终点。
+        取 $\gamma=0.9$，逐状态写式 (10.2)：</p>
+      <p>$$v(s_1)=\max\big\{\,1+0.9v(s_2),\;-1+0.9v(s_3)\,\big\},\qquad
+        v(s_2)=\max\big\{\,-1+0.9v(s_2),\;1+0.9v(s_4)\,\big\},$$
+        $$v(s_3)=\max\big\{\,1+0.9v(s_4),\;-1+0.9v(s_3)\,\big\},\qquad v(s_4)=0.$$</p>
+      <p>从 $s_4$ 与 $s_3$ 开始。$s_3$ 向下会得到 $-1+0.9v(s_3)$，若取它则 $v(s_3)=-10$；
+        向右给出 $1+0.9\times0=1$，取最大得 $v(s_3)=1$，对应动作是向右。
+        同理 $v(s_2)=\max\{-1+0.9v(s_2),\,1\}=1$，对应向下。
+        代入 $s_1$：向右得 $1+0.9\times1=1.9$，向下得 $-1+0.9\times1=-0.1$，
+        取最大得 $v(s_1)=1.9$，对应向右。所以
+        $$v^*=(1.9,\;1,\;1,\;0)^\top.$$
+        代回四个方程：右边分别是 $\max\{1.9,-0.1\}$、$\max\{-0.1,1\}$、
+        $\max\{1,-0.1\}$、$0$，与原值一一对上。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 520 214" role="img" aria-label="网格世界的最优动作：s1向右得1.9，s2向下得1，s3向右得1，s4终点">
+          <rect x="170" y="40" width="110" height="70" class="box-a"/>
+          <rect x="280" y="40" width="110" height="70" class="box-a"/>
+          <rect x="170" y="110" width="110" height="70" class="box-a"/>
+          <rect x="280" y="110" width="110" height="70" class="box"/>
+          <text x="186" y="66" class="val-b">s1 取 1.9</text>
+          <text x="296" y="66" class="val-b">s2 取 1</text>
+          <text x="186" y="136" class="val-b">s3 取 1</text>
+          <text x="296" y="136" class="val-b">s4 终点 0</text>
+          <text x="186" y="88" class="lbl">动作：向右</text>
+          <text x="296" y="88" class="lbl">动作：向下</text>
+          <text x="186" y="158" class="lbl">动作：向右</text>
+          <text x="296" y="158" class="lbl">回合结束</text>
+          <path d="M228 75 H276" class="arrow-a"/>
+          <path d="M268 69 l10 6 l-10 6" class="arrow-a"/>
+          <path d="M325 112 V96" class="arrow"/>
+          <path d="M319 104 l6 -10 l6 10" class="arrow"/>
+          <path d="M228 145 H276" class="arrow-a"/>
+          <path d="M268 139 l10 6 l-10 6" class="arrow-a"/>
+          <text x="34" y="70" class="lbl">每格上面是价值</text>
+          <text x="34" y="92" class="lbl">下面是取最大的动作</text>
+          <text x="34" y="130" class="lbl">四个值代回式 (10.2)</text>
+        </svg>
+        <figcaption class="fig-cap"><span class="fig-num">图 10.2</span>
+          折扣因子取 0.9 时每个状态的最优价值与取最大值的动作：
+          s1 与 s3 向右，s2 向下，s4 结束。四个值代回式 (10.2) 都成立。</figcaption>
+      </figure>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.3（取最大不破坏自洽）</span>
+      <p>贝尔曼方程是"给定策略下的自洽"，贝尔曼最优方程是"策略也待定时的自洽"。
+        待定不代表可以为每个状态单独挑动作：$v^*$ 必须同时对全部状态成立，
+        挑出的动作要连成一整套自洽的策略。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 最优动作值与最优策略</h2>
+    <div class="def">
+      <span class="label">定义 4.1（按动作分块的矩阵）</span>
+      <p>对每个动作 $a$，记 $[P_a]_{s,s'}=p(s'\mid s,a)$，记 $[r_a]_s$ 为 $r(s,a)$。
+        把 $q^*(s,a)$ 摆成"状态 × 动作"的表，整套记作 $\mathcal{Q}$。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 4.2（$v^*$ 与 $q^*$ 的关系）</span>
+      <p>对所有状态与动作成立</p>
+      <div class="eq">
+        <span class="eq-body">$$q^*(s,a)=r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)\,v^*(s'),\qquad
+          v^*(s)=\max_a q^*(s,a).$$</span>
+        <span class="eq-num">(10.4)</span>
+      </div>
+      <p>把第一式代进第二式就回到式 (10.2)。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>先证第一式。任取策略 $\pi$，由第 0009 课式 (9.8)，
+        $q_\pi(s,a)=r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v_\pi(s')$。
+        两边对 $\pi$ 取上确界。第一项与 $\pi$ 无关；第二项里 $v^*(s')$ 是 $v_\pi(s')$ 的上确界，
+        并且对 $\gamma\ge0$、$p\ge0$ 可以逐项取到，所以
+        $q^*(s,a)=r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')$。</p>
+      <p>再证第二式，分两个方向。上界：任取策略 $\pi$，把第一步用全期望公式拆出来，
+        $v_\pi(s)=\sum_a\pi(a\mid s)q_\pi(s,a)\le\max_a q_\pi(s,a)\le\max_a q^*(s,a)$。
+        对 $\pi$ 取上确界得 $v^*(s)\le\max_a q^*(s,a)$。</p>
+      <p>下界：取定理 3.1 构造的 $\pi^*$，它在每个状态都取到最大值，
+        所以 $v_{\pi^*}(s)=q^*(s,\pi^*(s))=\max_a q^*(s,a)$。
+        又由定理 3.1 的第三步 $v_{\pi^*}(s)=v^*(s)$，所以 $v^*(s)\ge\max_a q^*(s,a)$，
+        两个方向合起来就是第二式。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 4.3（贪婪策略最优）</span>
+      <p>设 $v^*$ 满足式 (10.2)。对每个状态 $s$ 取
+        $$\pi^*(s)\in\argmax_a\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')\Big].$$
+        则 $\pi^*$ 是确定性策略，并且 $v_{\pi^*}(s)=v^*(s)$ 对所有 $s$ 成立，
+        也就是 $\pi^*$ 是最优策略。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：先说明 $\pi^*$ 与 $v^*$ 构成自洽方程，再用解的唯一性绑定两者。</p>
+      <p>由式 (10.4)，$\pi^*(s)$ 取的就是使 $q^*(s,a)$ 最大的 $a$，于是
+        $$r\big(s,\pi^*(s)\big)+\gamma\sum_{s'}p\big(s'\mid s,\pi^*(s)\big)v^*(s')
+          =\max_a q^*(s,a)=v^*(s).$$
+        左端就是 $T_{\pi^*}v^*$ 的第 $s$ 个分量，所以 $T_{\pi^*}v^*=v^*$。</p>
+      <p>这组等式与第 0009 课式 (9.3) 形状一样：$v=r_{\pi^*}+\gamma P_{\pi^*}v$。
+        由第 0009 课定理 2.2，该方程的解唯一，而 $v_{\pi^*}$ 也满足它，
+        所以 $v^*=v_{\pi^*}$，$\pi^*$ 是最优策略。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.4（矩阵形式与一个对照）</span>
+      <p>把式 (10.2) 逐状态写成矩阵，就是 $v^*=\max_a\big(r_a+\gamma P_a v^*\big)$，
+        最大是逐分量取。对照第 0008 课的 $\pi_1$（永远向右）：
+        它有 $v_{\pi_1}(s_1)=-8$，而 $v^*(s_1)=1.9$，差得很远，
+        原因就是 $\pi_1$ 在 $s_2$ 撞墙自环，把 $v(s_2)$ 压到了 $-10$。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 270" role="img" aria-label="最优贝尔曼方程的推导链条：从策略集合的上确界到唯一不动点再到贪婪策略">
+        <rect x="30" y="24" width="500" height="40" rx="4" class="box"/>
+        <text x="44" y="50" class="val-b">① 定义：v* 是所有策略里 vπ 的最高分</text>
+        <path d="M280 64 V86" class="arrow-a"/>
+        <path d="M274 78 l6 10 l6 -10" class="arrow-a"/>
+        <rect x="30" y="90" width="500" height="40" rx="4" class="box"/>
+        <text x="44" y="116" class="val-b">② 上界：对任意策略 π 与起点 v，vπ 不超过 T^k v</text>
+        <path d="M280 130 V152" class="arrow-a"/>
+        <path d="M274 144 l6 10 l6 -10" class="arrow-a"/>
+        <rect x="30" y="156" width="500" height="40" rx="4" class="box-a"/>
+        <text x="44" y="182" class="val-b">③ 取极限：T 的不动点满足 v* = T v*</text>
+        <path d="M280 196 V218" class="arrow-a"/>
+        <path d="M274 210 l6 10 l6 -10" class="arrow-a"/>
+        <rect x="30" y="222" width="500" height="40" rx="4" class="box-a"/>
+        <text x="44" y="248" class="val-b">④ 取最大的动作连成 π*，解唯一，vπ* = v*</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 10.3</span>
+        定理 3.1 的四步。上界对任意策略都成立；取极限需要压缩性；
+        最后一步把每格挑出的最大动作拼成整套策略。</figcaption>
+    </figure>
+    <p>下面这张图说明"取最大"可能改主意：只把 $s_1$ 的两个动作值并排画出来，
+      参数一变较高的那一根就换边。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 240" role="img" aria-label="s1 处两个动作值的对比：哪一根更高取决于具体参数">
+        <line x1="80" y1="180" x2="500" y2="180" class="axis-b"/>
+        <line x1="80" y1="40" x2="80" y2="180" class="axis-b"/>
+        <rect x="120" y="96" width="46" height="84" class="bar-hi"/>
+        <rect x="186" y="150" width="46" height="30" class="bar"/>
+        <text x="124" y="196" class="lbl">向右</text>
+        <text x="190" y="196" class="lbl">向下</text>
+        <text x="112" y="88" class="val-b">1.9</text>
+        <text x="182" y="142" class="val">−0.1</text>
+        <text x="36" y="60" class="lbl">本课数值：</text>
+        <text x="36" y="80" class="lbl">向右更高</text>
+        <rect x="340" y="120" width="46" height="60" class="bar-hi"/>
+        <rect x="406" y="86" width="46" height="94" class="bar"/>
+        <text x="344" y="196" class="lbl">向右</text>
+        <text x="410" y="196" class="lbl">向下</text>
+        <text x="332" y="112" class="val-b">较低</text>
+        <text x="402" y="78" class="val">较高</text>
+        <text x="330" y="222" class="lbl">换一组参数，较高的那一根就换边</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 10.4</span>
+        在 s1 处两个动作值的比较。哪一根更高取决于转移与奖励的具体数值，
+        所以最优策略是让式 (10.2) 处处成立的那套动作，没有"永远走某个方向"的通则。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 4.5（本课与后面几课的分工）</span>
+      <p>本课只证明式 (10.2) 有唯一解且贪婪策略达到它，没有给出算法。
+        第 0011 课把压缩映射（每迭代一次，两个估计的差距就缩小一点）定理单独证一遍；
+        第 0012 课与后面讲策略迭代（反复"打分、改招"直到改不动）的几课给出算法；
+        第 0013 课的值迭代就是把 $v_{k+1}=Tv_k$ 逐元素写出来。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>最优状态价值 $v^*(s)$ 是所有策略下 $v_\pi(s)$ 的上确界；有限状态下它被取到。</li>
+      <li>最优贝尔曼算子 $T$ 单调且压缩，因此有唯一不动点。</li>
+      <li>贝尔曼最优方程把贝尔曼方程里的加权平均换成取最大。</li>
+      <li>$q^*(s,a)=r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')$，且 $v^*(s)=\max_a q^*(s,a)$。</li>
+      <li>取到式 (10.2) 最大值的动作连成确定性策略 $\pi^*$，并且 $v_{\pi^*}=v^*$。</li>
+    </ul>
+    <p>下一课把本课用到的压缩映射语言单独证成一条定理，为值迭代与策略迭代做准备。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 定义 1.1 里为什么先用上确界而不是直接写最大值？</p>
+      <ol class="mcq-options">
+        <li>因为策略集合是有限的，最大值不一定存在</li>
+        <li>因为还没证明最高分能被某个策略取到，先取上确界更稳妥</li>
+        <li>因为上确界一定大于最大值，这样定义得到的分更高</li>
+        <li>因为折扣小于 1 时给每个状态打分的函数不连续，最好避开最大值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：上确界对任何有界集合都存在，最大值需要额外论证"取得到"。
+          定理 3.1 的第三步补上了这个论证，之后两者是一回事。</p>
+        <p>A 错在策略集合通常无限，而且有限也不是"最大值不存在"的理由。
+          C 错在上确界不会大于最大值，两者至多相等。
+          D 错在本课的状态价值由有限状态的线性方程给出，是连续的，不存在不连续的问题。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 证明引理 2.3 时，"把 $v$ 换成 $v+d$ 会让每个分量恰好增加 $\gamma d$"
+        这一步用到了哪条性质？</p>
+      <ol class="mcq-options">
+        <li>动作个数有限，所以能交换取最大与求和</li>
+        <li>奖励的期望 $r(s,a)$ 有界，所以常数项能忽略</li>
+        <li>$P_a$ 的每一列加起来等于 1，所以求和后被约掉</li>
+        <li>后继概率之和等于 1，所以加上的 $d$ 合成一个 $d$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\gamma\sum_{s'}p(s'\mid s,a)\big(v(s')+d\big)
+          =\gamma\sum_{s'}p(s'\mid s,a)v(s')+\gamma d\sum_{s'}p(s'\mid s,a)$，
+          最后一个因子用行和等于 1 收成 $\gamma d$。</p>
+        <p>A 错在那一步与动作个数无关。
+          B 错在 $r(s,a)$ 在两边同时出现，本来就会抵消，不需要有界性。
+          C 错在规范里用的是行和，列和一般不等于 1。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 贝尔曼最优方程与贝尔曼方程在形式上的唯一差别是什么？</p>
+      <ol class="mcq-options">
+        <li>把按 $\pi(a\mid s)$ 对动作加权平均换成了对动作取最大</li>
+        <li>把折扣因子去掉了，所以两者的收敛速度不同</li>
+        <li>把转移概率 $p(s'\mid s,a)$ 换成了策略概率 $\pi(a\mid s)$</li>
+        <li>把即时奖励 $r(s,a)$ 换成了一步之后的价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两式的右边结构相同，都是"即时奖励 + 折扣后的后继价值"，
+          区别只在最外层：一个按策略加权平均，一个取最大。</p>
+        <p>B 错在折扣因子在两式里都在。
+          C 错在两式都保留转移概率，策略概率只出现在贝尔曼方程的外层。
+          D 错在即时奖励项在两式里都在。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 在 2×2 网格世界与 $\gamma=0.9$ 下，$v^*(s_3)$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$-10$，因为向下越界会一直扣分</li>
+        <li>$1.9$，与 $v^*(s_1)$ 相同</li>
+        <li>$1$，由 $1+0.9\times v^*(s_4)$ 得到</li>
+        <li>$0$，因为 $s_3$ 只能向下</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$s_3$ 有两个动作。向右走到终点拿 $+1$ 分，得 $1+0.9\times0=1$；
+          向下越界得 $-1+0.9v(s_3)$，若取它则 $v(s_3)=-10$。取最大得 $v^*(s_3)=1$。</p>
+        <p>A 错在 $-10$ 是取向下时的解，被向右的 $1$ 比下去了。
+          B 错在 $1.9$ 是 $s_1$ 的最优值。
+          D 错在 $s_3$ 同样可以向右走。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 承上题，$\gamma=0.9$ 时 $v^*(s_1)$ 与 $v^*(s_2)$ 分别是多少？</p>
+      <ol class="mcq-options">
+        <li>$-8$ 与 $-10$，与永远向右的策略相同</li>
+        <li>$1.9$ 与 $1$，因为 $s_1$ 向右、$s_2$ 向下</li>
+        <li>$1$ 与 $1.9$，因为 $s_1$ 向下、$s_2$ 向右</li>
+        <li>都是 $1$，因为两个状态都能一步到终点</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v^*(s_2)=\max\{-1+0.9v^*(s_2),\,1\}=1$，对应向下到终点。
+          代进 $s_1$：向右得 $1+0.9\times1=1.9$，向下得 $-1+0.9\times1=-0.1$，
+          取最大得 $v^*(s_1)=1.9$。</p>
+        <p>A 错在 $-8$ 与 $-10$ 是永远向右那套策略的价值，不是最优值。
+          C 错在把两个状态的取值对调了。
+          D 错在 $s_1$ 一步到不了终点，要先经过 $s_2$ 或 $s_3$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 关于 $q^*(s,a)$ 与 $v^*(s)$ 的关系，下面哪一种说法对？</p>
+      <ol class="mcq-options">
+        <li>$v^*(s)$ 等于各动作 $q^*(s,a)$ 的算术平均</li>
+        <li>$v^*(s)$ 等于各动作 $q^*(s,a)$ 里最小的那个</li>
+        <li>$q^*(s,a)$ 与 $v^*(s)$ 互相独立，没有等式联系</li>
+        <li>$v^*(s)$ 等于各动作 $q^*(s,a)$ 里最大的那个</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理 4.2 证明了两者相等。直观上，从 $s$ 出发的最高分，
+          必然是"先选某个动作、之后走最好"的高分里的最大值，
+          而"之后走最好"这个前提对所有动作都一样，差别只在第一个动作。</p>
+        <p>A 描述的是贝尔曼方程里的加权平均，但权重来自策略，与最优值不同。
+          B 错在最优是取最大而不是最小。
+          C 错在 $q^*(s,a)=r(s,a)+\gamma\sum p v^*(s')$ 把两者绑在一起。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 设某个状态有两个动作，$q^*(s,a_1)=3.2$、$q^*(s,a_2)=3.2$。
+        据此可以推断什么？</p>
+      <ol class="mcq-options">
+        <li>$v^*(s)=3.2$，两个动作都是最优动作</li>
+        <li>$v^*(s)=6.4$，两个动作的价值要相加</li>
+        <li>$v^*(s)$ 无法确定，因为出现并列时取最大没有定义</li>
+        <li>$v^*(s)=3.2$，但只有 $a_1$ 是最优动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v^*(s)=\max_a q^*(s,a)=3.2$。取最大允许并列，
+          并列时两个动作都是最优动作，任选一个都得到同样的价值。</p>
+        <p>B 错在价值是"选一个动作"的得分，不相加。
+          C 错在并列不影响最大值的定义，只是取最大的动作不唯一。
+          D 错在并列时两个动作都是最优的，取哪个都不影响价值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 定理 4.3 的证明中，"$\pi^*$ 是最优策略"这一步靠的是哪条结论？</p>
+      <ol class="mcq-options">
+        <li>压缩映射的柯西序列性质，它保证迭代序列收敛</li>
+        <li>单调性，它保证 $T_{\pi^*}v^*\le Tv^*$</li>
+        <li>第 0009 课的解唯一性，它保证满足同一方程的两个解相等</li>
+        <li>动作个数有限，它保证取最大的动作一定存在</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\pi^*$ 满足 $T_{\pi^*}v^*=v^*$，而 $v_{\pi^*}$ 也满足同一个方程；
+          由 $I-\gamma P_{\pi^*}$ 可逆，解唯一，所以两者相等。</p>
+        <p>A 错在证明里没有用到迭代序列。
+          B 错在单调性用于式 (10.2) 的上界那一段，不用于最后绑定。
+          D 错在动作有限保证取最大的动作能取到，但取到之后还要证明它达到最优值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">9. 若把网格世界的越界惩罚从 $-1$ 改成 $-20$，其他不变，
+        最优策略最可能发生什么变化？</p>
+      <ol class="mcq-options">
+        <li>完全不变，因为最优策略只由奖励的正负决定</li>
+        <li>$s_1$ 处的选择可能翻转，因为撞墙的代价变了</li>
+        <li>所有状态都改为向下，因为向下更接近终点</li>
+        <li>不再存在最优策略，因为惩罚太重</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (10.2) 里两个动作的取值依赖 $r(s,a)$，越界惩罚就是它的一部分。
+          惩罚变重会把自环那一支压低，原来"向右进自环"的选项就更差，
+          哪些动作成为最大需要重算。</p>
+        <p>A 错在最优动作由数值大小决定，不由正负号决定。
+          C 错在向下在 $s_3$ 也会越界，不会因为惩罚重就都改向下。
+          D 错在确定性最优策略的存在性由定理 4.3 保证，与惩罚大小无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 为什么说贝尔曼最优方程不能"每个状态单独解"？</p>
+      <ol class="mcq-options">
+        <li>因为取最大这一步不可逆，无法从方程里反解出最优值</li>
+        <li>因为每个状态的方程里出现的都是别的状态的价值</li>
+        <li>因为最优策略可能是随机的，而方程只对确定性策略成立</li>
+        <li>因为最优值必须同时对全部状态满足方程，挑出的动作要连成一整套策略</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (10.2) 是一组互相耦合的方程（$s_1,s_2,s_3$ 彼此相连），
+          解出最优值时，每个状态取最大值的动作也同时确定了一整套策略，
+          两者必须一起自洽。</p>
+        <p>A 错在"不可逆"解释不了这件事，拦住逐个解的是耦合与自洽。
+          B 错在方程里也出现本状态的价值，关键不是"只有别的状态"。
+          C 错在定理 4.3 说明存在确定性最优策略，而且方程对随机策略
+          （同一状态下按概率选动作的策略）同样成立。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 3 章 3.1–3.3.2 节。本课的最优价值定义、贝尔曼最优方程、压缩性论证与贪婪策略最优性均取自该书。</p>
+      <p>R. S. Sutton and A. G. Barto, <em>Reinforcement Learning: An Introduction</em>, 2nd ed.,
+        麻省理工学院出版社 2018 年版，第 3.6 节给出同一条方程的最优性表述，可对照阅读。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 $s_1$ 处两个动作值随折扣因子变化的情况算一张表"，
+      或者 "为什么证明 $v^*(s)=\max_a q^*(s,a)$ 时需要正反两个方向？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

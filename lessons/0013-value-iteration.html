@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0013 · 值迭代：逐元素形式与实现 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0013" data-slug="value-iteration" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">数学预备 13 ／ 第 1 部分 · 基础工具</p>
+    <h1>值迭代：逐元素形式与实现</h1>
+    <p class="lede">0011 课证明了值迭代从任意初值都收敛（一轮轮算下去，数值不再明显变化，稳定下来了）。这一课把它变成能跑的算法：
+      写出逐元素更新式、给出收敛速度与误差界，再定一个能停下来的准则，
+      最后在一张网格上把前几步的数值全部算出来。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能从压缩映射直接写出值迭代算法与它的逐元素形式</li>
+        <li>能证明误差按 $\gamma^k$ 几何衰减，并说明为什么 $\gamma$ 越大越慢</li>
+        <li>能推出误差界 $\|v_{k+1}-v^*\|_\infty\le\frac{\gamma}{1-\gamma}\|v_{k+1}-v_k\|_\infty$</li>
+        <li>能按这个界选停止阈值 $\varepsilon$（事先指定的一个很小的正数）</li>
+        <li>能在一张 $2\times2$ 网格上手算几步值迭代，并检验收敛速度</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 算法形式</h2>
+    <p>这叫值迭代：不显式维护策略（一套"看到什么状态就选什么动作"的规则），
+      直接把价值反复往最优方向推。先看它的整体写法。</p>
+    <p>压缩映射（每迭代一次，两个估计之间的差距就缩小一点，所以最终必然稳定）定理
+      给出的结论很直接：只要反复套用贝尔曼算子，就一定走到唯一的 $v^*$。把它写成更新式就是值迭代。
+      这里的折扣因子（越往后的奖励，算进总分时权重越小）记作 γ，满足 $0\le\gamma<1$。</p>
+    <div class="thm">
+      <span class="label">定理 1.1（值迭代）</span>
+      <p>取任意 $v_0\in\R^n$，反复按式 (13.1) 更新。则 $v_k\to v^*$，
+        且 $\|v_k-v^*\|_\infty\le\gamma^k\|v_0-v^*\|_\infty$。</p>
+      <div class="eq">
+        <span class="eq-body">$$v_{k+1}=Tv_k$$</span>
+        <span class="eq-num">(13.1)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>由 0011 课定理 4.2，$(\R^n,\|\cdot\|_\infty)$ 完备；由定理 5.6，$T$ 是它的
+        $\gamma$-压缩映射，$0\le\gamma<1$。把压缩映射定理用到这个 $T$ 上，直接得到结论。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>式 (13.1) 里的 $T$ 是</p>
+    <div class="eq">
+      <span class="eq-body">$$(Tv)(s)=\max_{a\in\mathcal{A}(s)}\Big[r(s,a)+\gamma\sum_{s'\in\mathcal{S}}p(s'\mid s,a)v(s')\Big],
+      \qquad s\in\mathcal{S}$$</span>
+      <span class="eq-num">(13.2)</span>
+    </div>
+    <p>式中 $\mathcal{S}$ 是状态空间（所有可能状态的集合），$\mathcal{A}(s)$ 是动作空间
+      （每个状态下能选的动作组成的集合），$r(s,a)$ 是动作值（在某个状态选某个动作，平均能拿到多少
+      即时奖励），$p(s'\mid s,a)$ 是跳转概率（这个跳转不是百分之百确定的，而是一组可能性，
+      各带着自己的概率）。</p>
+    <div class="thm">
+      <span class="label">命题 1.2（逐元素形式）</span>
+      <p>把式 (13.2) 的第 $s$ 个分量单独写出来，就是每个状态一条更新式：
+        $$v_{k+1}(s)=\max_{a\in\mathcal{A}(s)}\Big[r(s,a)+\gamma\sum_{s'\in\mathcal{S}}p(s'\mid s,a)\,v_k(s')\Big].$$</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.3（为什么逐元素形式重要）</span>
+      <p>式 (13.2) 是整体写法，适合用来讲证明。真正写代码时用的是逐元素形式：
+        每个状态算一次括号里的式子，取最大的那个，写回新表。
+        $n$ 个状态就是 $n$ 次独立的比较，状态之间不互相等待。
+        这些性质让它一眼就能并行，也让"抄近路"的错误（比如边算边写同一张表）看得更清楚。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.4（同步更新与原地更新）</span>
+      <p>逐元素形式要求第 $k+1$ 轮的所有状态都读第 $k$ 轮的值。若写代码时直接在 $v$ 上改，
+        后面的状态就会读到本轮已经改过的新值，那算的已经不是式 (13.1)。
+        实现上要么先算进一份新表再整体替换，要么确认顺序不影响结果。
+        下一课的迭代算法（先打分再改招，反复交替）也踩同一个坑。</p>
+    </div>
+    <p>下面把"停"的判据写清楚：给定阈值 ε（事先指定的一个很小的正数），
+      当相邻两轮的价值表差别足够小时就停止。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 250" role="img" aria-label="值迭代的循环：读旧表算新表，再判断是否停下来">
+        <rect x="26" y="96" width="86" height="52" class="box"/>
+        <text x="46" y="127" class="val-b">v0</text>
+        <path d="M116 122 H166" class="arrow-a"/>
+        <path d="M158 117 l10 5 l-10 5" class="arrow-a"/>
+        <rect x="170" y="82" width="130" height="80" class="box-a"/>
+        <text x="184" y="106" class="val">每个状态取 max</text>
+        <text x="184" y="128" class="val">得到新的一张表</text>
+        <text x="184" y="150" class="lbl">v_{k+1} = T v_k</text>
+        <path d="M304 122 H356" class="arrow-a"/>
+        <path d="M348 117 l10 5 l-10 5" class="arrow-a"/>
+        <polygon points="420,84 486,122 420,160" class="box"/>
+        <text x="428" y="118" class="val">变化小？</text>
+        <text x="430" y="138" class="lbl">小于 ε 就停</text>
+        <path d="M420 168 V206 H235 V166" class="arrow"/>
+        <path d="M230 174 l5 -10 l5 10" class="arrow"/>
+        <text x="270" y="222" class="lbl">没停就再来一轮</text>
+        <path d="M490 122 H520" class="arrow-a"/>
+        <text x="496" y="112" class="lbl">停</text>
+        <text x="26" y="52" class="val-b">值迭代的每一轮只做两件事</text>
+        <text x="26" y="72" class="lbl">算新表、比新旧表的差别；差别足够小就停</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 13.1</span>
+        值迭代的循环：从任意初值出发，用旧表算出一张新表，比较两张表的差别，
+        差别小于阈值 ε 就停下来。整个过程不维护策略表，最后一步才从 v* 取动作。
+        图里的"变化小？"就是下一节要推的停止准则。</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg viewBox="0 0 520 220" role="img" aria-label="把新旧两张价值表逐元素相减，取最大的绝对值">
+        <rect x="30" y="46" width="86" height="74" class="box"/>
+        <text x="46" y="78" class="val">v_k</text>
+        <text x="42" y="100" class="lbl">旧表</text>
+        <rect x="126" y="46" width="86" height="74" class="box-a"/>
+        <text x="142" y="78" class="val">v_{k+1}</text>
+        <text x="140" y="100" class="lbl">新表</text>
+        <path d="M216 96 H268" class="arrow-a"/>
+        <path d="M260 91 l10 5 l-10 5" class="arrow-a"/>
+        <text x="216" y="84" class="lbl">逐元素相减</text>
+        <rect x="272" y="46" width="110" height="74" class="box"/>
+        <text x="286" y="72" class="val">0.03</text>
+        <text x="286" y="92" class="val">0.21</text>
+        <text x="286" y="112" class="val">0.08</text>
+        <path d="M386 96 H432" class="arrow-a"/>
+        <path d="M424 91 l10 5 l-10 5" class="arrow-a"/>
+        <rect x="436" y="66" width="76" height="52" class="box-a"/>
+        <text x="448" y="88" class="val-b">0.21</text>
+        <text x="444" y="108" class="lbl">取最大</text>
+        <text x="30" y="152" class="lbl">下面一行：把每个状态的差列出来，取绝对值最大的那一个，就是相邻差 ‖v(k+1) − vk‖∞</text>
+        <text x="30" y="174" class="lbl">只要它小于阈值 ε 就停；停下来的真实误差还要乘 γ/(1−γ)</text>
+        <text x="30" y="196" class="lbl">所以要事先把 ε 定得比目标误差小一截，见式 (13.3)</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 13.2</span>
+        停止判据的算法：两张表逐元素相减，把差的绝对值列出来，取其中最大的那个。
+        它只用当前手头的数据，不需要知道 v*。这个数就是相邻差，和真实误差只差一个常数倍数。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 收敛性与误差界</h2>
+    <div class="thm">
+      <span class="label">定理 2.1（收敛速度）</span>
+      <p>在定理 1.1 的设定下，对任意 $k\ge0$，
+        $$\|v_k-v^*\|_\infty\le\gamma^k\,\|v_0-v^*\|_\infty.$$
+        也就是说误差按 $\gamma$ 的幂次几何衰减：每多迭代一轮，误差上界就乘一个 $\gamma$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（归纳）</span>
+      <p>$k=0$ 时两边相等，成立。设 $k$ 时成立，则
+        $\|v_{k+1}-v^*\|_\infty=\|Tv_k-Tv^*\|_\infty\le\gamma\|v_k-v^*\|_\infty
+        \le\gamma^{k+1}\|v_0-v^*\|_\infty$，
+        第一步用 $v^*$ 是不动点（再迭代一次也不变的那种解），第二步用压缩性（0011 课式 (11.3)），第三步用归纳假设。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.2（$\gamma$ 决定要跑多少轮）</span>
+      <p>要把误差压到初值的 $10^{-3}$，需要 $\gamma^k\le10^{-3}$，
+        即 $k\ge3\ln10/(-\ln\gamma)$。$\gamma=0.9$ 时约需 $66$ 轮，$\gamma=0.99$ 时约需 $687$ 轮。
+        状态多、$\gamma$ 大，值迭代就会慢得让人等不下去，这也是后面要讲截断策略迭代（打分少打几轮就改招）与异步更新的动机。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 2.3（只用相邻两项的误差界）</span>
+      <p>对任意 $k\ge0$，
+        $$\|\mkern1mu v_{k+1}-v^*\mkern1mu\|_\infty\le\frac{\gamma}{1-\gamma}\,\|v_{k+1}-v_k\|_\infty.$$</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：把 $v^*$ 与 $v_{k+1}$ 的差写成无穷多段相邻差之和，每段用压缩性放大一次。</p>
+      <p>第一步，把差写成桥。对任意 $m>k$，
+        $v_{k+1}-v^*=\sum_{j=k+1}^{m-1}(v_j-v_{j+1})+(v_m-v^*)$。</p>
+      <p>第二步，逐段放缩。由第一步的距离衰减（0011 课证明中的同一步），
+        $\|v_j-v_{j+1}\|_\infty\le\gamma^{j-k-1}\|v_{k+1}-v_k\|_\infty$，
+        而 $\|v_m-v^*\|_\infty\le\gamma^{m-k-1}\|v_{k+1}-v^*\|_\infty$ 随 $m\to\infty$ 趋于 $0$
+        （因为 $\gamma<1$）。代入并用三角不等式：
+        $\|v_{k+1}-v^*\|_\infty\le\|v_{k+1}-v_k\|_\infty\sum_{j\ge0}\gamma^{j}
+        =\frac{\gamma}{1-\gamma}\|v_{k+1}-v_k\|_\infty$。</p>
+      <p>第三步，几何级数收敛用到 $0\le\gamma<1$，求和 $\sum_{j\ge0}\gamma^j=1/(1-\gamma)$。证明完毕。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.4（这条界为什么是"可用"的）</span>
+      <p>定理 2.1 的界里有 $v^*$，算的时候并不知道它，只能事后检验。
+        定理 2.3 把 $v^*$ 换成了 $\|v_{k+1}-v_k\|_\infty$，而这个量每一轮都算得出来。
+        于是可以定停止准则：当 $\|v_{k+1}-v_k\|_\infty<\varepsilon$ 时停，
+        此时真实误差不超过 $\frac{\gamma}{1-\gamma}\varepsilon$。
+        注意系数 $\frac{\gamma}{1-\gamma}$：$\gamma=0.9$ 时它是 $9$，想要误差小于 $10^{-3}$，
+        阈值要取到 $10^{-4}$ 以下。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 240" role="img" aria-label="误差按 γ 的幂衰减，相邻两项的差比总误差大，用它作停止判据要留系数">
+        <line x1="70" y1="180" x2="490" y2="180" class="axis-b"/>
+        <line x1="70" y1="34" x2="70" y2="180" class="axis-b"/>
+        <text x="70" y="26" class="lbl">对数刻度</text>
+        <polyline points="80,48 140,72 200,96 260,120 320,144 380,168" class="curve"/>
+        <polyline points="80,72 140,96 200,120 260,144 320,168" class="curve2"/>
+        <text x="300" y="64" class="lbl">真实误差 ‖vk − v*‖∞</text>
+        <text x="300" y="104" class="lbl">相邻差 ‖v(k+1) − vk‖∞</text>
+        <line x1="70" y1="140" x2="490" y2="140" class="mark"/>
+        <text x="76" y="134" class="lbl">阈值 ε</text>
+        <text x="70" y="206" class="lbl">两条线斜率相同、相差一个常系数 γ/(1−γ)；相邻差达标时真实误差还没达标</text>
+        <text x="70" y="226" class="lbl">所以阈值要按这个系数缩一缩，见式 (13.3)</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 13.3</span>
+        两条曲线平行下降，斜率由 γ 决定。实线是真实误差，虚线是相邻两项的差。
+        虚线永远在实线下方，两者差一个常数倍数 γ/(1−γ)。把 ε 直接当成误差上限会偏乐观，
+        要按式 (13.3) 折算。</figcaption>
+    </figure>
+    <div class="thm">
+      <span class="label">命题 2.5（停止准则）</span>
+      <p>给定阈值 $\varepsilon>0$，当 $\|v_{k+1}-v_k\|_\infty<\varepsilon$ 时停止迭代。
+        此时真实误差满足
+        $$\|\mkern1mu v_{k+1}-v^*\mkern1mu\|_\infty<\frac{\gamma}{1-\gamma}\,\varepsilon.$$</p>
+      <div class="eq">
+        <span class="eq-body">$$\|\mkern1mu v_{k+1}-v^*\mkern1mu\|_\infty\le\frac{\gamma}{1-\gamma}\,\|v_{k+1}-v_k\|_\infty<\frac{\gamma}{1-\gamma}\,\varepsilon$$</span>
+        <span class="eq-num">(13.3)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>第一个不等号是定理 2.3，第二个不等号是停止条件 $\|v_{k+1}-v_k\|_\infty<\varepsilon$
+        与 $\frac{\gamma}{1-\gamma}\ge0$。$\gamma=0$ 时系数为 $0$，此时 $v_1=Tv_0$ 已经是 $v^*$，
+        一次迭代就结束。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 在网格世界上手算几步</h2>
+    <div class="eg">
+      <span class="label">例 3.1（$2\times2$ 网格，$\gamma=0.75$）</span>
+      <p>四个状态排成 $2\times2$：$s_1$ 左上、$s_2$ 右上、$s_3$ 左下、$s_4$ 右下。
+        每个状态有两个动作（右、下），移动是确定的：向右则列加一，向下则行加一，
+        走到 $s_4$ 后停在原地。奖励规则：走到 $s_4$ 得 $+1$，从 $s_4$ 出发得 $0$，
+        运动但没到达 $s_4$ 得 $0$。取 $\gamma=0.75$，初值 $v_0=(0,0,0,0)$。
+        逐元素更新式是
+        $v_{k+1}(s)=\max\{0+\gamma v_k(\text{右}),\;0+\gamma v_k(\text{下})\}$
+        （$s_4$ 上两个动作都自环且奖励为 $0$，所以 $v_{k+1}(s_4)=0.75\,v_k(s_4)$）。</p>
+      <p>第 1 轮：$v_1(s_1)=\max\{0.75 v_0(s_2),0.75 v_0(s_3)\}=0$；
+        $v_1(s_2)=\max\{0+1,0.75v_0(s_4)\}=1$；
+        $v_1(s_3)=\max\{0+1,0.75v_0(s_3)\}=1$；$v_1(s_4)=0$。
+        所以 $v_1=(0,1,1,0)$。</p>
+      <p>第 2 轮：$v_2(s_1)=\max\{0.75\times1,0.75\times1\}=0.75$；
+        $v_2(s_2)=1$；$v_2(s_3)=1$；$v_2(s_4)=0.75\times0=0$。得 $v_2=(0.75,1,1,0)$。</p>
+      <p>第 3 轮：$v_3(s_4)=0.75\times v_2(s_4)=0$，其余分量与第 2 轮相同，
+        所以 $v_3=(0.75,1,1,0)$。把这张表代回更新式已经不再变化，它是不动点：
+        $v_3(s_2)=\max\{1,0.75v_3(s_4)\}=1$，$v_3(s_3)=1$，
+        $v_3(s_1)=\max\{0.75v_3(s_2),0.75v_3(s_3)\}=0.75$，
+        $v_3(s_4)=0.75v_3(s_4)$ 在 $v_3(s_4)=0$ 时成立。
+        逐条核对贝尔曼最优（把"这一步的价值"和"下一步的价值"连起来的最优版本）方程就知道，
+        它就是最优值 $v^*=(0.75,1,1,0)$。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 250" role="img" aria-label="2×2 网格上三轮值迭代的数值变化">
+        <text x="26" y="24" class="val-b">k = 0</text>
+        <rect x="26" y="36" width="72" height="52" class="box"/><text x="52" y="68" class="val">0</text>
+        <rect x="98" y="36" width="72" height="52" class="box"/><text x="124" y="68" class="val">0</text>
+        <rect x="26" y="88" width="72" height="52" class="box"/><text x="52" y="120" class="val">0</text>
+        <rect x="98" y="88" width="72" height="52" class="box"/><text x="124" y="120" class="val">0</text>
+
+        <text x="196" y="24" class="val-b">k = 1</text>
+        <rect x="196" y="36" width="72" height="52" class="box"/><text x="222" y="68" class="val">0</text>
+        <rect x="268" y="36" width="72" height="52" class="box-a"/><text x="294" y="68" class="val-b">1</text>
+        <rect x="196" y="88" width="72" height="52" class="box-a"/><text x="222" y="120" class="val-b">1</text>
+        <rect x="268" y="88" width="72" height="52" class="box"/><text x="294" y="120" class="val">0</text>
+
+        <text x="366" y="24" class="val-b">k = 3 = v*</text>
+        <rect x="366" y="36" width="72" height="52" class="box-a"/><text x="386" y="68" class="val-b">0.75</text>
+        <rect x="438" y="36" width="72" height="52" class="box-a"/><text x="464" y="68" class="val-b">1</text>
+        <rect x="366" y="88" width="72" height="52" class="box-a"/><text x="386" y="120" class="val-b">1</text>
+        <rect x="438" y="88" width="72" height="52" class="box-a"/><text x="464" y="120" class="val-b">0</text>
+
+        <text x="26" y="172" class="lbl">数值从右下角的 +1 出发，一轮向外扩一格；每个状态取两个后继中较大的那个</text>
+        <text x="26" y="194" class="lbl">s2、s3 在第一轮就到 1 并停住；s1 要等 s2 有值后才涨到 0.75；s4 一直是 0</text>
+        <text x="26" y="216" class="lbl">第 3 轮整张表已经是不动点，所以 v3 就等于 v*，误差归零</text>
+        <text x="26" y="238" class="lbl">网格的右下角是终点 s4，走到它得 +1，从它出发得 0</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 13.4</span>
+        三轮值迭代的数值。深色格子是已经变化的状态。第一轮只有紧挨终点的两个格子拿到 1，
+        起点要等下一轮才从它们那里收到 0.75。信息每轮只向外传一格，这正是 $\gamma$ 与状态距离
+        共同决定收敛快慢的直观来源。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 3.2（核对收敛速度与误差界）</span>
+      <p>真实最优值 $v^*=(0.75,1,1,0)$，逐轮比较误差：
+        $\|v_1-v^*\|_\infty=0.75$、$\|v_2-v^*\|_\infty=0$、$\|v_3-v^*\|_\infty=0$。
+        相邻两项的差是 $\|v_1-v_0\|_\infty=1$、$\|v_2-v_1\|_\infty=0.75$、$\|v_3-v_2\|_\infty=0$。
+        用定理 2.3 检查：$\gamma/(1-\gamma)=0.75/0.25=3$，
+        $3\times1=3\ge0.75$、$3\times0.75=2.25\ge0$，两轮的界都成立。
+        这张网格太小，第 2 轮就已经到了 $v^*$，所以看不到 $\gamma^k$ 的完整衰减过程。
+        想看衰减，把规模换大、把 $\gamma$ 换到 $0.9$ 以上再跑。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 实现要点</h2>
+    <div class="rem">
+      <span class="label">注记 4.1（把一次更新写成三段）</span>
+      <p>第 $k+1$ 轮对状态 $s$：先算"这一步的奖励"，再把 $p(s'\mid s,a)\,v_k(s')$ 对后继状态求和，
+        最后对动作取最大。三段分别对应式 (13.2) 里的 $r$、求和号与 $\max$。
+        写成代码时把这三段分开，出错时能立刻定位是哪一段。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.2（用无穷范数做停止判据）</span>
+      <p>停止判据用 $\|\cdot\|_\infty$（无穷范数，所有分量里绝对值最大的那个），
+        不是所有分量之和。原因是压缩性本身是对无穷范数成立的：
+        只要最大分量变化很小，其他分量只会更小。若改用其他范数，阈值与误差的关系会变，
+        定理 2.3 那个系数 $\frac{\gamma}{1-\gamma}$ 就不再成立。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.3（$\gamma=0$ 与一次性收敛）</span>
+      <p>$\gamma=0$ 时 $T$ 把任何 $v$ 都送到"只看即时奖励"的那张表，第二次迭代就不动了。
+        这时的最优策略在每个状态取即时奖励最大的动作，与 $v_0$ 无关。
+        把这个极端记住，可以随时检验实现有没有写错：把 $\gamma$ 设成 0，
+        跑两轮，第二轮的结果必须与第一轮完全一样。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>值迭代就是 $v_{k+1}=Tv_k$，见式 (13.1)；逐元素形式是每个状态一条更新式。</li>
+      <li>误差按 $\gamma^k$ 几何衰减，见定理 2.1；$\gamma$ 越接近 1，需要的轮数越多。</li>
+      <li>只用相邻两项的误差界见定理 2.3，乘上系数 $\frac{\gamma}{1-\gamma}$ 就得到停止准则，见式 (13.3)。</li>
+      <li>每一轮必须整表同步更新，不能边算边覆盖同一张表。</li>
+      <li>网格算例里 $v^*=(0.75,1,1,0)$，第 2 轮就已经算准，误差归零。</li>
+    </ul>
+    <p>下一课换一条路：不动价值，改成先给一套策略打分、再把策略里吃亏的动作换掉，
+      反复交替。那条路叫策略迭代，值与策略会被显式地分开维护。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 值迭代每一轮更新的对象是什么？</p>
+      <ol class="mcq-options">
+        <li>动作表，也就是每个状态选哪个动作</li>
+        <li>价值表，也就是每个状态值多少分</li>
+        <li>策略表与价值表，两张表一起更新</li>
+        <li>状态跳转的概率，边算边修正环境模型</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (13.1) 只更新 $v$，策略是算完以后取 $\argmax$ 附加得到的，
+          过程中不显式维护。</p>
+        <p>A 是策略迭代或 $\argmax$ 那一步的产物，不是每轮更新的对象。
+          C 描述了策略迭代的结构。D 属于模型学习，值迭代假定模型已知。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 值迭代的收敛性直接来自哪条结论？</p>
+      <ol class="mcq-options">
+        <li>期望的线性性，把回报（从当前这一步往后能拿到的奖励全加起来）的期望拆开</li>
+        <li>概率分布的归一性，把加权平均化成一个常数</li>
+        <li>三角不等式，把两个估值的差拆成两段之和</li>
+        <li>贝尔曼算子在无穷范数下是压缩映射，见式 (13.2)</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$T$ 压缩，$(\R^n,\|\cdot\|_\infty)$ 完备，把压缩映射定理套上去就得到
+          唯一不动点与迭代收敛，见定理 1.1 的证明。</p>
+        <p>A、B、C 都是证明压缩性时用到的中间性质，单独一条推不出迭代收敛。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 在定理 2.1 的归纳证明里，从 $\|v_{k+1}-v^*\|_\infty$ 走到
+        $\gamma\|v_k-v^*\|_\infty$ 用的是哪一步？</p>
+      <ol class="mcq-options">
+        <li>把两个式子代入，再用压缩性把差的范数放缩一次</li>
+        <li>用期望的线性性把求和号整体拆开成若干项</li>
+        <li>用 $\gamma<1$ 把误差直接乘上一个任意小的正数</li>
+        <li>用完备性保证迭代序列的极限点一定存在</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_{k+1}=Tv_k$ 与 $v^*=Tv^*$，所以两个 $T$ 的输入分别是 $v_k$ 与 $v^*$，
+          压缩性给出 $\|Tv_k-Tv^*\|_\infty\le\gamma\|v_k-v^*\|_\infty$。</p>
+        <p>B 不在这一步。C 错在 $\gamma$ 是压缩系数定义的，不是"乘个更小的数"。
+          D 管的是存在性，不管这一段的放缩。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 若 $\gamma=0.9$，停止阈值取 $\varepsilon=10^{-3}$，
+        停止时真实误差的上界大约是多少？</p>
+      <ol class="mcq-options">
+        <li>$10^{-3}$</li>
+        <li>$9\times10^{-4}$</li>
+        <li>$9\times10^{-3}$</li>
+        <li>$10^{-2}$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：系数是 $\gamma/(1-\gamma)=0.9/0.1=9$，所以上界是 $9\times10^{-3}$。</p>
+        <p>A 错在直接把阈值当成误差上限，忽略了系数。B 错在把系数当成了 $\gamma$。
+          D 错在把系数算成了 10。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 在例 3.1 的网格上，$v_2(s_1)$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$0$，因为 $s_1$ 到不了终点</li>
+        <li>$0.75$，由 $0.75\times v_1(s_2)$ 得到</li>
+        <li>$1$，与 $v_1(s_2)$ 相同</li>
+        <li>$0.5625$，由 $0.75^2\times1$ 得到</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：第 2 轮时 $s_1$ 的两个后继 $s_2$、$s_3$ 在第 1 轮的值都是 $1$，
+          所以 $v_2(s_1)=\max\{0.75\times1,0.75\times1\}=0.75$。</p>
+        <p>A 错在 $s_1$ 向右或向下都能走到终点。C 错在漏掉了折扣因子 （越往后的奖励，算进总分时权重越小）。
+          D 算的是 $v_3(s_4)$，不是 $v_2(s_1)$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 关于 $\|v_{k+1}-v_k\|_\infty$ 与 $\|v_{k+1}-v^*\|_\infty$ 的大小关系，
+        下面哪个说法成立？</p>
+      <ol class="mcq-options">
+        <li>两者总是相等，所以可以直接用相邻差代替误差</li>
+        <li>相邻差总是更大，所以用相邻差作判据是安全的</li>
+        <li>两者大小关系不确定，要看初值怎么取</li>
+        <li>相邻差不超过真实误差乘以 $(1-\gamma)/\gamma$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由定理 2.3 移项即得 $\|v_{k+1}-v_k\|_\infty\ge\frac{1-\gamma}{\gamma}
+          \|v_{k+1}-v^*\|_\infty$，即相邻差至少是真实误差的 $\frac{1-\gamma}{\gamma}$ 倍。
+          当 $\gamma$ 接近 1 时这个倍数很小，相邻差会比真实误差小得多。</p>
+        <p>A 与 B 都错在把两者当成同一个量级，B 更是把方向说反了。
+          C 错在这个关系只由压缩性决定，与初值无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 若实现时直接在旧表上覆盖，导致后面的状态读到本轮已更新的值，
+        这时的迭代最接近下面哪一种？</p>
+      <ol class="mcq-options">
+        <li>不再是式 (13.1)，每一步的结果与同步版本不同</li>
+        <li>仍然是式 (13.1)，只是每一轮算得更快一点</li>
+        <li>仍然是式 (13.1)，但收敛速度会变成 $\gamma^2$</li>
+        <li>会出现两个不同的不动点，结果依赖读写顺序</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (13.1) 的 $Tv_k$ 要求所有分量都读同一张旧表。边算边覆盖会让不同状态
+          读到不同轮次的值，那已经是另一个算子（异步更新），结果与同步版本不同。</p>
+        <p>B 错在它确实改变了算法。C 错在收敛速度由压缩系数决定，不会被这样改快。
+          D 错在最优价值 $v^*$ 的唯一性由压缩映射定理保证，与实现细节无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 当 $\gamma=0$ 时，值迭代两次之后会怎样？</p>
+      <ol class="mcq-options">
+        <li>误差每轮减半，需要多跑几轮才收敛</li>
+        <li>不收敛，因为压缩系数等于 0 时定理不适用</li>
+        <li>第二轮与第一轮完全相同，已经到 $v^*$</li>
+        <li>结果依赖初值 $v_0$ 的选取</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\gamma=0$ 时 $(Tv)(s)=\max_a r(s,a)$，与 $v$ 无关，
+          所以 $v_1=v_2=v^*$，一次迭代就到位。压缩映射定理允许 $\gamma=0$，
+          只要它严格小于 1。</p>
+        <p>A 错在 $\gamma=0$ 时误差直接归零，不是慢慢减半。
+          B 错在定义只要求 $0\le\gamma<1$。D 错在 $T$ 完全丢掉了 $v$ 的信息。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">9. 在例 3.1 里，$v_3$ 与 $v^*$ 只差 $s_4$ 一个分量。
+        若把初值改成 $v_0=(100,100,100,100)$，$v^*$ 会变吗？</p>
+      <ol class="mcq-options">
+        <li>会变，因为初值不同会收敛到不同的不动点</li>
+        <li>不变，因为 $T$ 的不动点唯一</li>
+        <li>会变，因为大初值把价值整体抬高</li>
+        <li>无法判断，要先把迭代跑完才知道</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：压缩映射定理保证 $T$ 在 $\R^n$ 上的不动点唯一，与初值无关。
+          初值只影响需要跑多少轮，不影响终点。</p>
+        <p>A 与 C 都把"初值影响过程"误当成"初值影响终点"。
+          D 错在不需要跑完，唯一性本来就是定理的结论。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 若 $\gamma$ 从 $0.5$ 改成 $0.95$，其他都不变，
+        关于值迭代的收敛，下面哪个判断成立？</p>
+      <ol class="mcq-options">
+        <li>收敛更快，因为每轮的收缩幅度更小</li>
+        <li>收敛速度不变，只影响最终的价值大小</li>
+        <li>不再收敛，因为压缩系数太接近 1</li>
+        <li>收敛更慢，需要的轮数大约按比例增加</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：收敛速度由 $\gamma^k$ 决定，$\gamma$ 越大衰减越慢。
+          把误差压到同样水平所需的轮数大约是原来的 $\ln0.5/\ln0.95\approx13.5$ 倍。</p>
+        <p>A 把"收缩幅度更小"说成了更快，方向反了。
+          B 错在 $\gamma$ 同时决定速度与价值大小。
+          C 错在 $\gamma=0.95<1$，压缩性仍然成立。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 4 章 4.1 节。</p>
+      <p>想补动态规划的经典处理（含异步与广义策略迭代），可读
+        <em>Dynamic Programming and Optimal Control</em>（D. Bertsekas）第 1 卷第 1、2 章，
+        或 <em>Reinforcement Learning: An Introduction</em>（Sutton &amp; Barto）第 4 章。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 $\frac{\gamma}{1-\gamma}$ 这个系数用我的网格例子再推一遍"，
+      或者 "为什么 $\gamma$ 接近 1 时值迭代会需要几百轮？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

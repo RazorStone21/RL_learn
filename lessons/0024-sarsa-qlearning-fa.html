@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0024 · 函数逼近下的 Sarsa 与 Q-learning — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0024" data-slug="sarsa-qlearning-fa" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法 5 ／ 第 24 课</p>
+    <h1>函数逼近下的 Sarsa 与 Q-learning</h1>
+    <p class="lede">上一课把价值估计换成了带参数的函数 $\hat v(s;w)$，这里做同一件事：
+      把动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）也换成 $\hat q(s,a;w)$，再把 Sarsa 与 Q-learning 的表格更新改成对参数 $w$ 的更新。
+      改完之后会出现一个新麻烦：有些组合能让参数一路发散。</p>
+    <div class="objectives">
+      <h2>学完之后你会</h2>
+      <ul>
+        <li>能写出函数逼近下 Sarsa 与 Q-learning 的参数更新式</li>
+        <li>能把线性逼近下的更新式展开成特征向量的形式，并说出共用一个参数意味着什么</li>
+        <li>能说清是哪个操作让 Q-learning 变成了异策略算法</li>
+        <li>能说清函数逼近、自举、异策略三者同时出现时为什么会失去收敛保证</li>
+        <li>能列举几种实践中用来稳住训练的手段，并说出每种手段在压制哪一条</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 从 $\hat v$ 到 $\hat q$</h2>
+    <p>TD（temporal difference）。时序差分（用"走一步之后的新估计"来更新"走这一步之前的估计"）是这一族算法的总称。
+      Sarsa 与 Q-learning 更新的都是动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分），
+      所以这里把估计写成 $\hat q(s,a;w)$，式中 $s$ 是状态，$a$ 是动作，$w$ 是要调的函数参数。
+      状态动作对的数量比状态更多，用表格记下来只会更早撑爆，这就是必须换函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值）的原因。</p>
+    <p>换成函数之后，更新式的形状跟着变。表格法是"只改一格"，函数逼近是"按梯度改一组参数"，梯度就是往哪个方向调参数能让误差下降最快的那个方向。
+      上一课已经把梯度怎么来的讲完了，这里只做替换：把预测项换成 $\hat q(S,A;w)$，
+      把梯度换成 $\nabla_w\hat q(S,A;w)$，其余照旧。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 200" role="img" aria-label="表格法只改一格，函数逼近会改动一片状态动作对的估计">
+        <text x="20" y="20" class="val-b">表格：只改一格</text>
+        <rect x="20" y="40" width="40" height="28" class="box"/><rect x="66" y="40" width="40" height="28" class="box"/>
+        <rect x="112" y="40" width="40" height="28" class="box"/><rect x="158" y="40" width="40" height="28" class="box"/>
+        <rect x="20" y="74" width="40" height="28" class="box"/><rect x="66" y="74" width="40" height="28" class="box-a"/>
+        <rect x="112" y="74" width="40" height="28" class="box"/><rect x="158" y="74" width="40" height="28" class="box"/>
+        <rect x="20" y="108" width="40" height="28" class="box"/><rect x="66" y="108" width="40" height="28" class="box"/>
+        <rect x="112" y="108" width="40" height="28" class="box"/><rect x="158" y="108" width="40" height="28" class="box"/>
+        <text x="66" y="92" class="val">改</text>
+        <text x="20" y="160" class="lbl">其余格子一个也不动</text>
+        <path d="M226 88 H262" class="arrow-a"/>
+        <path d="M256 84 l9 4 l-9 4" class="arrow-a"/>
+
+        <text x="286" y="20" class="val-b">函数逼近：一片一起改</text>
+        <rect x="286" y="40" width="40" height="28" class="box-a"/><rect x="332" y="40" width="40" height="28" class="box-a"/>
+        <rect x="378" y="40" width="40" height="28" class="box-a"/><rect x="424" y="40" width="40" height="28" class="box-a"/>
+        <rect x="286" y="74" width="40" height="28" class="box-a"/><rect x="332" y="74" width="40" height="28" class="box-a"/>
+        <rect x="378" y="74" width="40" height="28" class="box-a"/><rect x="424" y="74" width="40" height="28" class="box-a"/>
+        <rect x="286" y="108" width="40" height="28" class="box-a"/><rect x="332" y="108" width="40" height="28" class="box-a"/>
+        <rect x="378" y="108" width="40" height="28" class="box-a"/><rect x="424" y="108" width="40" height="28" class="box-a"/>
+        <text x="286" y="160" class="lbl">改动量由特征决定，大的改得多</text>
+        <text x="286" y="178" class="lbl">这就是泛化，也是分析变难的原因</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 24.1</span>
+        表格法的更新是局部的，动一格不影响别人。函数逼近的更新是全局的：一次更新按特征大小分摊到许多状态动作对上，
+        分摊对了就是泛化（在没见过的状态上也能给出靠谱的估计），分摊错了会把已经学对的估计一起带偏。这个差别是后面所有麻烦的源头。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 函数逼近下的 Sarsa</h2>
+    <p>先把 Sarsa 的表格更新摆出来。每一步走到 $(S,A)$，拿到奖励 $R$，跳到 $S'$，按同一套策略（一套"看到什么状态就选什么动作"的规则）选出下一个动作 $A'$，
+      表格更新是 $q(S,A)\leftarrow q(S,A)+\alpha\big[R+\gamma q(S',A')-q(S,A)\big]$，
+      式中 $\alpha$ 是学习率（每次更新时，往新信息的方向挪多远），$\gamma$ 是折扣因子（越往后的奖励，算进总分时权重越小）。
+      把 $q$ 换成 $\hat q(\cdot,\cdot;w)$，就得到下面这条。</p>
+    <div class="def">
+      <span class="label">定义 2.1（函数逼近下的 Sarsa）</span>
+      <p>每一步按当前策略选动作，得到 $(S,A,R,S',A')$，记 TD 误差（时序差分误差，用走一步之后的新估计减去当前的估计）为</p>
+      <div class="eq">
+        <span class="eq-body">$$\delta=R+\gamma\,\hat q(S',A';w)-\hat q(S,A;w)$$</span>
+        <span class="eq-num">(24.1)</span>
+      </div>
+      <p>再按半梯度（更新时只对预测的那部分求梯度，对目标那部分当常数看）方向改参数</p>
+      <div class="eq">
+        <span class="eq-body">$$w\leftarrow w+\alpha\,\delta\,\nabla_w\hat q(S,A;w)$$</span>
+        <span class="eq-num">(24.2)</span>
+      </div>
+      <p>式中 $S'$ 是下一步状态，$A'$ 是下一步按同一套策略选出的动作。产生数据的策略就是正在学的那套，
+        所以这是同策略算法。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（式 (24.2) 是半梯度）</span>
+      <p>思路：写出目标函数，求一次真实梯度，再对照半梯度。
+        取目标函数 $J(w)=\E\big[\big(R+\gamma\hat q(S',A';w)-\hat q(S,A;w)\big)^2\big]$，
+        它与上一课的时序差分目标是同一个构造，只是把状态换成了状态动作对。
+        按上一课定理 4.2 的做法对固定的 $s,a,r,s',a'$ 求导，链式法则给出
+        $$\nabla_w\big[\delta(w)^2\big]=2\delta(w)\big(\gamma\nabla_w\hat q(s',a';w)-\nabla_w\hat q(s,a;w)\big).$$
+        取期望后，式 (24.2) 用的是去掉目标那一项之后的版本：
+        $$\E\big[2\delta(w)\nabla_w\hat q(S,A;w)\big].$$
+        被丢掉的那一项来自目标里的参数，所以式 (24.2) 是一次半梯度更新，而不是某个目标的真实梯度。
+        这一步的计算与上一课完全一样，唯一的新内容是预测项从 $\hat v(S;w)$ 换成了 $\hat q(S,A;w)$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 2.2（线性逼近下把式 (24.2) 写开）</span>
+      <p>取 $\hat q(s,a;w)=\phi(s,a)^Tw$，式中 $\phi(s,a)$ 是特征向量，也就是把状态动作对加工出来的一组数字。
+        因为 $\nabla_w\hat q(s,a;w)=\phi(s,a)$，式 (24.2) 变成
+        $$w\leftarrow w+\alpha\,\delta\,\phi(S,A),$$
+        与上一课式 (23.7) 的形状一样。注意所有状态动作对共用同一组 $w$：
+        更新 $(S,A)$ 会按 $\phi(S,A)$ 与别的 $\phi(s,a)$ 的接近程度，连带改动那些估计。
+        特征的构造决定了这种连带关系：把 $\phi$ 取成"当前格子到目标的距离"，附近的格子就会一起被改动。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.3（同策略意味着什么）</span>
+      <p>"同策略"说的是边学的那套策略就是正在用来产生数据的那套。它带来一个好处，
+        训练时的数据分布（你手头这批数据是什么样的、偏向哪些情况）与要评估的目标一致，上一课讲的三根支柱里"固定数据分布"那一根还能立住。
+        Sarsa 因此在函数逼近下仍有一份完整的收敛（一轮轮算下去，数值不再明显变化，稳定下来了）结论可用。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 函数逼近下的 Q-learning</h2>
+    <p>Q-learning 的表格更新与 Sarsa 只差一处：下一个动作不按当前策略选，直接取让动作价值最大的那个。
+      $$q(S,A)\leftarrow q(S,A)+\alpha\big[R+\gamma\max_{a'}q(S',a')-q(S,A)\big].$$
+      换成函数之后，只有"取最大"这一步照旧，参数更新照抄 Sarsa 的形状。</p>
+    <div class="def">
+      <span class="label">定义 3.1（函数逼近下的 Q-learning）</span>
+      <p>每一步按行为策略选动作，得到 $(S,A,R,S')$，记</p>
+      <div class="eq">
+        <span class="eq-body">$$\delta=R+\gamma\max_{a'}\hat q(S',a';w)-\hat q(S,A;w)$$</span>
+        <span class="eq-num">(24.3)</span>
+      </div>
+      <p>再更新参数</p>
+      <div class="eq">
+        <span class="eq-body">$$w\leftarrow w+\alpha\,\delta\,\nabla_w\hat q(S,A;w)$$</span>
+        <span class="eq-num">(24.4)</span>
+      </div>
+      <p>式中 $\max_{a'}$ 表示在所有可选动作里挑最大的那个估计值。式中 $S'$ 是下一步状态，
+        行为策略是采集数据时用的那套规则，它可以与正在学的最优策略不同。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="Sarsa 用行为策略选出的下一个动作，Q-learning 用最大值">
+        <text x="20" y="20" class="val-b">Sarsa：下一个动作由策略给出</text>
+        <rect x="20" y="40" width="76" height="40" class="box"/><text x="30" y="65" class="val">s, a</text>
+        <path d="M96 60 H150" class="arrow"/>
+        <path d="M144 56 l9 4 l-9 4" class="arrow"/>
+        <rect x="152" y="40" width="76" height="40" class="box-a"/><text x="160" y="58" class="val">s', a'</text>
+        <text x="160" y="74" class="lbl">策略挑的</text>
+        <text x="240" y="65" class="lbl">估计值直接进目标</text>
+
+        <line x1="20" y1="100" x2="520" y2="100" class="grid"/>
+
+        <text x="20" y="126" class="val-b">Q-learning：下一个动作取最大值</text>
+        <rect x="20" y="146" width="76" height="40" class="box"/><text x="30" y="171" class="val">s, a</text>
+        <path d="M96 166 H150" class="arrow"/>
+        <path d="M144 162 l9 4 l-9 4" class="arrow"/>
+        <rect x="152" y="130" width="86" height="26" class="box-a"/><text x="158" y="148" class="lbl">s', a₁</text>
+        <rect x="152" y="160" width="86" height="26" class="box-a"/><text x="158" y="178" class="lbl">s', a₂</text>
+        <rect x="152" y="190" width="86" height="26" class="box-a"/><text x="158" y="208" class="lbl">s', a₃</text>
+        <path d="M276 166 H300" class="arrow-a"/>
+        <path d="M294 162 l9 4 l-9 4" class="arrow-a"/>
+        <text x="288" y="152" class="lbl">max</text>
+        <text x="316" y="160" class="lbl">挑最大的那个</text>
+        <text x="316" y="178" class="lbl">与行为策略无关</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 24.2</span>
+        Sarsa 的目标里用的是行为策略实际选出的下一个动作，所以目标带着行为策略的印记，学的就是它。
+        Q-learning 的目标里用最大值，把"下一步会怎么走"这件事替换成"下一步最好能有多好"，
+        于是学的对象脱离了行为策略，行为策略只负责提供数据。这一个 max 就是异策略的来源。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 3.2（一个 max 带来的身份变化）</span>
+      <p>Sarsa 的更新式里出现 $A'$，它是行为策略采出来的；Q-learning 的更新式里出现的是 $\max_{a'}$，
+        没有任何来自行为策略的动作。对同一批数据 $(S,A,R,S')$，无论数据由哪套策略产生，
+        Q-learning 算出的更新量都一样，所以它可以拿旧策略的数据学当前的最优策略。
+        这与 0022 课讲表格 Q-learning 时的结论一致，换成函数逼近并不改变这一点。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.3（线性逼近下的两个更新并排看）</span>
+      <p>取 $\hat q(s,a;w)=\phi(s,a)^Tw$，两套算法的更新式分别是
+        $$w\leftarrow w+\alpha\,\delta_{\text{Sarsa}}\,\phi(S,A),\qquad
+          w\leftarrow w+\alpha\,\delta_{\text{Q}}\,\phi(S,A),$$
+        其中 $\delta_{\text{Sarsa}}=R+\gamma\,\phi(S',A')^Tw-\phi(S,A)^Tw$，
+        $\delta_{\text{Q}}=R+\gamma\max_{a'}\phi(S',a')^Tw-\phi(S,A)^Tw$。
+        两者的差别只在 $\delta$ 上，参数更新完全一样。这说明"是哪种算法"这件事，
+        在函数逼近下全部压在 TD 误差上。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.4（max 会带来系统性偏高）</span>
+      <p>$\max_{a'}$ 取的是估计值里的最大者。估计本身带噪声时，被挑中的那个往往正好被噪声抬高了，
+        于是目标偏大，学出来的价值整体偏高。这个系统性偏高叫最大化偏差（因为总取最大值而整体偏高），
+        它在 0025 课会有专门的修正手段。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 致命三元组</h2>
+    <p>到这里可以把上一课留下的那句话讲完了。有三个东西同时出现时，参数可能一路发散，
+      任何步长都救不回来。它们各有名字。</p>
+    <div class="def">
+      <span class="label">定义 4.1（致命三元组的三块积木）</span>
+      <p>函数逼近：估计值由一个参数个数远小于状态数的函数给出。</p>
+      <p>自举，意思是：用自己当前的估计去更新自己当前的估计。</p>
+      <p>异策略：边学的那套策略不是产生数据的那套。</p>
+    </div>
+    <div class="thm">
+      <span class="label">命题 4.2（致命三元组）</span>
+      <p>函数逼近、自举、异策略三者同时具备时，参数更新可能发散，即 $\|w_t\|\to\infty$；
+        三者缺一，通常仍有收敛结论可用。这个组合叫致命三元组。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（发散的机制，在线性逼近下）</span>
+      <p>思路：把半梯度时差分的参数迭代写成线性递推，再看它的系数矩阵什么时候会让参数放大。
+        取线性逼近 $\hat q(s,a;w)=\phi(s,a)^Tw$，并假定采样分布固定为 $d$。
+        把式 (24.4) 取期望，得到
+        $$w_{t+1}=w_t+\alpha\,\E_d\big[\delta_t\,\phi(S,A)\big],$$
+        其中 $\delta_t=R+\gamma\max_{a'}\phi(S',a')^Tw_t-\phi(S,A)^Tw_t$。
+        把 $\delta_t$ 里的 $w_t$ 提出来，整理成 $w_{t+1}=(I+\alpha M)w_t+\alpha b$ 的形状，
+        其中 $b=\E_d[R\,\phi(S,A)]$，而
+        $$M=\E_d\big[\phi(S,A)\big(\gamma\,\phi(S',a^*)^{\!T}-\phi(S,A)^T\big)\big],$$
+        式中 $a^*$ 是使 $\phi(S',a')^Tw_t$ 最大的动作，它随 $w_t$ 变化，让 $M$ 更难对付。
+        迭代是否发散取决于 $I+\alpha M$ 的特征值：只要有某个特征值的模大于 $1$，$w_t$ 就会沿这个方向被放大。
+        这个矩阵在这里只是"把误差搬回参数"的通道，它前面的系数矩阵并不保证稳定。
+        异策略的作用是让采样分布 $d$ 与目标策略不一致：$d$ 偏向行为策略常去的状态，
+        而 $b$ 与 $M$ 里的项由目标策略决定，两边错配时这个通道的增益可以大于 1。
+        自举的作用是让误差通过 $M$ 里的 $\gamma\phi(S',a^*)^T$ 回流到参数上，形成正反馈。
+        三条通路可以逐条看出缺一不可：没有函数逼近就没有参数化的 $M$ 可谈，更新退回逐格修正；
+        没有自举则目标里不含 $w_t$，$M=0$，误差不会绕回参数；
+        没有异策略则 $d$ 与被估对象一致，此时可以证明这个通道的增益落在稳定范围内
+        （这一步是引用，见注记 4.3）。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.3（这条命题的严格版本是引用）</span>
+      <p>上面给出的是机制，不是一般性的定理。严格的反例由 Baird 在 1995 年给出：
+        一个只有两个状态、线性逼近、查表可解的问题上，异策略的半梯度时差分方法让参数发散。
+        线性逼近下异策略的稳定条件由 Tsitsiklis 与 Van Roy 在 1997 年分析清楚，
+        归结为"采样分布与投影所用的分布必须一致"。
+        这里把这两条当引用使用，只用它们说明：致命三元组的危险是真实的，不是数值误差。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 320" role="img" aria-label="函数逼近、自举、异策略三个要素同时出现会发散">
+        <circle cx="260" cy="70" r="52" class="box-a"/>
+        <text x="228" y="66" class="val">函数逼近</text>
+        <text x="228" y="86" class="lbl">参数代替表格</text>
+        <circle cx="150" cy="220" r="52" class="box-a"/>
+        <text x="124" y="216" class="val">自举</text>
+        <text x="112" y="236" class="lbl">目标含估计</text>
+        <circle cx="370" cy="220" r="52" class="box-a"/>
+        <text x="344" y="216" class="val">异策略</text>
+        <text x="330" y="236" class="lbl">学与采样分开</text>
+        <line x1="228" y1="112" x2="180" y2="176" class="axis-b"/>
+        <line x1="292" y1="112" x2="340" y2="176" class="axis-b"/>
+        <line x1="196" y1="238" x2="322" y2="238" class="axis-b"/>
+        <text x="184" y="300" class="val-b">三者齐备 → 更新可能发散</text>
+        <text x="184" y="318" class="lbl">去掉任一条，通常还有收敛结论</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 24.3</span>
+        三个要素两两之间都有通路：函数逼近让更新全局化，自举让误差回流，异策略让采样分布与学习目标错配。
+        三条通路同时开着，误差就能绕回参数上并越放越大。抽掉任意一条，回路断开，通常就还能收敛。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 4.4（Q-learning 正好三者齐备）</span>
+      <p>Q-learning 用的估计是带参数的函数，满足第一条；目标里含 $\max_{a'}\hat q(S',a';w)$，满足第二条；
+        更新式不含行为策略的动作，因此可以用任意行为策略产生数据，满足第三条。
+        三条全中，所以函数逼近下的 Q-learning 没有一般的收敛保证。
+        Sarsa 用的是同一类估计、同样自举，但它的目标里含行为策略选出的动作，属于同策略，少了第三条。
+        很多教材因此建议：用函数逼近加自举时，先考虑同策略算法。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="Q-learning 与 Sarsa 在三要素上的对照">
+        <text x="20" y="24" class="val-b">三个要素的对照</text>
+        <text x="180" y="24" class="val-b">Q-learning</text>
+        <text x="360" y="24" class="val-b">Sarsa</text>
+
+        <text x="20" y="64" class="val">函数逼近</text>
+        <rect x="180" y="48" width="140" height="24" class="box-a"/><text x="238" y="65" class="val">有</text>
+        <rect x="360" y="48" width="140" height="24" class="box-a"/><text x="418" y="65" class="val">有</text>
+
+        <text x="20" y="108" class="val">自举</text>
+        <rect x="180" y="92" width="140" height="24" class="box-a"/><text x="238" y="109" class="val">有</text>
+        <rect x="360" y="92" width="140" height="24" class="box-a"/><text x="418" y="109" class="val">有</text>
+
+        <text x="20" y="152" class="val">异策略</text>
+        <rect x="180" y="136" width="140" height="24" class="box-a"/><text x="238" y="153" class="val">有</text>
+        <rect x="360" y="136" width="140" height="24" class="box"/><text x="418" y="153" class="val">无</text>
+
+        <text x="20" y="196" class="lbl">结论</text>
+        <text x="180" y="196" class="lbl">三要素齐备，无一般收敛保证</text>
+        <text x="180" y="214" class="lbl">需要额外手段稳住训练</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 24.4</span>
+        两套算法在前两条上完全一样，区别只在第三条。Q-learning 的目标与行为策略无关，
+        因此天然支持异策略，也就必然踩中致命三元组。这张表解释了为什么"能复用旧数据"这个优点，
+        在换成函数逼近之后要付代价。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. 实践中怎么把它稳住</h2>
+    <p>理论上没有一般收敛保证，不代表这类算法不能用。工程上一整套手段都在做同一件事：
+      把致命三元组里最活跃的那条通路压一压，让误差别放大得那么快。下面逐个说明它们各自压的是哪一条。</p>
+    <div class="def">
+      <span class="label">定义 5.1（另存一份算目标）</span>
+      <p>目标网络是另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑。
+        把它写进更新式：让 $w$ 负责预测，让另一组参数 $w^-$ 负责算目标，
+        $$\delta=R+\gamma\max_{a'}\hat q(S',a';w^-)-\hat q(S,A;w),$$
+        更新只改 $w$，每隔固定步数执行一次 $w^-\leftarrow w$。
+        它压的是自举那条通路：目标在两次同步之间不再随 $w$ 变，正反馈被截断成有限长的链条。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 5.2（从池子里抽样）</span>
+      <p>经验回放是把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用。
+        它压的是数据分布那条通路：随机抽样让相邻两步之间的相关性被打散，
+        同一批数据里各个状态动作对近似独立，$M$ 里的期望更接近一个稳定的量。
+        抽样的均匀性还让稀缺的状态动作对有机会被反复用到，数据效率跟着提高。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.3（还有几种常见手段）</span>
+      <p>双 Q（用两套估计分别负责"挑动作"和"打分"，压住总是高估的毛病）针对的是
+        $\max$ 带来的最大化偏差。学习率调小、把梯度的模长截断到上限，压的是单步更新幅度。
+        把特征归一化到量级相近，压的是 $M$ 里各方向量级悬殊导致的条件数问题。
+        这些手段可以叠加使用，但都不能改变"三要素齐备时没有一般保证"这个事实。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 230" role="img" aria-label="误差回流到参数的回路被目标网络与经验回放各自削弱">
+        <rect x="24" y="24" width="150" height="42" class="box-a"/>
+        <text x="42" y="50" class="val">参数 w 更新</text>
+        <path d="M174 45 H250" class="arrow-a"/>
+        <path d="M244 41 l9 4 l-9 4" class="arrow-a"/>
+        <rect x="254" y="24" width="150" height="42" class="box-a"/>
+        <text x="272" y="50" class="val">估计 q(s, a; w)</text>
+        <path d="M404 45 H470 V150 H200 V120" class="arrow"/>
+        <path d="M196 126 l4 -9 l5 8" class="arrow"/>
+        <text x="410" y="120" class="lbl">误差经目标回流</text>
+
+        <rect x="24" y="110" width="168" height="46" class="box"/>
+        <text x="38" y="130" class="val">目标网络 w⁻</text>
+        <text x="38" y="148" class="lbl">隔一阵同步，截断回流</text>
+
+        <rect x="24" y="176" width="168" height="46" class="box"/>
+        <text x="38" y="196" class="val">经验回放池</text>
+        <text x="38" y="214" class="lbl">随机抽样，打散相关性</text>
+
+        <line x1="200" y1="133" x2="250" y2="133" class="arrow-a"/>
+        <path d="M244 129 l9 4 l-9 4" class="arrow-a"/>
+        <line x1="200" y1="199" x2="250" y2="199" class="arrow-a"/>
+        <path d="M244 195 l9 4 l-9 4" class="arrow-a"/>
+        <text x="266" y="138" class="lbl">目标更稳，更新更小</text>
+        <text x="266" y="204" class="lbl">一批样本进更新式</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 24.5</span>
+        误差从估计回流到参数本来构成一个闭环，闭环的放大倍数由系数矩阵决定。
+        目标网络在回路上插一个"更新较慢的副本"，把闭环截成有限长的链条；
+        经验回放改变进入回路的样本分布，让每一步更新看到的状态动作对更接近独立同分布。
+        两条手段都是削弱，不是消除。下一课会把它们装进一个具体算法里。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 5.4（为什么下一课要讲 DQN）</span>
+      <p>把 Q-learning 配上参数化的动作价值、目标网络与经验回放，就得到 DQN。
+        它没有在理论上补好收敛证明，靠的是用工程手段把致命三元组的破坏力压到可用的水平。
+        下一课会写出它的损失函数、训练循环，并说明它在简单任务上的表现。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>函数逼近下的 Sarsa 与 Q-learning 都用 TD 误差乘梯度更新参数，见式 (24.2) 与式 (24.4)。</li>
+      <li>线性逼近时梯度就是特征向量，更新式变成 $w\leftarrow w+\alpha\delta\phi(S,A)$，所有状态动作对共用一组参数。</li>
+      <li>两者只差目标里的下一动作：Sarsa 用行为策略选的 $A'$，Q-learning 用 $\max_{a'}$，这一个 max 让 Q-learning 成为异策略算法。</li>
+      <li>函数逼近、自举、异策略同时出现就是致命三元组，参数可能发散，Q-learning 三条全中。</li>
+      <li>目标网络削弱自举的正反馈，经验回放打散数据相关性，双 Q 修正最大化偏差，这些都是削弱而不是消除。</li>
+    </ul>
+    <p>下一课把 Q-learning、目标网络与经验回放装进一个算法：DQN。那里会写出它的损失函数与训练循环，
+      并说明它为什么能在状态多得记不下的任务上跑起来。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 判断一套算法是同策略还是异策略，看下面哪一条最准确？</p>
+      <ol class="mcq-options">
+        <li>看它更新的是哪一类估计值</li>
+        <li>看产生数据的策略是不是要学的那套</li>
+        <li>看它的目标里有没有出现取最大值的操作</li>
+        <li>看它的参数是用梯度更新还是直接赋值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：同策略与异策略的区别在数据从哪来。数据由要学的那套策略产生就是同策略，
+          由另一套产生就是异策略。</p>
+        <p>A 错在更新对象与这个划分无关。C 错在取最大值只是导致异策略的一个常见原因，
+          不是判据本身。D 错在参数更新方式与数据来源是两件事。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. Q-learning 的更新式里，$\max_{a'}$ 起的作用是什么？</p>
+      <ol class="mcq-options">
+        <li>把所有动作的估计值都抬高一点点，便于探索</li>
+        <li>从行为策略里挑出概率最大的那个动作</li>
+        <li>把 TD 误差限制在一个固定的范围内，防止震荡</li>
+        <li>直接取最大的估计当目标，与行为策略无关</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\max_{a'}\hat q(S',a';w)$ 取的是下一步所有动作估计里的最大值，
+          它只依赖参数，不依赖行为策略选了什么。</p>
+        <p>A 错在取最大值不是抬高估计，虽然它会带来系统性偏高。B 错在它取的是估计值最大的动作，
+          与行为策略的概率无关。C 错在限制幅度是梯度截断那类手段做的事。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 式 (24.2) 为什么不等于 Sarsa 目标的真实梯度？</p>
+      <ol class="mcq-options">
+        <li>目标里含参数，而更新时把这一项的导数丢掉了</li>
+        <li>因为学习率每次都在变，梯度方向跟着改变</li>
+        <li>因为状态动作对是采样得到的，期望算不准</li>
+        <li>因为动作价值对参数不可微，只能近似处理</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：真实梯度里含 $\gamma\nabla_w\hat q(S',A';w)$ 这一项，来源就是目标里的参数。
+          半梯度把它当作常数，于是更新式只剩预测那一项的导数。</p>
+        <p>B 错在学习率的大小不改变"是不是梯度"这件事。C 错在采样带来的是估计误差，
+          用样本近似梯度仍然是梯度。D 错在动作价值对参数可微。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 下面哪种情形会让线性逼近下的参数迭代发散？</p>
+      <ol class="mcq-options">
+        <li>同策略采样，且特征向量线性无关</li>
+        <li>每步都用新采的样本更新，步长恒定</li>
+        <li>异策略采样，且系数矩阵有模大于 1 的特征值</li>
+        <li>把奖励归一化到零附近，重新跑一遍</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：参数迭代是 $w_{t+1}=(I+\alpha M)w_t+\alpha b$ 的形状。
+          只要有特征值的模大于 1，对应的方向就会被一步步放大。</p>
+        <p>A 是收敛结论成立的条件之一。B 只描述采样与步长，本身不导致发散。
+          D 是常见的数值处理，不改变迭代的稳定性。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 线性逼近取 $\phi(s,a)=(1,2)^T$，三个状态动作对共用这组特征。
+        更新其中一个、参数改动量为 $\alpha\delta(1,2)^T$ 时，另外两个的估计会怎样？</p>
+      <ol class="mcq-options">
+        <li>完全不受影响，因为它们的特征与这一个无关</li>
+        <li>按同样的量变化，因为三个状态动作对共用参数</li>
+        <li>变化量是这一个的两倍，因为一共三对平均分摊</li>
+        <li>无法判断，要先知道三个状态动作对的访问次数</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：估计值等于特征与参数的乘积。三个状态动作对的特征相同，参数一改，
+          三处的估计值按同一公式变化。</p>
+        <p>A 描述的是表格法的局部更新。C 错在更新量不会因为共用的数量而按倍数变化。
+          D 错在访问次数影响学习效果，不影响这一步的代数结果。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">6. 下面哪一项属于目标网络做的事情？</p>
+      <ol class="mcq-options">
+        <li>把每一步经历都存起来，供以后重复使用</li>
+        <li>用两套估计分别负责挑动作和给动作打分</li>
+        <li>另存一份较旧的参数专门用来算目标，隔一阵同步</li>
+        <li>把参数更新的步长按误差大小自动缩小</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：目标网络就是另存一份"稍旧"的参数算目标，隔固定步数才同步一次，
+          让目标在两次同步之间不跟着预测动。</p>
+        <p>A 描述的是经验回放。B 描述的是双 Q。D 描述的是自适应步长那类做法。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 在同一个批数据上反复训练很多轮，为什么容易出问题？</p>
+      <ol class="mcq-options">
+        <li>因为样本会被逐渐遗忘，缓冲区里的旧数据被覆盖</li>
+        <li>因为反复训练会让特征的量级越来越小，梯度消失</li>
+        <li>因为同一批数据只覆盖部分动作，最大值取不准</li>
+        <li>因为数据分布被反复使用而失去新样本带来的纠偏</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：异策略方法靠持续采集新数据把估计拉回目标策略对应的分布。
+          反复用同一批数据时，更新在这批样本上自我强化，缺乏新样本的纠偏。</p>
+        <p>A 错在覆盖是缓冲区容量造成的，与反复训练无关。B 错在特征量级由特征设计决定。
+          C 错在覆盖动作不全与训练轮数没有必然关系。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. 某状态下动作 $a$ 的估计比目标大，走一步之后更新量 $\delta$ 的符号与效果是？</p>
+      <ol class="mcq-options">
+        <li>$\delta>0$，参数朝增大该状态动作对估计的方向移动</li>
+        <li>$\delta<0$，参数朝减小该状态动作对估计的方向移动</li>
+        <li>$\delta=0$，因为估计与目标之间的差距会被抵消</li>
+        <li>符号无法判断，要先知道特征向量的符号模式</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\delta$ 是目标减去当前估计。估计比目标大时 $\delta<0$，
+          更新 $w\leftarrow w+\alpha\delta\nabla_w\hat q$ 沿负梯度走，把这个估计压下来。</p>
+        <p>A 把符号说反了。C 错在只有估计恰好等于目标时 $\delta$ 才为零。
+          D 错在符号只由目标与估计的大小关系决定，特征影响的是更新方向与幅度。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">9. 同策略的 Sarsa 在函数逼近下仍有一份完整的收敛结论，主要靠哪个条件？</p>
+      <ol class="mcq-options">
+        <li>产生数据的分布与要评估的目标保持一致</li>
+        <li>它的更新式里不含取最大值的操作</li>
+        <li>它的学习率可以取得比异策略方法更大</li>
+        <li>它的特征向量一定是线性无关的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：同策略让采样分布与被估对象对应的分布一致，上一课讲的"固定数据分布"这根支柱还能立住，
+          压缩性论证才有落脚点。</p>
+        <p>B 只是没有取最大值，那本身不构成收敛理由。C 与收敛结论无关，步长条件另有规定。
+          D 是需要另外假定的条件，不是同策略自动带来的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">10. 下面关于稳定手段的说法，哪一个是对的？</p>
+      <ol class="mcq-options">
+        <li>目标网络能让函数逼近下的 Q-learning 获得一般收敛保证</li>
+        <li>经验回放会加快误差回流，所以必须配合更小的学习率</li>
+        <li>这些手段削弱发散的通路，但不改变收敛保证缺失的事实</li>
+        <li>只要特征线性无关，致命三元组就不再构成威胁</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：目标网络与经验回放都是工程上的削弱手段，让训练在更多问题上能跑起来，
+          它们没有把"三要素齐备时没有一般保证"这条改掉。</p>
+        <p>A 错在一般收敛保证至今没有。B 错在经验回放的作用是打散相关性，不是加快回流。
+          D 错在特征线性无关是收敛结论的条件之一，消不掉异策略带来的错配。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 8 章第 3 节。这里的 Sarsa 与 Q-learning 更新式、致命三元组的提法与该节一致。</p>
+      <p>致命三元组的说法来自 R. Sutton 与 A. Barto,
+        <em>Reinforcement Learning: An Introduction</em> 第 2 版第 11 章。
+        异策略发散的反例见 L. Baird, <em>Residual Algorithms: Reinforcement Learning with Function
+        Approximation</em>, 1995；稳定条件的分析见 J. Tsitsiklis 与 B. Van Roy（1997）。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "用 Baird 的反例讲一遍异策略为什么会发散"，
+      或者 "目标网络隔多少步同步一次比较合适，同步太慢会怎样？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

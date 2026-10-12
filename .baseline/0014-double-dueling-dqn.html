@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0014 · Double DQN 与 Dueling DQN — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="0014" data-slug="double-dueling-dqn" data-part="第三部分 · 深度价值方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第 14 课 · 第三部分 · 深度价值方法</p>
+    <h1>Double DQN 与 Dueling DQN</h1>
+    <p class="lede"><a href="0013-dqn.html">0013 课</a>的 DQN 留下两个毛病：Q 值系统性偏大，
+      动作差别小时样本浪费。这一节给出对应的两个改动，读完你能说清哪个改动修哪个毛病，
+      在自己的训练里也知道先开哪一个。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 Double DQN 的目标，并解释"用 A 选动作、用 B 评估"为什么能缓解过估计</li>
+        <li>能写出 Dueling 的聚合公式，并说清"减优势均值"那一步在解决什么</li>
+        <li>能按症状判断该加 Double 还是换 Dueling，并知道它们为什么可以叠加</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>DQN 留下的两个毛病</h2>
+    <p>DQN 能训起来，但 Q 值经常系统性偏大：在随机性强的环境里，
+      学到的 Q 能比真实回报高出好几倍。策略只关心 arg max，偏差一旦集中在某几个动作上，
+      选出来的动作就变差。</p>
+    <p>第二个毛病更隐蔽。网络对每个动作各输出一个 Q，参数全用在"比较动作"上，
+      没有一条通路回答"这个状态本身值多少"。可很多状态里动作差别很小，
+      比如路上没车时往左往右都行。让每个动作的 Q 各自学一遍"这个状态还行"，是纯粹的样本浪费。</p>
+  </section>
+
+  <section>
+    <h2>Double DQN：把"选动作"和"评动作"分开</h2>
+    <p>过估计的根源是 max。设想所有动作的真实价值都是 0，但我们的估计带着噪声；
+      对每个动作取 max 时，被选中的往往是<strong>噪声恰好偏正</strong>的那一个，未必是最好的那个。
+      用数学说就是 <span class="math">𝔼[ max<sub>a</sub> Q(s,a) ] ≥ max<sub>a</sub> 𝔼[ Q(s,a) ]</span>，
+      而且这个偏差会被自举一次次放大。</p>
+    <p>标准 DQN 的目标里，挑动作和给价值用的是同一组参数
+      <span class="math">φ<sup>−</sup></span>（φ 是网络参数）：</p>
+    <div class="eq">
+      <span class="eq-body">y = r + γ max<sub>a′</sub> Q(s′, a′; φ<sup>−</sup>)</span>
+      <span class="eq-num">(14.1)</span>
+    </div>
+    <p>式中 γ（折扣因子）给未来奖励打折，r 是即时奖励。</p>
+    <p><span class="term">Double DQN（double deep Q-network）</span>把这两件事拆给两个网络：
+      用在线网络 <var>φ</var> 挑动作，用目标网络
+      <span class="math">φ<sup>−</sup></span> 给这个动作打分。</p>
+    <div class="eq">
+      <span class="eq-body">a* = arg max<sub>a′</sub> Q(s′, a′; φ)，&nbsp;&nbsp; y = r + γ Q(s′, a*; φ<sup>−</sup>)</span>
+      <span class="eq-num">(14.2)</span>
+    </div>
+    <p>直觉是：噪声要同时骗过两个互相独立的估计，难得多。这个方法来自 van Hasselt 等人的
+      <a class="cite" href="https://arxiv.org/abs/1509.06461">Double Q-learning 论文（arXiv 1509.06461）</a>，
+      在 DQN 上只改了目标公式，多算一次 arg max，几乎零成本。</p>
+    <div class="note">
+      <p>别夸大它：Double DQN 只是缓解，不是消除。在线网络自己还没学好时，
+        挑出的动作本来就不靠谱，收益有限；两个网络都低估时，它也无能为力。
+        但"便宜且通常不亏"这三点加起来，足够让它成为默认配置。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Dueling：把 Q 拆成状态价值加优势</h2>
+    <p><span class="term">优势函数（advantage function）</span>衡量"在 <var>s</var> 做 <var>a</var>
+      比按策略平均好多少"，记作 <span class="math">A(s,a) = Q(s,a) − V(s)</span>
+      （见<a href="../reference/notation.html">符号表</a>与
+      <a href="../reference/glossary.html">术语表</a>）。反过来说，
+      <span class="math">Q(s,a) = V(s) + A(s,a)</span>。</p>
+    <p><span class="term">Dueling DQN</span> 把这个分解搬进网络结构：共享的特征层之后分出两条支路，
+      一条输出标量 <var>V</var>(<var>s</var>)，一条输出向量 <var>A</var>(<var>s</var>,·)，
+      再合并成 Q。但直接相加有个问题：把 <var>V</var> 和 <var>A</var> 同时加一个常数、
+      再减一个常数，Q 完全不变，损失函数分不出这份价值该记在谁头上，这叫不可辨识。
+      解决办法是强制优势均值为 0：</p>
+    <div class="eq">
+      <span class="eq-body">Q(s, a) = V(s) + A(s, a) − (1 / |A|) Σ<sub>a′</sub> A(s, a′)</span>
+      <span class="eq-num">(14.3)</span>
+    </div>
+    <p>减掉的是这一行优势的均值，也就是对每个动作减同一个数，各动作 Q 的
+      <strong>相对大小不变，arg max 不变</strong>。从此 <var>V</var> 专门承担状态的基准价值，
+      <var>A</var> 只描述相对好坏。在动作效果差不多的状态里，
+      <var>V</var> 支路一次就能把"这状态不错"学到位，不必等每个动作的 Q 分别收敛。</p>
+    <p>这个结构出自 Wang 等人的
+      <a class="cite" href="https://arxiv.org/abs/1511.06581">Dueling Network Architectures（arXiv 1511.06581）</a>。
+      原文还给了把均值换成最大值的变体，性质类似，实践中用均值更常见。</p>
+  </section>
+
+  <section>
+    <h2>两者各修什么，怎么组合</h2>
+    <table>
+      <thead><tr><th>改进</th><th>改的地方</th><th>解决的问题</th><th>代价</th></tr></thead>
+      <tbody>
+        <tr><td>Double DQN</td><td>目标 <var>y</var> 的算法</td>
+          <td>max 带来的过估计</td><td>每次多一次 arg max，几乎为零</td></tr>
+        <tr><td>Dueling DQN</td><td>网络结构与聚合公式</td>
+          <td>动作差别不大时的样本浪费</td><td>多一条 V 支路，必须做中心化</td></tr>
+      </tbody>
+    </table>
+    <p>两者正交：一个改损失里的目标，一个改网络输出的形状，可以同时打开，也能和
+      <a href="../reference/algorithms.html#alg-dqn">经验回放、目标网络</a>任意搭配。
+      再往上叠优先回放（<a href="0015-prioritized-replay.html">0015 课</a>）与分布式价值
+      （<a href="0016-rainbow-distributional.html">0016 课</a>），就是 Rainbow。
+      但组合时要<strong>一次只加一个并做消融</strong>：同时改三处，出了问题无法归因，
+      也不知道该回退哪一个。</p>
+    <p>Lilian Weng 的
+      <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">DQN 变体综述</a>
+      把这一族改进按"改目标 / 改结构 / 改采样"分了类，可以在决定加哪个组件前先扫一遍。</p>
+  </section>
+
+  <section>
+    <h2>诊断：该先开哪一个</h2>
+    <ul>
+      <li><strong>Q 值随训练持续膨胀</strong>，或在奖励带噪声、环境随机的任务里策略变差：
+        先开 Double DQN，这是最便宜的一次尝试。</li>
+      <li><strong>动作数多（十个以上）、学得慢</strong>，很多状态下不同动作效果接近：
+        试 Dueling。它和探索无关，不会让策略更愿意尝试新动作。</li>
+      <li><strong>关键转移很少、奖励极稀疏</strong>：这两个改动都帮不上，
+        问题在"该学哪些样本"，去 <a href="0015-prioritized-replay.html">0015 课的优先经验回放</a>。</li>
+    </ul>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. Double DQN 的目标 (14.2) 与 DQN 的目标 (14.1) 差别在哪里？</p>
+      <ol class="mcq-options">
+        <li>用在线网络挑出动作，再用目标网络评估这个动作的价值</li>
+        <li>用目标网络挑出动作，再用在线网络评估这个动作的价值</li>
+        <li>同时训练两个 Q 网络，最后取两者输出中较小的那个值</li>
+        <li>对同一个动作的 Q 值采样两次，最后取两次采样的平均值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：选动作与评估动作必须来自不同的估计，噪声才不容易同时骗过两边。
+          式 (14.2) 里 <span class="math">arg max</span> 用在线参数 <var>φ</var>，
+          取值用目标参数 <span class="math">φ<sup>−</sup></span>，"Double"的含义就在这里。</p>
+        <p>B 把两个网络对调了：用目标网络选动作时，在线网络还没学好，
+          被选中的动作往往是错的，反而更不稳。C 描述的是 TD3（twin delayed deep deterministic policy gradient，双延迟深度确定性策略梯度）那类双评论家取最小值，
+          目的是保守，不是去掉选择噪声。D 与任何算法都不对应，重复采样不会降低偏差。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. DQN 里 Q 值系统性偏大的根本原因是什么？</p>
+      <ol class="mcq-options">
+        <li>回放缓冲区里的样本高度相关，让随机梯度的噪声不再独立</li>
+        <li>max 作用在带噪声的估计上，会系统性地挑到偏高的那个</li>
+        <li>目标网络的参数同步得太频繁，导致自举目标来回跳动</li>
+        <li>奖励被裁剪到固定区间，让 Q 值的绝对尺度失去意义</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：对一组带噪声的估计取 max，被选中的往往是噪声偏正的那一个，
+          于是 <span class="math">𝔼[max<sub>a</sub> Q] ≥ max<sub>a</sub> 𝔼[Q]</span>。
+          这个偏差再经自举沿时间传播，就会累积成明显的过估计。</p>
+        <p>A 说的是经验回放要解决的样本相关性问题，与偏差无关。
+          C 会让训练不稳，但目标网络同步频率本身不产生系统性高估。
+          D 影响的是数值尺度；裁剪奖励反而常常抑制 Q 值膨胀。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. Dueling 的聚合公式 (14.3) 里减去优势均值这一步是必须的，因为？</p>
+      <ol class="mcq-options">
+        <li>它保证网络输出的 Q 值恒为非负，避免出现负的估计值</li>
+        <li>它让优势支路的梯度被整体缩放，从而显著加快收敛速度</li>
+        <li>它把动作价值投影到固定区间，避免 Q 值无界地持续膨胀</li>
+        <li>它让 V 与 A 可辨识，同时不改变各动作 Q 值的相对大小</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：不加中心化时，<var>V</var> 加 <var>c</var>、<var>A</var> 减
+          <var>c</var> 得到的 Q 完全相同，两条支路无法被损失函数区分开。
+          把每行优势减去自身均值后，优势的均值被固定为 0，<var>V</var> 就只能承担状态基准价值。
+          这一步是对整行减同一个常数，所以 arg max 不变。</p>
+        <p>A 与事实无关：Q 完全可以为负。B 是误传，中心化不改变梯度的整体尺度。
+          C 也不对，它不限制 Q 的取值范围。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 下列哪种情形最值得换成 Dueling 结构？</p>
+      <ol class="mcq-options">
+        <li>动作数很少，并且不同动作带来的收益差距非常大</li>
+        <li>奖励非常稀疏，绝大多数状态拿不到任何奖励信号</li>
+        <li>动作数较多，并且很多状态下不同动作的效果差不多</li>
+        <li>动作是连续的，无法对动作集合逐个求最大值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Dueling 的价值在于让 <var>V</var> 支路单独学习"这个状态值多少"。
+          当多数状态下选哪个动作都差不多时，这部分价值占了 Q 的绝大部分，
+          <var>V</var> 一次就能学到，而原本每个动作的 Q 都得重复学一遍。</p>
+        <p>A 恰好相反：动作差异越大，"比较动作"越重要，优势支路之外收益有限。
+          B 是探索与采样问题，Dueling 不改变采哪些样本。D 本身就排除了 DQN 一族，
+          连续动作该走策略梯度或 actor-critic。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 关于这两个改进的组合与代价，下列说法正确的是？</p>
+      <ol class="mcq-options">
+        <li>两者可以同时使用：Double 几乎零成本，Dueling 只改结构</li>
+        <li>两者互斥，因为 Dueling 的聚合与 Double 的目标相冲突</li>
+        <li>两者都要求各自从头训练一份独立的网络，参数量因此要翻一倍</li>
+        <li>两者都只是在缓解探索不足，跟过估计偏差与样本效率都没有关系</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Double 只改目标 <var>y</var> 的算法，Dueling 只改网络输出的聚合方式，
+          一个动损失、一个动结构，互不冲突，叠在一起就是 Rainbow 的做法。</p>
+        <p>B 是错的：两者作用在不同的位置。C 也不对，Dueling 是共享特征层再分两条支路，
+          参数增加有限，更不需要两份独立网络。D 把作用完全说反了，
+          它们治的分别是过估计和样本效率。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0014-code-1">
+            <h3>代码题 1 · 对比 DQN 与 Double DQN 的目标</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这两个函数算同一批转移的目标 y，区别在自举值怎么取。DQN 直接对目标网络在 <code>s′</code> 上的输出取最大值，估计噪声会被当成真实优势，目标系统性偏高；Double DQN 让在线网络选动作、目标网络给值，两个网络的噪声不同，偏差就小得多。它们都在更新步里被调用，输入是刚算出的网络输出，输出是交给损失的 <code>y</code>。两个函数都不修改输入。请实现 <code>dqn_targets(rewards, dones, next_q_target, gamma)</code> 与 <code>double_dqn_targets(rewards, dones, next_q_online, next_q_target, gamma)</code>，只许用 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：形状 <code>(B,)</code> 的 float 数组，即时奖励。</li>
+          <li><code>dones</code>：形状 <code>(B,)</code> 的 bool 数组，<code>True</code> 表示该条在 <code>s′</code> 终止。</li>
+          <li><code>next_q_target</code>：形状 <code>(B, n_actions)</code> 的 float 数组，目标网络在 <code>s′</code> 上给出的 Q 值，两个函数都要用。</li>
+          <li><code>next_q_online</code>：形状 <code>(B, n_actions)</code> 的 float 数组，在线网络在 <code>s′</code> 上给出的 Q 值，只有 Double 版本用。</li>
+          <li><code>gamma</code>：float，折扣因子 γ。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>dqn_targets</code> 返回 <code>np.ndarray</code>，形状 <code>(B,)</code> 的 float：第 <code>i</code> 个元素是 <span class="math">r<sub>i</sub> + (1 − done<sub>i</sub>) γ max<sub>a′</sub> Q<sub>target</sub>(s′<sub>i</sub>, a′)</span>。</li>
+          <li><code>double_dqn_targets</code> 返回 <code>np.ndarray</code>，形状 <code>(B,)</code> 的 float：先由在线网络取 <span class="math">a* = arg max<sub>a′</sub> Q<sub>online</sub>(s′<sub>i</sub>, a′)</span>，第 <code>i</code> 个元素是 <span class="math">r<sub>i</sub> + (1 − done<sub>i</sub>) γ Q<sub>target</sub>(s′<sub>i</sub>, a*)</span>。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>dones</code> 为真时即使 <code>Q(s′,·)</code> 全是 50，目标也只等于 <code>r</code>；非终止样本逐条核对到 1e-12；并列最大值时按 <code>np.argmax</code> 取最小下标的约定；4000 条标准正态随机 Q 上，真实价值为 0 时 DQN 目标均值约 0.93，Double 目标均值绝对值小于 0.15 且比 DQN 低 0.5 以上。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>终止转移不自举，用 <code>(~dones)</code> 乘在自举项上。</li>
+          <li>先算 <code>idx = np.argmax(next_q_online, axis=1)</code>，
+            再用 <code>next_q_target[np.arange(B), idx]</code> 取出对应的目标值。</li>
+          <li><code>np.argmax</code> 在并列时取第一个下标，两个函数都遵守这个约定。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def dqn_targets(rewards, dones, next_q_target, gamma):
+    # TODO: y = r + (1-done) * gamma * max_a' Q_target(s', a')
+    return np.zeros(len(rewards))
+
+
+def double_dqn_targets(rewards, dones, next_q_online, next_q_target, gamma):
+    # TODO: 在线网络选动作，目标网络评估该动作
+    return np.zeros(len(rewards))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+r = np.array([1.0, 0.0, 2.0])
+done = np.array([True, False, False])
+nq_t = np.array([[50.0, 50.0], [1.0, 3.0], [4.0, 4.0]])
+nq_o = np.array([[0.0, 0.0], [9.0, 1.0], [0.5, 8.0]])
+
+y_d = dqn_targets(r, done, nq_t, 0.5)
+check(abs(y_d[0] - 1.0) < 1e-12,
+      f"终止转移的目标只有 r，即使 Q(s',·) 全是 50 也不能自举，实际 {y_d[0]:.4f}")
+check(abs(y_d[1] - 1.5) < 1e-12, f"0 + 0.5*max(1,3) = 1.5，实际 {y_d[1]:.4f}")
+check(abs(y_d[2] - 4.0) < 1e-12, f"2 + 0.5*max(4,4) = 4.0，实际 {y_d[2]:.4f}")
+
+y_dd = double_dqn_targets(r, done, nq_o, nq_t, 0.5)
+check(abs(y_dd[0] - 1.0) < 1e-12, f"终止转移同样不能自举，实际 {y_dd[0]:.4f}")
+check(abs(y_dd[1] - 0.5) < 1e-12,
+      f"在线网络在第 1 条样本上选动作 0，目标网络给的 1.0 才是评估值：0.5，实际 {y_dd[1]:.4f}")
+check(abs(y_dd[2] - 4.0) < 1e-12,
+      f"在线网络选动作 1，目标网络在该动作上是 4.0：2 + 0.5*4 = 4.0，实际 {y_dd[2]:.4f}")
+check(abs(y_dd[1] - y_d[1]) > 0.5,
+      "这个例子里 Double 目标应明显小于 DQN 目标（1.0 对 3.0 的自举值）")
+
+rng = np.random.default_rng(7)
+B = 4000
+zeros = np.zeros(B)
+none_done = np.zeros(B, dtype=bool)
+online = rng.normal(0.0, 1.0, size=(B, 4))
+target = rng.normal(0.0, 1.0, size=(B, 4))
+plain = dqn_targets(zeros, none_done, target, 0.9)
+dbl = double_dqn_targets(zeros, none_done, online, target, 0.9)
+check(plain.mean() > 0.6,
+      f"真实价值全为 0 时，DQN 目标因 max 而系统性偏正（期望约 0.93），实际均值 {plain.mean():.3f}")
+check(abs(dbl.mean()) < 0.15,
+      f"Double 用独立的在线网络选动作，评估应近似无偏，实际均值 {dbl.mean():.3f}")
+check(dbl.mean() < plain.mean() - 0.5,
+      f"Double 目标应明显低于 DQN 目标，实际 {dbl.mean():.3f} vs {plain.mean():.3f}")
+
+g2 = double_dqn_targets(np.array([1.0]), np.array([False]), np.array([[0.0, 5.0]]),
+                        np.array([[3.0, 2.0]]), 0.5)
+check(abs(g2[0] - 2.0) < 1e-12,
+      f"arg max 取在线网络的 1 号动作，目标网络给 2.0：1 + 0.5*2 = 2.0，实际 {g2[0]:.4f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def dqn_targets(rewards, dones, next_q_target, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    next_q_target = np.asarray(next_q_target, dtype=float)
+    bootstrap = np.max(next_q_target, axis=1)
+    return rewards + gamma * bootstrap * (~dones)
+
+
+def double_dqn_targets(rewards, dones, next_q_online, next_q_target, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    next_q_online = np.asarray(next_q_online, dtype=float)
+    next_q_target = np.asarray(next_q_target, dtype=float)
+    best_actions = np.argmax(next_q_online, axis=1)
+    bootstrap = next_q_target[np.arange(next_q_target.shape[0]), best_actions]
+    return rewards + gamma * bootstrap * (~dones)
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0014-code-2">
+            <h3>代码题 2 · 实现 Dueling 头部的聚合与中心化</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>Dueling 网络把 Q 拆成状态价值 <code>V(s)</code> 与优势 <code>A(s,a)</code> 两条支路，再合并成一个 Q 输出。直接相加不可辨识：V 加常数、A 减同一个常数，得到的 Q 完全一样，训练会漂移，所以合并时要减掉优势的均值（或最大值）做中心化。这两个函数就是合并那一步，在网络最后被调用，输入是两条支路的原始输出，输出直接被当成 Q 用，选动作和算目标 y 都靠它。都不修改输入。请实现 <code>dueling_q(v, adv)</code> 与 <code>dueling_q_max(v, adv)</code>，只许用 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>v</code>：形状 <code>(B,)</code> 或 <code>(B, 1)</code> 的 float 数组，状态价值支路的输出，每个状态一个数。</li>
+          <li><code>adv</code>：形状 <code>(B, A)</code> 的 float 数组，优势支路的输出，<code>A</code> 是动作数。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>dueling_q</code> 返回 <code>np.ndarray</code>，形状 <code>(B, A)</code> 的 float：第 <code>(i, a)</code> 个元素是 <span class="math">v<sub>i</sub> + adv[i, a] − mean<sub>a′</sub> adv[i, a′]</span>，均值沿动作轴取，每行减自己的均值。</li>
+          <li><code>dueling_q_max</code> 返回 <code>np.ndarray</code>，形状 <code>(B, A)</code> 的 float：把上式里的均值换成该行的最大值。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>v</code> 给 <code>(B,)</code> 与 <code>(B, 1)</code> 两种形状结果一致；中心化后每行 Q 的均值正好等于 <code>v</code>（max 版本是每行最大值等于 <code>v</code>）；每行的 <code>argmax</code> 与 <code>adv</code> 的 <code>argmax</code> 相同；<code>adv</code> 整体加 5 时 Q 不变，<code>v</code> 整体加 2 时 Q 整体加 2；Q 减去 v 之后等于中心化后的优势；<code>(2, 3)</code> 的例子里两个函数的数值逐项核对。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>用 <code>v = np.asarray(v, dtype=float)</code> 之后判断维度，
+            一维时 <code>v = v.reshape(-1, 1)</code>，就能直接和 <code>(B, A)</code> 广播。</li>
+          <li>均值/最大值都要 <code>keepdims=True</code>，否则减掉的是整个 batch 的统计量。</li>
+          <li>中心化是对每一行减同一个常数，所以 <code>argmax</code> 不会改变。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def dueling_q(v, adv):
+    # TODO: Q = v + adv - mean(adv, axis=1, keepdims=True)
+    return np.zeros_like(np.asarray(adv, dtype=float))
+
+
+def dueling_q_max(v, adv):
+    # TODO: Q = v + adv - max(adv, axis=1, keepdims=True)
+    return np.zeros_like(np.asarray(adv, dtype=float))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+v = np.array([[1.0], [2.0]])
+adv = np.array([[1.0, 2.0, 3.0], [0.0, -1.0, 1.0]])
+q = np.asarray(dueling_q(v, adv), dtype=float)
+check(q.shape == (2, 3), f"输出形状应为 (2,3)，实际 {q.shape}")
+check(np.allclose(q, np.array([[0.0, 1.0, 2.0], [2.0, 1.0, 3.0]])),
+      f"按式 (14.3) 聚合：第一行均值 2、第二行均值 0，实际 {q}")
+
+q1 = np.asarray(dueling_q(np.array([1.0, 2.0]), adv), dtype=float)
+check(np.allclose(q1, q), "v 是形状 (B,) 的一维数组时，结果应与 (B,1) 时一致")
+
+check(np.allclose(q.mean(axis=1), v.ravel()),
+      f"中心化后，各动作 Q 的均值必须等于 v，实际 {q.mean(axis=1)}")
+check(np.array_equal(np.argmax(q, axis=1), np.argmax(adv, axis=1)),
+      "减均值是对整行减同一个常数，argmax 不能被改变")
+check(np.allclose(q - v.reshape(-1, 1), adv - adv.mean(axis=1, keepdims=True)),
+      "中心化后的 Q 减 v 应正好等于中心化后的优势")
+
+check(np.allclose(dueling_q(v, adv + 5.0), q),
+      "优势整体加一个常数不应改变 Q（中心化要修掉的就是这种不可辨识性）")
+check(np.allclose(dueling_q(v + 2.0, adv), q + 2.0),
+      "价值支路整体加常数，Q 应随之整体加同一个常数")
+
+qm = np.asarray(dueling_q_max(v, adv), dtype=float)
+check(qm.shape == (2, 3), f"dueling_q_max 的输出形状应为 (2,3)，实际 {qm.shape}")
+check(np.allclose(qm, np.array([[-1.0, 0.0, 1.0], [1.0, 0.0, 2.0]])),
+      f"用最大值聚合：第一行减 3、第二行减 1，实际 {qm}")
+check(np.allclose(qm.max(axis=1), v.ravel()),
+      f"用最大值聚合时，每个状态上 Q 的最大值应正好等于 v，实际 {qm.max(axis=1)}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def dueling_q(v, adv):
+    v = np.asarray(v, dtype=float)
+    adv = np.asarray(adv, dtype=float)
+    if v.ndim == 1:
+        v = v.reshape(-1, 1)
+    return v + adv - np.mean(adv, axis=1, keepdims=True)
+
+
+def dueling_q_max(v, adv):
+    v = np.asarray(v, dtype=float)
+    adv = np.asarray(adv, dtype=float)
+    if v.ndim == 1:
+        v = v.reshape(-1, 1)
+    return v + adv - np.max(adv, axis=1, keepdims=True)
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Double DQN 的目标 (14.2) 与过估计分析：van Hasselt, Guez &amp; Silver,
+        <em>Deep Reinforcement Learning with Double Q-learning</em>（AAAI 2016），
+        <a class="cite" href="https://arxiv.org/abs/1509.06461">arXiv 1509.06461</a>。</p>
+      <p>Dueling 的结构与聚合公式 (14.3)：Wang et al.,
+        <em>Dueling Network Architectures for Deep Reinforcement Learning</em>（ICML 2016），
+        <a class="cite" href="https://arxiv.org/abs/1511.06581">arXiv 1511.06581</a>。
+        想一次看完整族改进，读
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">Lilian Weng 的 DQN 综述</a>。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把式 (14.2) 和式 (14.3) 合到同一个 numpy 训练循环里给我看。"
+      或者 "我的 Q 值一路涨到几百，帮我判断该先开 Double 还是先查目标网络。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

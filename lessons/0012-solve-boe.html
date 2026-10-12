@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0012 · 从 BOE 求解最优策略；影响最优策略的因素 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0012" data-slug="solve-boe" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">数学预备 12 ／ 第 1 部分 · 基础工具</p>
+    <h1>从 BOE 求解最优策略；影响最优策略的因素</h1>
+    <p class="lede">上一课证明了最优贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的最优版本）的解
+      $v^*$ 存在且唯一。这一课把 $v^*$ 变成一张能执行的动作表，再讨论哪些东西会改变这张表：
+      折扣因子（越往后的奖励，算进总分时权重越小，这里取 γ）、奖励的平移与缩放，以及并列造成的多解。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出从 $v^*$ 提取最优策略的公式，并说明它为什么是"逐状态的 $\argmax$"</li>
+        <li>能证明任何最优策略都必须是贪婪的，以及贪婪策略一定是最优的</li>
+        <li>能证明 $r\to ar+b$（$a>0$）不改变最优策略集合，只是把 $v^*$ 平移缩放</li>
+        <li>能判断 γ 变大变小时最优动作会怎样切换，并算出切换的临界值</li>
+        <li>能说清 γ = 0、γ = 1 与并列多解这三种边界情形各自会发生什么</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 从价值到策略</h2>
+    <p>0011 课得到的结论是：在状态与动作个数有限、奖励有界、$0\le\gamma<1$ 时，
+      贝尔曼算子 $T$ 是压缩映射（每作用一次就把两个向量的距离按比例缩短），最优贝尔曼方程 $v=Tv$ 有唯一解 $v^*$，
+      从任意初值出发的值迭代都收敛（一轮轮算下去，数值稳定到不再变化）到它。现在把 $v^*$ 翻译成动作。</p>
+    <p>做法很直接：在状态 $s$ 上，把每个动作的"这一步奖励 + 打折后的后续价值"算出来，
+      挑最大的那一个。这个量就是动作的第一步估计，记作</p>
+    <div class="eq">
+      <span class="eq-body">$$q^*(s,a)=r(s,a)+\gamma\sum_{s'\in\mathcal{S}}p(s'\mid s,a)\,v^*(s')$$</span>
+      <span class="eq-num">(12.1)</span>
+    </div>
+    <p>式中 $q^*$ 是最优动作值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分），
+      $\mathcal{S}$ 是状态空间（所有可能状态的集合），$p(s'\mid s,a)$ 是跳转概率
+      （这个跳转不是百分之百确定的，而是一组可能性，各带着自己的概率）。</p>
+    <div class="thm">
+      <span class="label">定理 1.1（最优策略就是贪婪策略）</span>
+      <p>设 $v^*$ 是唯一的最优状态值，$q^*$ 由式 (12.1) 给出。定义策略
+        $$\pi^*(s)\in\argmax_{a\in\mathcal{A}(s)}q^*(s,a),\qquad s\in\mathcal{S},$$
+        其中 $\mathcal{A}(s)$（每个状态下能选的动作组成的集合）。则 $\pi^*$ 是最优策略，
+        且 $v_{\pi^*}=v^*$。这个策略叫<em>贪婪策略</em>（在当前估计里挑看起来最好的那个）。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：要证明一个策略最优，只要证明它的价值函数（给每个状态打一个"值多少分"的分数的函数）也满足最优贝尔曼方程。
+        因为 0011 课已经证明了那个方程的解只有一个。</p>
+      <p>记 $T_{\pi}$ 为策略 $\pi$ 对应的贝尔曼算子：
+        $(T_{\pi}v)(s)=r(s,\pi(s))+\gamma\sum_{s'}p(s'\mid\pi(s))v(s')$，
+        其中 $r(s,\pi(s))$ 与 $p(\cdot\mid s,\pi(s))$ 是把动作取成 $\pi(s)$ 的结果。</p>
+      <p>第一步，贪婪策略的算子作用在 $v^*$ 上等于 $T$ 作用在 $v^*$ 上。由 $\pi^*$ 的定义，
+        它对每个 $s$ 都取到了 $\max$ 里的最大项，所以
+        $(T_{\pi^*}v^*)(s)=\max_a\big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')\big]=(Tv^*)(s)=v^*(s)$。
+        最右边那个等号用的是 $v^*$ 满足最优贝尔曼方程。</p>
+      <p>第二步，$v^*$ 是 $T_{\pi^*}$ 的不动点（代进去仍是自己，即 $T_{\pi^*}v^*=v^*$）。上面一段说明 $T_{\pi^*}v^*=v^*$。</p>
+      <p>第三步，$v_{\pi^*}=v^*$。策略评估（给一套固定的策略打分，算出它值多少）算子 $T_{\pi^*}$ 也是压缩映射（每作用一次就把两个向量的距离按比例缩短）（它的证明与 0011 课
+        定理 5.6 一字不差，只是把 $\max$ 换成固定的动作），所以由压缩映射定理，
+        $T_{\pi^*}$ 有唯一不动点。$v_{\pi^*}$ 按定义就是 $T_{\pi^*}$ 的不动点，
+        而 $v^*$ 也是，两者只能是同一个。于是该策略达到最优状态值，它是最优策略。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 1.2（所有最优策略都是贪婪的）</span>
+      <p>若策略 $\pi$ 满足 $v_\pi=v^*$，则对每个 $s$ 都有
+        $\pi(s)\in\argmax_a q^*(s,a)$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（反证）</span>
+      <p>由 $v_\pi=v^*$ 与贝尔曼方程 $v_\pi=T_\pi v_\pi$，对每个 $s$ 有
+        $v^*(s)=r(s,\pi(s))+\gamma\sum_{s'}p(s'\mid s,\pi(s))v^*(s')$。</p>
+      <p>另一方面，$v^*(s)=\max_a q^*(s,a)\ge q^*(s,\pi(s))=r(s,\pi(s))
+        +\gamma\sum_{s'}p(s'\mid s,\pi(s))v^*(s')$。</p>
+      <p>两个式子合起来说明 $v^*(s)$ 与 $q^*(s,\pi(s))$ 相等，
+        也就是说 $\pi(s)$ 取到了 $\max$ 里的最大值，即 $\pi(s)\in\argmax_a q^*(s,a)$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.3（两条合起来说明什么）</span>
+      <p>定理 1.1 说贪婪策略够用，定理 1.2 说没有别的最优策略。
+        所以"找最优策略"这件事被压成了一次逐状态的 $\argmax$，
+        这也是值迭代最后一步只做一件小事的理由。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 240" role="img" aria-label="从最优价值出发，逐状态取最大值得到最优动作">
+        <rect x="30" y="70" width="96" height="70" class="box-a"/>
+        <text x="46" y="98" class="val-b">v*</text>
+        <text x="42" y="120" class="lbl">每个状态一个数</text>
+        <path d="M132 105 H196" class="arrow-a"/>
+        <path d="M188 100 l10 5 l-10 5" class="arrow-a"/>
+        <text x="136" y="94" class="lbl">逐状态取最大</text>
+        <rect x="200" y="52" width="130" height="106" class="box"/>
+        <text x="212" y="74" class="val">a1: 3.0</text>
+        <text x="212" y="96" class="val">a2: 5.2</text>
+        <text x="212" y="118" class="val">a3: 4.1</text>
+        <text x="212" y="144" class="lbl">q*(s, ·)</text>
+        <path d="M334 105 H396" class="arrow-a"/>
+        <path d="M388 100 l10 5 l-10 5" class="arrow-a"/>
+        <rect x="400" y="82" width="92" height="52" class="box-a"/>
+        <text x="412" y="104" class="val-b">π*(s) = a2</text>
+        <text x="416" y="124" class="lbl">最高的那个</text>
+        <text x="30" y="200" class="lbl">先算每个动作的 q* 值，再取其中最大的；有并列时任取一个都是最优策略</text>
+        <text x="30" y="222" class="lbl">这一步不需要新的迭代，只是把已经算好的表读一遍</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 12.1</span>
+        从价值到策略的流程：左边是算好的最优状态值 v*，中间把每个动作的即时奖励与折扣后的后续价值
+        加起来得到 q*，右边取 q* 最大的动作作为这个状态的动作。整条流水线没有新算法，
+        只有一次逐行比较。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 折扣因子会把动作换掉</h2>
+    <p>γ 越小，智能体（做决策的那一方）越只顾眼前；γ 越大，越愿意为将来铺路。为了看清这件事，
+      用一个能手算的两状态例子。</p>
+    <div class="eg">
+      <span class="label">例 2.1（两个终局动作，临界值 γ = 1/2）</span>
+      <p>状态 $s_A$ 有两个动作。动作 $\alpha$：立刻拿奖励 $1$，然后结束。
+        动作 $\beta$：立刻拿奖励 $0$，跳到状态 $s_B$；$s_B$ 只有一个自身循环动作，
+        每步拿奖励 $1$，永不结束。取 $\gamma<1$。按 0011 课的做法手算：
+        $v(s_B)=1+\gamma v(s_B)$，得 $v(s_B)=1/(1-\gamma)$。于是
+        $q(s_A,\alpha)=1$，$q(s_A,\beta)=0+\gamma/(1-\gamma)$。
+        比较两者：$\gamma/(1-\gamma)>1$ 当且仅当 $\gamma>1/2$。</p>
+      <p>结论：$\gamma<1/2$ 时 $s_A$ 的最优动作是 $\alpha$；$\gamma>1/2$ 时是 $\beta$；
+        $\gamma=1/2$ 时两个动作并列，$\alpha$ 与 $\beta$ 都是最优的。
+        临界值 $\gamma=1/2$ 是解方程 $\gamma/(1-\gamma)=1$ 得到的。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 250" role="img" aria-label="同一条奖励流在不同折扣因子下折算出的现值不同">
+        <line x1="60" y1="170" x2="510" y2="170" class="axis-b"/>
+        <text x="60" y="192" class="lbl">时间步</text>
+        <rect x="80" y="140" width="34" height="30" class="bar-hi"/>
+        <text x="88" y="130" class="val-b">1</text>
+        <text x="76" y="200" class="lbl">0</text>
+        <text x="126" y="200" class="lbl">1</text>
+        <text x="176" y="200" class="lbl">2</text>
+        <text x="226" y="200" class="lbl">3</text>
+        <text x="276" y="200" class="lbl">4</text>
+        <line x1="140" y1="170" x2="140" y2="46" class="mark"/>
+        <text x="146" y="60" class="lbl">动作 β 从第 1 步起每步拿 1，永不结束</text>
+        <text x="146" y="80" class="val">γ = 0.9 时折现总和 = 9.0</text>
+        <text x="146" y="100" class="val">γ = 0.5 时折现总和 = 1.0</text>
+        <text x="146" y="120" class="val">γ = 0.2 时折现总和 = 0.25</text>
+        <text x="60" y="228" class="lbl">动作 α 是一个 1 分，用柱高 1 画在时间步 0；折扣因子越小，将来的分越不值钱</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 12.2</span>
+        两个动作的差别只在"什么时候拿分"。动作 α（读作"阿尔法"）立刻给 1 分；动作 β（读作"贝塔"）从下一步起每步给 1 分，
+        折现总和是 γ/(1−γ)。γ = 0.2 时 β 只值 0.25 分，输给 α；γ = 0.9 时 β 值 9 分，赢过 α。
+        两者相等那一点就是临界值 γ = 0.5。</figcaption>
+    </figure>
+    <div class="eg">
+      <span class="label">例 2.2（γ = 0 与只顾眼前）</span>
+      <p>当 $\gamma=0$，式 (12.1) 里的求和项整个被乘没了，$q^*(s,a)=r(s,a)$，
+        于是最优策略只在即时奖励上取最大。用一个 $2\times2$ 网格（四格，从 $s_1$ 走到 $s_4$，
+        每步确定性移动，$s_4$ 吸收）说明差别：把奖励设成
+        $r(s_1,\text{右})=0$、$r(s_1,\text{下})=1$、$r(s_2,\text{右})=100$、$r(s_3,\text{右})=200$。
+        $\gamma=0$ 时 $s_1$ 的最优动作是"下"（拿 1 分），
+        但 $\gamma=0.5$ 时"右"更好：沿 $s_1\to s_2\to s_3\to s_4$ 的折扣总分是
+        $0+0.5\times100+0.25\times200=100$，远大于走"下"得到的约 1 分。
+        只顾眼前会把路走死。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 250" role="img" aria-label="2×2 网格里同一个状态在 γ 小时选保守动作，在 γ 大时选通往大奖励的动作">
+        <rect x="90" y="40" width="70" height="70" class="box-a"/>
+        <text x="104" y="70" class="val-b">s1</text>
+        <text x="96" y="92" class="lbl">起点</text>
+        <rect x="160" y="40" width="70" height="70" class="box"/>
+        <text x="178" y="70" class="val">s2</text>
+        <text x="168" y="92" class="lbl">+100</text>
+        <rect x="90" y="110" width="70" height="70" class="box"/>
+        <text x="108" y="140" class="val">s3</text>
+        <text x="98" y="162" class="lbl">+200</text>
+        <rect x="160" y="110" width="70" height="70" class="box"/>
+        <text x="178" y="140" class="val">s4</text>
+        <text x="168" y="162" class="lbl">终点</text>
+        <path d="M126 44 v62" class="arrow-a"/>
+        <path d="M121 100 l5 10 l5 -10" class="arrow-a"/>
+        <text x="36" y="82" class="lbl">γ 小：选这条</text>
+        <path d="M164 76 h62" class="arrow"/>
+        <path d="M218 71 l10 5 l-10 5" class="arrow"/>
+        <text x="236" y="70" class="lbl">γ 大：沿这条路拿 100 与 200</text>
+        <text x="36" y="140" class="val-b">+1</text>
+        <text x="240" y="146" class="lbl">折扣总分 0 + 0.5×100 + 0.25×200 = 100</text>
+        <text x="90" y="212" class="lbl">γ 很小时，先拿稳到手的 1 分；γ 足够大时，绕路去拿后面的大分</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 12.3</span>
+        同一个网格、同一份奖励，只因 γ 不同，起点 s1 的最优动作就换了。
+        γ 小的时候折扣把远处的大奖励压没了，保守动作胜出；γ 大的时候长期收益占上风。
+        这也解释了调 γ 时策略会突然"换性格"。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 奖励的平移与缩放不改变最优策略</h2>
+    <div class="thm">
+      <span class="label">定理 3.1（仿射变换下的策略不变性）</span>
+      <p>设 $a>0$、$b$ 是常数，把奖励整体换成 $r'(s,a)=a\,r(s,a)+b$，转移概率（做完一个动作后跳到各状态的可能性）不变。
+        记 $v'^*$ 与 $\Pi'^*$ 分别是新问题的最优状态值与最优策略集合，$v^*$ 与 $\Pi^*$ 是原来的。
+        则
+        $$v'^*=a\,v^*+\frac{b}{1-\gamma}\mathbf{1},\qquad \Pi'^*=\Pi^*,$$
+        其中 $\mathbf{1}$ 是全 $1$ 向量。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：写出新问题的贝尔曼算子 $T'$，猜一个不动点 $u=a v^*+\frac{b}{1-\gamma}\mathbf{1}$，
+        验证 $T'u=u$。由压缩映射定理，不动点唯一，所以猜对了。
+        再比较两边 $\argmax$ 里的表达式，说明取最大的动作没变。</p>
+      <p>第一步，写出 $T'$。对任意 $v$ 与任意 $s$，
+        $(T'v)(s)=\max_a\big[a\,r(s,a)+b+\gamma\sum_{s'}p(s'\mid s,a)v(s')\big]$。</p>
+      <p>第二步，验证 $u=a v^*+\frac{b}{1-\gamma}\mathbf{1}$ 是 $T'$ 的不动点。把 $u$ 代进括号里，
+        求和项中那个常数可以提出来：
+        $\gamma\sum_{s'}p(s'\mid s,a)\frac{b}{1-\gamma}=\frac{\gamma b}{1-\gamma}$，
+        这一步用了跳转概率之和为 $1$。于是括号里等于
+        $a\,r(s,a)+b+\gamma\sum_{s'}p(s'\mid s,a)a\,v^*(s')+\frac{\gamma b}{1-\gamma}
+        =a\big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')\big]+\frac{b}{1-\gamma}$，
+        最后一个等号用了 $b+\frac{\gamma b}{1-\gamma}=\frac{b}{1-\gamma}$。</p>
+      <p>第三步，把 $\max$ 提出来。因为 $a>0$，正系数可以从 $\max$ 里提出来且不改变最大点；
+        而 $\frac{b}{1-\gamma}$ 与动作无关，也可以提出来：
+        $(T'u)(s)=a\max_a\big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')\big]+\frac{b}{1-\gamma}
+        =a\,v^*(s)+\frac{b}{1-\gamma}=u(s)$。
+        中间那个等号用的是 $v^*$ 满足最优贝尔曼方程。</p>
+      <p>第四步，唯一性给出 $v'^*=u$。注意新问题的奖励仍然有界，压缩映射定理的条件全部满足。</p>
+      <p>第五步，比较最优动作。由式 (12.1)，新问题的动作值是
+        $q'^*(s,a)=a\,r(s,a)+b+\gamma\sum_{s'}p(s'\mid s,a)u(s')
+        =a\big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^*(s')\big]+\frac{b}{1-\gamma}
+        =a\,q^*(s,a)+\frac{b}{1-\gamma}$。
+        这个式子对每个动作都成立，且 $a>0$、$\frac{b}{1-\gamma}$ 不随动作变化。
+        所以 $q'^*(s,a)$ 的大小次序与 $q^*(s,a)$ 完全一致：让前者最大的动作，
+        恰好就是让后者最大的动作。两个问题的最优策略集合相同，即 $\Pi'^*=\Pi^*$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.2（这条定理有什么用）</span>
+      <p>奖励的量纲可以随便定。把"每分钟收益"换成"每步收益减 10"，或者整体乘 100 换成百分制，
+        最优策略都不受影响，只有价值表跟着变。反过来，如果只是想让价值表好看一点，
+        用 $b$ 把负奖励抬平也不会偷偷改掉策略。注意 $a$ 必须大于 $0$：
+        $a<0$ 相当于把所有奖励的喜好颠倒过来，$a=0$ 让奖励全变成常数 $b$，
+        那时任何策略都最优，两个结论都失效。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. γ = 1、γ = 0 与多解</h2>
+    <div class="rem">
+      <span class="label">注记 4.1（γ = 1 时会发生什么）</span>
+      <p>0011 课的压缩性证明每一步都用到了 $0\le\gamma<1$：几何级数求和、误差按 $\gamma^k$ 衰减、
+        以及 $(1-\gamma)d\le0$ 那一步的唯一性推导。$\gamma=1$ 时这些都不成立，
+        而且最优贝尔曼方程可能没有有界的解。取一个只有自身循环、奖励恒为 $1$ 的状态，
+        $\gamma=1$ 时 $v(s)=1+v(s)$ 无解；$\gamma=0.9$ 时 $v(s)=10$，
+        $\gamma=0.5$ 时 $v(s)=2$。同一个状态，折扣因子越小价值越低，
+        因为将来那些 1 分被折得越轻。实践里 $\gamma$ 取 $0.9$ 到 $0.99$ 之间，
+        既保留长期眼光，又让数值有界、收敛速度可接受。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 230" role="img" aria-label="同一份永续奖励的价值随折扣因子变化，γ 接近 1 时价值急剧变大">
+        <line x1="70" y1="180" x2="490" y2="180" class="axis-b"/>
+        <line x1="70" y1="36" x2="70" y2="180" class="axis-b"/>
+        <text x="70" y="26" class="lbl">v(s) = 1 / (1 − γ)</text>
+        <polyline points="80,176 180,166 260,152 320,132 370,110 410,88 440,68 464,52 480,42" class="curve"/>
+        <line x1="464" y1="40" x2="464" y2="180" class="mark"/>
+        <text x="392" y="200" class="lbl">γ = 0.9 时 v = 10</text>
+        <text x="300" y="60" class="lbl">γ → 1 时价值趋于无穷</text>
+        <text x="80" y="204" class="lbl">γ = 0 时 v = 1：只看这一步的奖励</text>
+        <text x="444" y="200" class="val-b">γ = 1</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 12.4</span>
+        一个永续拿 1 分的状态，价值是 1/(1−γ)。γ = 0 时价值就是 1；γ = 0.9 时涨到 10；
+        越靠近 1 涨得越猛，到 γ = 1 直接发散。这就是压缩映射定理要求 γ 严格小于 1 的实际原因。
+        画成曲线看，它在 1 附近有一条竖直的渐近线。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 4.2（多个最优策略同时存在）</span>
+      <p>最优状态值 $v^*$ 一定唯一，最优策略却可能有多个：只要某个状态上有两个动作的 $q^*$ 值相等，
+        两个动作都是最优的，组合起来就得到不同的最优策略。它们在 $v$ 上完全一致，
+        只在路径选择上不同。动手算的时候不要用"值一样所以算法出错了"来解释这种差别，
+        那只是并列。工程上可以在 $\argmax$ 里加一点确定性的规则（比如取编号最小的动作），
+        让同一份输入每次都给出同一张表。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>最优策略在逐状态上取 $\argmax_a q^*(s,a)$，$q^*$ 由式 (12.1) 算，不需要新算法。</li>
+      <li>贪婪策略一定最优，且所有最优策略都贪婪，所以最优策略集合已经被这两条定理框死。</li>
+      <li>奖励做 $r\to ar+b$（$a>0$）时 $v'^*=a v^*+\frac{b}{1-\gamma}\mathbf{1}$，最优策略集合不变。</li>
+      <li>γ 决定眼前与将来的权重；变小会退回只顾眼前，变大时策略可能整体换向，切换点是可算的临界值。</li>
+      <li>$\gamma=1$ 会破坏压缩性与有界性；并列会让最优策略不唯一，但 $v^*$ 始终唯一。</li>
+    </ul>
+    <p>下一课把"从 $v^*$ 取 $\argmax$"这一步展开成算法：值迭代 $v_{k+1}=Tv_k$ 的逐元素形式、
+      收敛速度、停止准则与误差界，并在一张网格上手算几步。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 关于最优策略集合与奖励变换，下面哪个说法成立？</p>
+      <ol class="mcq-options">
+        <li>把奖励乘正数 $a$ 再加常数 $b$，最优策略集合不变</li>
+        <li>把奖励乘正数 $a$ 再加常数 $b$，最优策略集合一定变小</li>
+        <li>把奖励整体乘 $a$，最优策略集合按 $a$ 的比例改变</li>
+        <li>把奖励整体平移 $b$，最优策略集合按 $b$ 的正负改变</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$q'^*(s,a)=a\,q^*(s,a)+\frac{b}{1-\gamma}$，而 $a>0$ 且第二项与动作无关，
+          所以取最大的动作没变，见式 (12.1) 后的讨论。</p>
+        <p>B 错在正系数与常数都不会改变动作之间的大小次序；
+          C 错在策略是离散选择，不存在按比例改变这回事；
+          D 错在平移量对每个动作都一样，$b$ 的正负也不影响次序。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 策略 $\pi$ 是最优策略，当且仅当它满足下面哪一条？</p>
+      <ol class="mcq-options">
+        <li>它在每个状态都选了即时奖励最大的动作</li>
+        <li>它的动作值 $q_\pi(s,a)$ 对每个动作都取到最大</li>
+        <li>它让每个状态的访问次数都达到最大</li>
+        <li>它在每个状态都让 $q^*(s,a)$ 取到最大值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理 1.2 证明的就是这一条，即所有最优策略都必须在每个状态上贪婪地取 $q^*$ 的最大值。</p>
+        <p>A 错在只比即时奖励，忽略了后续价值，例 2.2 就是反例。
+          B 错在 $q_\pi$ 是这套策略自己的动作值，与最优值 $q^*$ 不是一回事。
+          C 错在访问次数不是最优性的判据，绕远路反而可能访问更多状态。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. 在定理 1.1 的证明里，从 $(T_{\pi^*}v^*)(s)=v^*(s)$ 推出 $v_{\pi^*}=v^*$，
+        关键依据是什么？</p>
+      <ol class="mcq-options">
+        <li>$T_{\pi^*}$ 与 $T$ 是同一条公式，只是写法不同</li>
+        <li>$v_{\pi^*}$ 是一个随机变量，期望等于 $v^*$</li>
+        <li>$T_{\pi^*}$ 是压缩映射，所以它的不动点只有一个</li>
+        <li>$v^*$ 在数值上一定不小于 $v_{\pi^*}$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_{\pi^*}$ 按定义就是 $T_{\pi^*}$ 的不动点，$v^*$ 也被验证成它的不动点，
+          而压缩映射的不动点唯一，两者只能相等。</p>
+        <p>A 错在 $T_{\pi^*}$ 把动作固定成 $\pi^*(s)$，$T$ 要取 $\max$，两者不同。
+          B 错在这里的比较对象是价值函数（给每个状态打一个"值多少分"的分数的函数），不是单次回报（从某一步往后拿到的奖励加起来）。
+          D 只给出不等式，不足以说明相等。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 在例 2.1 里，把"立刻拿 1 分然后结束"与"下一步起每步拿 1 分"作比较。
+        临界折扣因子是多少？</p>
+      <ol class="mcq-options">
+        <li>$\gamma=1/3$</li>
+        <li>$\gamma=1/2$</li>
+        <li>$\gamma=2/3$</li>
+        <li>$\gamma=1$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：后一个动作折现总和是 $\gamma/(1-\gamma)$，令它等于 1 得 $\gamma=1-\gamma$，
+          即 $\gamma=1/2$。</p>
+        <p>A 与 C 是解方程时把系数算错的结果。D 错在 $\gamma=1$ 时那个求和发散，
+          根本比较不了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. $\gamma=0$ 时，最优策略一定是什么？</p>
+      <ol class="mcq-options">
+        <li>随机选动作，因为后续价值都被乘成了 0</li>
+        <li>与 $\gamma=1$ 时的最优策略相同</li>
+        <li>在所有状态上都选动作值 $q^*$ 最大的动作</li>
+        <li>在每个状态上选即时奖励最大的动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\gamma=0$ 时式 (12.1) 的求和项系数为 0，$q^*(s,a)=r(s,a)$，
+          于是取 $\argmax$ 就退化成只看即时奖励。</p>
+        <p>A 错在 $\argmax$ 仍然是确定性的选择，除非并列。
+          B 错在 $\gamma=1$ 常常让方程无解，两者不可比。
+          C 是 $\gamma>0$ 时的一般写法，在 $\gamma=0$ 时它恰好等于 D，但 D 才是这条性质的准确表述。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">6. 某状态的最优状态值 $v^*(s)=7$，两个动作的 $q^*$ 分别是 $6.5$ 与 $7.0$。
+        关于最优策略，下面哪个判断成立？</p>
+      <ol class="mcq-options">
+        <li>第二个动作是最优动作，第一个一定不是</li>
+        <li>两个动作都可以，因为差别只有 $0.5$</li>
+        <li>第一个动作更好，因为它更保守</li>
+        <li>无法判断，还要知道即时奖励</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：最优动作的定义就是让 $q^*$ 取到最大值的动作，$7.0$ 是最大值，
+          所以第二个动作最优，第一个不是。</p>
+        <p>B 错在"差别小"不等于并列，并列要求两个值严格相等。
+          C 错在最优性与保守程度无关。D 错在 $q^*$ 已经把即时奖励包含在内，
+          不需要再单独知道。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">7. 若把奖励改成 $r'(s,a)=a\,r(s,a)+b$ 且 $a=0$、$b=5$，
+        关于新问题的最优策略集合，下面哪个说法对？</p>
+      <ol class="mcq-options">
+        <li>与原问题完全相同，因为常数不改变次序</li>
+        <li>只保留原问题里奖励最大的那一个动作</li>
+        <li>所有策略都最优，因为每个动作的奖励都是 5</li>
+        <li>无法判断，取决于转移概率</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$a=0$ 时奖励恒等于 5，与动作和状态都无关，所有策略的回报完全一样，
+          于是每个策略都是最优的。定理 3.1 要求 $a>0$，正系数才能把 $\max$ 提出来。</p>
+        <p>A 错在 $b$ 只有在 $a>0$ 时才不影响次序，此时系数为 0。
+          B 错在所有动作的奖励都被抹平了，没有"最大"。
+          D 错在转移概率也影响不了这个结论。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. 某个永续状态每步拿奖励 1，$\gamma=0.8$。它的最优状态值是多少？</p>
+      <ol class="mcq-options">
+        <li>$v=1.8$，按 $1/(1-\gamma)$ 算得</li>
+        <li>$v=5$，按几何级数求和算得</li>
+        <li>$v=0.8$，只剩第一步的奖励</li>
+        <li>无穷大，因为这个状态永远不结束</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v=1+0.8v$，解得 $v=1/(1-0.8)=5$。</p>
+        <p>A 错在把 $1/(1-\gamma)$ 算成了 $1+\gamma$。
+          C 错在漏掉了第一步的奖励。D 错在 $\gamma<1$ 时级数 $\sum\gamma^k$ 收敛，总分有限；
+          只有 $\gamma=1$ 才会发散。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 为什么 $\gamma=1$ 时压缩映射定理不能直接用？</p>
+      <ol class="mcq-options">
+        <li>因为 $\gamma=1$ 时状态转移（做完动作后环境跳到哪个状态）概率之和不再是 1</li>
+        <li>因为 $\gamma=1$ 时动作空间（你这一步能做的选择有多少种）会变成无限集</li>
+        <li>因为 $\gamma=1$ 时奖励一定无界</li>
+        <li>因为 $\gamma=1$ 时压缩系数不再是严格小于 1 的数</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：压缩映射的定义要求系数严格小于 1。$\gamma=1$ 时贝尔曼算子只能做到
+          $\|Tv_1-Tv_2\|_\infty\le\|v_1-v_2\|_\infty$，不是压缩，几何级数求和与唯一性推导都断了。</p>
+        <p>A 错在转移概率与 $\gamma$ 无关。B 错在动作空间由问题设定，不由 $\gamma$ 决定。
+          C 错在奖励可以有界，但仍可能没有有限的最优价值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 某问题里两个最优策略在同一个状态上选了不同动作。最合理的解释是什么？</p>
+      <ol class="mcq-options">
+        <li>那两个动作的 $q^*$ 值相等，形成了并列</li>
+        <li>其中一个策略其实不是最优的</li>
+        <li>最优状态值 $v^*$ 也有两个不同的解</li>
+        <li>算法没有收敛，需要多迭代几轮</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由定理 1.2，两个策略都必须在每个状态对 $q^*$ 取最大。既然它们选了不同动作，
+          这两个动作的 $q^*$ 只能相等。并列是多解的常见来源。</p>
+        <p>B 错在定理 1.1 已经保证贪婪策略都是最优的。
+          C 错在 $v^*$ 由压缩映射定理保证唯一。
+          D 错在并列与收敛是两件事，多迭代也分不出高下。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 3 章 3.4–3.5 节。</p>
+      <p>想补最优策略与贪婪策略的经典讨论，可读
+        <em>Dynamic Programming and Optimal Control</em>（D. Bertsekas）第 1 卷的确定性
+        与随机最优控制两章。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把临界值 $\gamma=1/2$ 的推导用折现求和再讲一遍"，
+      或者 "为什么把奖励整体加一个常数，最优策略一点都不会变？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0027 · 度量的梯度 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0027" data-slug="policy-gradient-derivation" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法</p>
+    <h1>度量的梯度：折扣与非折扣情形的推导</h1>
+    <p class="lede">上一课定好了尺子 $J(\theta)$，这一课把它求导。这是全书最长的一次推导，
+      但它的结论极其干净：无论用平均价值还是平均奖励，梯度最后都能写成
+      "某个对数概率（概率取对数）的梯度，乘上某个价值，再取期望"的统一形式。
+      后面所有策略梯度（算出参数往哪调能让总分更高）算法都是这个式子的不同实现。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>推导折扣情形下的策略梯度定理，并说清每一步用到了什么</li>
+        <li>说出折扣状态访问分布 $\rho_\pi$ 的含义，并解释它为什么与初始分布有关</li>
+        <li>用对数技巧 $\nabla\pi=\pi\nabla\log\pi$ 把梯度改写成期望形式</li>
+        <li>说明为什么求导时可以把状态分布当常数处理</li>
+        <li>写出平均奖励（非折扣）情形的对应结论，并指出它与折扣情形的差别</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 记号与目标</h2>
+    <p>为书写方便，把策略（看到什么状态就选什么动作的规则）写成 $\pi(a|s)$，省略参数 $\theta$；求导一律是对 $\theta$ 求，
+      所以 $\nabla$ 就是 $\nabla_\theta$。要算的目标是</p>
+    <div class="eq">
+      <span class="eq-body">$$J(\theta)=\bar v_\pi=\sum_{s\in\mathcal{S}}d(s)\,v_\pi(s),$$</span>
+      <span class="eq-num">(27.1)</span>
+    </div>
+    <p>其中 $d$ 是<em>初始状态分布</em>，它是任务给定的，<strong>与 $\theta$ 无关</strong>。
+      这一点很关键，后面会反复用到。策略 $\pi(a|s,\theta)$ 与它诱导的状态值 $v_\pi(s)$
+      则都依赖 $\theta$。</p>
+    <div class="rem">
+      <span class="label">注记 1.1（这条推导难在哪）</span>
+      <p>$J(\theta)$ 里含 $v_\pi(s)$，而 $v_\pi(s)$ 又依赖策略在<em>未来所有步</em>的行为。
+        换句话说，改一次 $\theta$，整条轨迹上的分布都跟着变。
+        难点就在于把这种"牵一发动全身"的依赖整理成一个可计算的形式。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 先把 $v$ 的梯度展开</h2>
+    <div class="thm">
+      <span class="label">引理 2.1（状态值梯度的递推式）</span>
+      <p>对任意 $s\in\mathcal{S}$，
+        $$\nabla v_\pi(s)=\sum_a\nabla\pi(a|s)\,q_\pi(s,a)+\gamma\sum_{s'}p(s'|s)\,\nabla v_\pi(s'),$$
+        其中 $p(s'|s)=\sum_a\pi(a|s)p(s'|s,a)$ 是策略诱导的一步转移概率（做完动作后环境跳到哪个状态、各有多大的可能性）。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>第一步，从 $v_\pi(s)=\sum_a\pi(a|s)q_\pi(s,a)$ 出发，用乘积的求导法则：
+        $$\nabla v_\pi(s)=\sum_a\Big[\nabla\pi(a|s)\,q_\pi(s,a)+\pi(a|s)\,\nabla q_\pi(s,a)\Big].$$</p>
+      <p>第二步，处理 $\nabla q_\pi(s,a)$。由 $q_\pi(s,a)=r(s,a)+\gamma\sum_{s'}p(s'|s,a)v_\pi(s')$，
+        注意 $r(s,a)$ 与 $p(s'|s,a)$ 都是环境给定的，<em>不含 $\theta$</em>，所以
+        $$\nabla q_\pi(s,a)=\gamma\sum_{s'}p(s'|s,a)\,\nabla v_\pi(s').$$</p>
+      <p>第三步，把第二步代回第一步，并把 $\pi$ 与 $p$ 中的求和合并：
+        $$\nabla v_\pi(s)=\sum_a\nabla\pi(a|s)q_\pi(s,a)+\gamma\sum_{s'}\Big(\sum_a\pi(a|s)p(s'|s,a)\Big)\nabla v_\pi(s').$$
+        括号里就是 $p(s'|s)$，整理即得引理。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="状态值梯度由两部分组成：当前一步的策略变化，以及未来各步的递归贡献">
+        <rect x="30" y="76" width="120" height="52" rx="4" class="box-a"/>
+        <text x="52" y="106" class="val">∇v(s)</text>
+        <path d="M156 92 H236" class="arrow-a"/>
+        <path d="M229 87 l9 5 l-9 5" class="arrow-a"/>
+        <rect x="240" y="24" width="180" height="48" rx="4" class="box"/>
+        <text x="252" y="44" class="val">当前一步：Σ ∇π(a|s) q(s,a)</text>
+        <text x="252" y="62" class="lbl">策略自己变了，立刻见效</text>
+        <path d="M156 114 H236" class="arrow-a"/>
+        <path d="M229 109 l9 5 l-9 5" class="arrow-a"/>
+        <rect x="240" y="132" width="180" height="48" rx="4" class="box"/>
+        <text x="252" y="152" class="val">未来各步：γ Σ p(s'|s) ∇v(s')</text>
+        <text x="252" y="170" class="lbl">同样的式子，在下一状态重来一遍</text>
+        <path d="M424 156 H492 V100 H424" class="arrow"/>
+        <path d="M431 95 l9 5 l-9 5" class="arrow"/>
+        <text x="436" y="196" class="lbl">递归回到自己</text>
+        <text x="30" y="212" class="lbl">引理 2.1：梯度 = 当前一步的贡献 + 下一步的同一问题</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 27.1</span>
+        引理 2.1 把 $\nabla v_\pi(s)$ 拆成两部分：一部分来自"当前这一步的策略变了"，
+        另一部分来自"未来各步的策略也变了"。第二部分的形式与左边完全一样，只是换了个状态，
+        所以这是一个<em>递归</em>关系，可以一层层展开下去。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 展开递归：状态访问分布</h2>
+    <p>把引理 2.1 反复代入自身。为了看清规律，先写前两层：</p>
+    <p>$$\nabla v_\pi(s)=\underbrace{\sum_a\nabla\pi(a|s)q_\pi(s,a)}_{\text{第 0 步}}
+      +\gamma\sum_{s'}p(s'|s)\underbrace{\sum_a\nabla\pi(a|s')q_\pi(s',a)}_{\text{第 1 步}}
+      +\gamma^2\sum_{s''}p^{(2)}(s''|s)\sum_a\nabla\pi(a|s'')q_\pi(s'',a)+\cdots$$</p>
+    <p>其中 $p^{(k)}(x|s)$ 表示"从 $s$ 出发、按策略走 $k$ 步后到达 $x$"的概率。
+      规律很清楚：每一层都是"某个状态的策略梯度乘上它的动作值"，前面挂一个 $\gamma^k$ 和到达该状态的概率。</p>
+    <div class="def">
+      <span class="label">定义 3.1（折扣状态访问分布）</span>
+      <p>给定初始分布 $d$，定义
+        $$\rho_\pi(x)=\sum_{s\in\mathcal{S}}d(s)\sum_{k=0}^{\infty}\gamma^k\,p^{(k)}(x\mid s),\qquad x\in\mathcal{S}.$$
+        它表示"从初始分布出发、按策略 $\pi$ 走，在<em>折扣意义下</em>平均有多经常待在状态 $x$"。
+        注意它对 $x$ 求和不为 1（$\gamma$ 的存在使总量变成 $\frac{1}{1-\gamma}$ 量级），
+        它只是一个权重。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.2（$\gamma^k$ 为什么出现在这里）</span>
+      <p>第 $k$ 步到达的状态，对当前决策的影响被 $\gamma^k$ 打了折（这里的 $\gamma$ 是折扣因子，意思是越往后的奖励，算进总分时权重越小）。这不是人为规定的，
+        而是从 $v_\pi$ 定义里的折扣回报（把往后各步的奖励按 $\gamma$ 打折后加起来）直接带出来的。换句话说，
+        $\rho_\pi$ 同时编码了"多容易到达"和"离现在多远"两件事。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 240" role="img" aria-label="折扣状态访问分布把各步到达各状态的概率按折扣加权后累加">
+        <text x="26" y="20" class="lbl">从初始分布出发，按策略一层层展开</text>
+        <circle cx="60" cy="120" r="20" class="box-a"/>
+        <text x="52" y="125" class="val">s₀</text>
+        <circle cx="180" cy="70" r="18" class="box"/>
+        <circle cx="180" cy="170" r="18" class="box"/>
+        <circle cx="310" cy="46" r="16" class="box"/>
+        <circle cx="310" cy="112" r="16" class="box"/>
+        <circle cx="310" cy="196" r="16" class="box"/>
+        <path d="M82 110 L160 76" class="arrow"/>
+        <path d="M82 130 L160 164" class="arrow"/>
+        <path d="M200 62 L292 50" class="arrow"/>
+        <path d="M200 78 L292 106" class="arrow"/>
+        <path d="M200 178 L292 190" class="arrow"/>
+        <text x="86" y="86" class="lbl">γ⁰·1</text>
+        <text x="212" y="46" class="lbl">γ¹</text>
+        <text x="212" y="130" class="lbl">γ²</text>
+        <text x="356" y="52" class="lbl">第 0 步</text>
+        <text x="356" y="118" class="lbl">第 1 步</text>
+        <text x="356" y="202" class="lbl">第 2 步</text>
+        <text x="26" y="228" class="lbl">ρ(x) = 把同一状态的各层贡献按 γ^k 加权后全部加起来</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 27.2</span>
+        把递归一层层展开，就得到一棵"状态访问树"。同一个状态可能在多个层被访问到，
+        $\rho_\pi(x)$ 就是把所有这些层上"到达 $x$ 的概率 × $\gamma^k$"累加起来。
+        它在策略梯度里扮演的是"这个状态的梯度该占多重"的权重。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4. 策略梯度定理（折扣情形）</h2>
+    <div class="thm">
+      <span class="label">定理 4.1（折扣情形的策略梯度定理）</span>
+      <p>对式 (27.1) 定义的目标函数，
+        $$\nabla J(\theta)=\sum_{x\in\mathcal{S}}\rho_\pi(x)\sum_{a}\nabla\pi(a|x)\,q_\pi(x,a).$$</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>由 $J(\theta)=\sum_s d(s)v_\pi(s)$ 与线性性，
+        $\nabla J(\theta)=\sum_s d(s)\nabla v_\pi(s)$。
+        把第 3 节的展开代入每个 $\nabla v_\pi(s)$，得到
+        $$\nabla J(\theta)=\sum_s d(s)\sum_{x}\sum_{k=0}^{\infty}\gamma^k p^{(k)}(x\mid s)\sum_a\nabla\pi(a|x)q_\pi(x,a).$$</p>
+      <p>这里 $d(s)$ 与 $\theta$ 无关（它是任务给定的初始分布），所以可以原样留在求和号里；
+        $p^{(k)}(x\mid s)$ 依赖 $\theta$，但它已经被展开成显式的求和项，不再需要求导。
+        交换求和次序，把与 $x$ 无关的部分先算完：
+        $$\nabla J(\theta)=\sum_{x}\Big[\sum_s d(s)\sum_{k=0}^{\infty}\gamma^k p^{(k)}(x\mid s)\Big]\sum_a\nabla\pi(a|x)q_\pi(x,a).$$
+        方括号里就是定义 3.1 的 $\rho_\pi(x)$，定理得证。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.2（"把状态分布当常数"到底对不对）</span>
+      <p>上一课注记 3.3 提过：如果 $J$ 里的 $d$ 取的是<em>平稳分布</em>，它就依赖 $\theta$，
+        求导会多出一项。上面的证明说明，只要把 $d$ 取成<strong>固定的初始分布</strong>，
+        这个麻烦就不存在：依赖 $\theta$ 的部分全部被吸收进 $\rho_\pi$ 里了。
+        这就是为什么实践上可以放心地把状态分布当常数。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 对数技巧：把梯度写成期望</h2>
+    <p>定理 4.1 的式子还不方便直接估计：它是一个对状态与动作的双重求和，
+      而我们需要的是<em>能从采样中估计</em>的东西。关键的一步变形是：</p>
+    <div class="eq">
+      <span class="eq-body">$$\nabla\pi(a|s)=\pi(a|s)\,\nabla\log\pi(a|s).$$</span>
+      <span class="eq-num">(27.2)</span>
+    </div>
+    <div class="proof">
+      <span class="label">证明（式 (27.2) 的来历）</span>
+      <p>由链式法则，$\nabla\log\pi(a|s)=\frac{1}{\pi(a|s)}\nabla\pi(a|s)$。
+        两边同乘 $\pi(a|s)$ 即得。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 5.1（策略梯度的期望形式）</span>
+      <p>记 $S\sim\rho_\pi$、$A\sim\pi(\cdot|S)$，则
+        $$\nabla J(\theta)=\E\Big[\nabla\log\pi(A|S)\,q_\pi(S,A)\Big].$$</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>把式 (27.2) 代入定理 4.1：
+        $$\nabla J(\theta)=\sum_x\rho_\pi(x)\sum_a\pi(a|x)\nabla\log\pi(a|x)q_\pi(x,a).$$
+        把 $\rho_\pi(x)$ 归一化成概率需要除以 $\sum_x\rho_\pi(x)$，但那个常数与 $\theta$ 无关，
+        它只影响梯度的尺度、不影响方向，实践上常被吸收进学习率（每次更新时往新信息的方向挪多远）里。
+        于是上式就是"先按 $\rho_\pi$ 抽状态、再按 $\pi$ 抽动作"的期望。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="对数技巧把概率的梯度换成概率乘以对数概率的梯度">
+        <rect x="30" y="40" width="200" height="52" rx="4" class="box"/>
+        <text x="48" y="72" class="val">∇π(a|s)</text>
+        <text x="30" y="110" class="lbl">不知道"概率对参数怎么变"</text>
+        <path d="M238 66 H320" class="arrow-a"/>
+        <path d="M313 61 l9 5 l-9 5" class="arrow-a"/>
+        <text x="250" y="56" class="lbl">乘除同一个 π</text>
+        <rect x="326" y="40" width="188" height="52" rx="4" class="box-a"/>
+        <text x="340" y="72" class="val">π(a|s) · ∇log π(a|s)</text>
+        <text x="326" y="110" class="lbl">一个是概率（可采样），一个是梯度（可计算）</text>
+        <text x="30" y="152" class="lbl">于是可以把"对 π 求导"改写成"对 log π 求导、再乘上 π"：</text>
+        <text x="30" y="182" class="val-b">∇J = E[ ∇log π(A|S) · q(S,A) ]</text>
+        <text x="30" y="206" class="lbl">期望可以用采样估计，这就是所有策略梯度算法的入口</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 27.3</span>
+        对数技巧的全部内容就是"乘一个 $\pi$ 再除一个 $\pi$"。它的价值在于：
+        $\nabla\pi$ 本身不好采样，而 $\pi\cdot\nabla\log\pi$ 里，$\pi$ 提供了采样依据、
+        $\nabla\log\pi$ 可以由网络直接算出。一个式子同时具备了"能采样"与"能计算"。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>6. 非折扣（平均奖励）情形</h2>
+    <p>把目标换成平均奖励 $\bar r_\pi$，推导的结构一模一样，只是状态访问分布换成平稳分布。</p>
+    <div class="thm">
+      <span class="label">定理 6.1（平均奖励情形的策略梯度定理）</span>
+      <p>若马尔可夫链在 $\pi$ 下遍历，则
+        $$\nabla\bar r_\pi=\sum_x d_\pi(x)\sum_a\nabla\pi(a|x)\,q_\pi(x,a)
+        =\E\Big[\nabla\log\pi(A|S)\,q_\pi(S,A)\Big],$$
+        其中 $S\sim d_\pi$（平稳分布），$A\sim\pi(\cdot|S)$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（思路）</span>
+      <p>与折扣情形完全平行，只换两处：把折扣状态访问分布 $\rho_\pi$ 换成平稳分布 $d_\pi$；
+        把 $q_\pi$ 换成平均奖励意义下的动作值（即"相对平均奖励的优势"）。
+        第一步仍然是把 $\nabla v$（此处是微分价值函数）展开成当前一步加递归项；
+        第二步展开递归时，$\gamma^k$ 的角色由"链收敛（一轮轮算下去，状态分布不再明显变化，稳定下来了）到平稳分布"承担，
+        逐层贡献的权重趋于常数，累加后即得 $d_\pi$。第三步用同一个对数技巧收尾。
+        完整细节见原书 9.3.2 节。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 6.2（两种情形的差别只有一处）</span>
+      <p>对比定理 4.1 与定理 6.1：<em>形式完全相同</em>，只是状态权重从 $\rho_\pi$ 换成 $d_\pi$。
+        这一点很有价值：它意味着算法实现上不必区分两种设定，
+        只要把"状态从哪里来"这件事处理好即可。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 200" role="img" aria-label="折扣与非折扣情形的梯度形式相同，只是状态权重不同">
+        <rect x="24" y="34" width="230" height="66" rx="4" class="box"/>
+        <text x="38" y="56" class="val">折扣情形</text>
+        <text x="38" y="78" class="lbl">状态权重 ρ(x)，来自初始分布 + γ^k 衰减</text>
+        <text x="38" y="94" class="lbl">总量不归一，量级约 1/(1−γ)</text>
+        <rect x="286" y="34" width="230" height="66" rx="4" class="box"/>
+        <text x="300" y="56" class="val">非折扣情形</text>
+        <text x="300" y="78" class="lbl">状态权重 d(x)，来自平稳分布</text>
+        <text x="300" y="94" class="lbl">总量恰好为 1</text>
+        <path d="M254 67 H282" class="arrow-a"/>
+        <path d="M277 62 l9 5 l-9 5" class="arrow-a"/>
+        <text x="150" y="136" class="val-b">∇J = E[ ∇log π(A|S) · q(S,A) ]　两者形式完全一样</text>
+        <text x="150" y="164" class="lbl">差别只在"状态从哪里采样"：一个按折扣访问分布，一个按平稳分布</text>
+        <text x="150" y="188" class="lbl">所以算法实现上不必为两种设定写两套代码</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 27.4</span>
+        两种情形的策略梯度定理形式完全相同，唯一区别是状态分布：折扣情形用 $\rho_\pi$，
+        非折扣情形用平稳分布 $d_\pi$。这解释了为什么同一套策略梯度算法
+        （如 REINFORCE、Actor-Critic）能在两种任务设定下通用。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>引理 2.1 把 $\nabla v_\pi(s)$ 拆成"当前一步的策略变化"加"未来各步的递归贡献"。</li>
+      <li>反复展开这个递归，得到折扣状态访问分布 $\rho_\pi(x)$，它把"多容易到达"与"离现在多远"编码在一起。</li>
+      <li>折扣情形的策略梯度定理：$\nabla J(\theta)=\sum_x\rho_\pi(x)\sum_a\nabla\pi(a|x)q_\pi(x,a)$，见式 (27.1) 定义的目标。</li>
+      <li>对数技巧 $\nabla\pi=\pi\nabla\log\pi$ 把双重求和变成期望，见式 (27.2)。</li>
+      <li>最终形式 $\nabla J=\E[\nabla\log\pi(A|S)q_\pi(S,A)]$，两种度量下完全一致。</li>
+    </ul>
+    <p>下一课把这个期望变成可运行的算法：用一次实际回报（从这一步往后拿到的奖励加起来）$G_t$ 代替 $q_\pi$，
+      就得到 REINFORCE。会看到它的方差为什么大，以及基线（从回报里减去的一个参照值，用来压低波动）为什么能救它。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 在推导 $\nabla v_\pi(s)$ 时，为什么 $\nabla q_\pi(s,a)$ 里没有 $r(s,a)$ 的贡献？</p>
+      <ol class="mcq-options">
+        <li>因为 $r(s,a)$ 的期望为零，求导后自然消失</li>
+        <li>因为 $q_\pi$ 的定义里本来就不含即时奖励这一项</li>
+        <li>因为 $r(s,a)$ 由环境给定，不依赖策略参数 $\theta$</li>
+        <li>因为奖励只影响"把策略改好一点"，不影响"给策略打分"</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$q_\pi(s,a)=r(s,a)+\gamma\sum_{s'}p(s'|s,a)v_\pi(s')$ 里，
+          只有 $v_\pi$ 依赖 $\theta$；奖励与转移概率都是环境的一部分，对 $\theta$ 求导为零。</p>
+        <p>A 错在奖励的期望通常不为零，这不是它消失的原因。
+          B 错在 $q_\pi$ 的定义里明确含 $r(s,a)$。D 混淆了评估与改进两个环节。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 折扣状态访问分布 $\rho_\pi(x)=\sum_s d(s)\sum_{k\ge0}\gamma^k p^{(k)}(x|s)$ 中，$\gamma^k$ 这一项的来源是什么？</p>
+      <ol class="mcq-options">
+        <li>为了让 $\rho_\pi$ 对 $x$ 求和等于 1，人为引入的归一化因子</li>
+        <li>从 $v_\pi$ 定义里的折扣回报直接带出来的，不是额外假设</li>
+        <li>用来补偿 $p^{(k)}$ 在 $k$ 很大时的数值误差</li>
+        <li>表示第 $k$ 步的到达概率本身衰减得很快</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_\pi$ 的定义里每一步奖励都带 $\gamma^k$，展开递归时这层折扣原封不动地
+          落到了"第 $k$ 步到达的状态"上。它是推导的自然产物。</p>
+        <p>A 错在 $\rho_\pi$ 并不归一（总量约 $\frac{1}{1-\gamma}$）。
+          C 错在它是数学结构不是数值修补。D 错在 $p^{(k)}$ 本身未必衰减。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 对数技巧 $\nabla\pi(a|s)=\pi(a|s)\nabla\log\pi(a|s)$ 的作用是什么？</p>
+      <ol class="mcq-options">
+        <li>把策略的概率值限制在 $(0,1)$ 区间内</li>
+        <li>消除梯度估计中的偏差，使其成为无偏估计</li>
+        <li>让策略梯度的计算复杂度从指数级降到多项式级</li>
+        <li>把"对概率求导"改写成"概率乘上一个可计算的梯度"，从而能写成期望</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\nabla\pi$ 没法直接从采样估计，而 $\pi\cdot\nabla\log\pi$ 中
+          $\pi$ 提供采样依据、$\nabla\log\pi$ 由网络直接算出，于是双重求和变成期望。</p>
+        <p>A 错在它与取值范围无关。B 错在它不改变偏差，只是改写形式。
+          C 错在复杂度改善来自"变成期望可用采样估计"，不是这个恒等式本身。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 证明中反复强调初始分布 $d(s)$ 与 $\theta$ 无关，这一步的作用是什么？</p>
+      <ol class="mcq-options">
+        <li>它让 $\nabla J=\sum_s d(s)\nabla v_\pi(s)$ 直接成立</li>
+        <li>它保证 $\rho_\pi(x)$ 对 $x$ 求和后恰好等于 1</li>
+        <li>它使折扣因子 $\gamma$ 可以被整体消掉，不再出现</li>
+        <li>它说明策略梯度只能用在起点完全固定的任务上</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：若 $d$ 依赖 $\theta$，求导就要用乘积法则，多出 $\sum_s(\nabla d(s))v_\pi(s)$ 一项。
+          取固定的初始分布就避免了这件事。</p>
+        <p>B 错在 $\rho_\pi$ 本来就不归一。C 错在 $\gamma$ 始终留在式子里。
+          D 错在初始分布可以是任意分布，不限于单点。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 若把目标里的 $d(s)$ 取成策略的平稳分布（因此依赖 $\theta$），会发生什么？</p>
+      <ol class="mcq-options">
+        <li>策略梯度恒为零，因为平稳分布对任何策略都相同</li>
+        <li>定理 4.1 失效，必须改用非折扣的度量</li>
+        <li>形式上会多出一项，但在平稳分布下这一项可以被消掉</li>
+        <li>$\rho_\pi$ 会变成负值，导致梯度方向错误</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：平稳分布满足 $d^T P_\pi=d^T$，利用这个平衡条件可以证明多出的那一项为零。
+          这就是策略梯度定理能在两种目标设定下通用的原因之一。</p>
+        <p>A 错在平稳分布确实随策略变化。B 错在定理仍然成立。
+          D 错在 $\rho_\pi$ 恒非负。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 定理 4.1 与定理 6.1（折扣与非折扣）在形式上的唯一差别是什么？</p>
+      <ol class="mcq-options">
+        <li>折扣情形含 $\gamma$，非折扣情形把 $\gamma$ 全部去掉</li>
+        <li>状态权重不同：一个用折扣访问分布，一个用平稳分布</li>
+        <li>非折扣情形不能使用对数技巧，必须用另一种推导</li>
+        <li>折扣情形求的是 $v_\pi$ 的梯度，非折扣情形求的是 $q_\pi$ 的梯度</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两个定理的右边都是 $\sum_x(\text{状态权重})\sum_a\nabla\pi(a|x)q_\pi(x,a)$，
+          只有状态权重不同。这也是同一套算法能通用两种设定的原因。</p>
+        <p>A 错在非折扣情形不是简单地把 $\gamma$ 置零。C 错在两者都用对数技巧。
+          D 错在两者求的都是标量目标的梯度。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 引理 2.1 的证明里，哪一步把"动作求和"合并成了策略诱导的转移概率 $p(s'|s)$？</p>
+      <ol class="mcq-options">
+        <li>第一步，对 $v_\pi(s)$ 的定义用乘积求导法则</li>
+        <li>第二步，对 $q_\pi$ 的定义求导，得到含 $p(s'|s,a)$ 的式子</li>
+        <li>把 $r(s,a)$ 视为常数而删掉的那一步</li>
+        <li>第三步，把 $\sum_a\pi(a|s)p(s'|s,a)$ 合并成 $p(s'|s)$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$p(s'|s)=\sum_a\pi(a|s)p(s'|s,a)$ 就是"先按策略选动作、再按环境转移"
+          的复合概率，这一步把动作维度消掉了，才使递归能写成只含状态的简洁形式。</p>
+        <p>A、B、C 三步都是必要的，但都不涉及动作维度的合并。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 为什么说策略梯度定理给出的结果"可以用采样估计"？</p>
+      <ol class="mcq-options">
+        <li>因为它被写成了对 $S\sim\rho_\pi$、$A\sim\pi$ 的期望，而期望可用样本平均逼近</li>
+        <li>因为 $\rho_\pi$ 可以事先精确算出，不需要任何采样</li>
+        <li>因为 $\nabla\log\pi(a|s)$ 是一个常数，与样本无关</li>
+        <li>因为 $q_\pi(s,a)$ 可以由环境直接给出真值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理 5.1 把梯度写成了期望形式，由大数定律（第 0001 课式 (1.5)）
+          可以用样本平均逼近。这就是从"一个公式"到"一个算法"的关键一步。</p>
+        <p>B 错在 $\rho_\pi$ 依赖环境模型与策略，一般算不出来，只能通过采样体现。
+          C 错在 $\nabla\log\pi$ 随状态动作而变。D 错在 $q_\pi$ 通常未知，需要用回报估计。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 式 (27.2) 中若把 $\log$ 的底数从 $e$ 换成 10，结论会怎样？</p>
+      <ol class="mcq-options">
+        <li>策略梯度定理不再成立，因为推导用到了自然对数的性质</li>
+        <li>梯度方向不变，但梯度大小会变成原来的 $\ln 10$ 倍</li>
+        <li>梯度方向不变，只是尺度整体改变，可被学习率吸收</li>
+        <li>无法判断，必须针对具体策略重新推导</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：换底只差一个常数因子 $\frac{1}{\ln 10}$，而恒等式
+          $\nabla\log\pi=\frac{\nabla\pi}{\pi}$ 对任何底数都成立（常数因子在两边同时出现）。
+          常数尺度不影响优化方向，实践上吸收进学习率即可。</p>
+        <p>A 错在推导只用到链式法则。B 的倍数说法方向不对（是 $\frac{1}{\ln 10}$ 倍的关键因子问题），
+          且重点在于"不影响方向与收敛性质"。D 错在结论与底数无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. 本课把 $\nabla J$ 写成期望后，下一步最自然的做法是什么？</p>
+      <ol class="mcq-options">
+        <li>把 $\rho_\pi$ 精确求出来，再代入求和的每一项</li>
+        <li>用一次实际采样得到的回报去代替 $q_\pi$，得到可运行的算法</li>
+        <li>把期望展开成对所有状态的求和，用动态规划求解</li>
+        <li>对 $\theta$ 求二阶导，用牛顿法加速收敛</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：期望形式的意义就在于可以用样本估计。把 $q_\pi(S,A)$ 换成一次实际回报 $G_t$
+          （因为 $\E[G_t|S_t,A_t]=q_\pi(S_t,A_t)$），就得到 REINFORCE，这是下一课的内容。</p>
+        <p>A 需要环境模型，与"无模型"的目标相悖。C 回到动态规划的思路上去了。
+          D 二阶方法在策略梯度里因代价过高而很少直接用。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 9 章 9.3 节（含 9.3.1 折扣情形与 9.3.2 非折扣情形的完整推导）。</p>
+      <p>想对照另一种推导路径，即从重要性采样（用另一套分布采到的数据来估计目标分布的期望，靠一个比值加权）出发（用另一套分布采到的数据来估计目标分布的期望，靠一个比值加权），可读 Sutton &amp; Barto,
+        <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 第 13.2 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把引理 2.1 的递归展开成三层，逐项写给我看"，
+      或者 "为什么 $\rho_\pi$ 不归一却还能当状态权重用？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

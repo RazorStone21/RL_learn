@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0001 · 概率论基础 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0001" data-slug="probability-basics" data-part="数学预备篇" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">数学预备 1</p>
+    <h1>概率论基础：随机变量、分布、期望、方差</h1>
+    <p class="lede">这一课把后面 30 课要用的概率语言一次讲清。强化学习的每一步都带随机性：
+      环境下一步跳到哪、奖励拿到多少、策略（一套"看到什么状态就选什么动作"的规则）这次选哪个动作，都是随机的。想读懂贝尔曼方程（把价值写成自洽方程的那组等式），
+      就得先能读懂 $E[R_{t+1}\mid S_t=s]$ 这种写法。这里只讲真正会用到的部分，
+      每一条都配证明或例子。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>说清样本空间、事件、随机变量三者的关系，并判断一个量是不是随机变量</li>
+        <li>写出离散与连续随机变量的分布，并在两种写法之间转换</li>
+        <li>用定义算期望与方差，并证明 $E[aX+bY]=aE[X]+bE[Y]$ 与 $\var(X)=E[X^2]-(E[X])^2$</li>
+        <li>分清独立与不相关，说明为什么同分布要单独提出来</li>
+        <li>陈述大数定律，并解释它为什么是蒙特卡洛方法的依据</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 为什么强化学习离不开概率</h2>
+    <p>先看一个具体场景。你在一个库存问题里补了 50 件货，明天能卖多少？答案不是一个确定的数，
+      而是一堆可能：卖 30 件的可能性大一点，卖 80 件的可能性小一点。这种"结果不唯一、
+      但每种结果有各自的可能性"的对象，就是概率论要处理的东西。</p>
+    <p>强化学习里这样的对象至少有三处。第一，<em>状态转移</em>（做完动作后环境跳到哪个状态）：同一个动作，环境可能跳到不同状态。
+      第二，<em>奖励</em>：同一个状态动作对，拿到的奖励可能不同。第三，<em>策略</em>：策略本身常常是随机的，
+      同一个状态可能选不同动作。后面要学的价值函数（给每个状态或动作打一个"值多少分"的分数的函数），本质就是对这些随机结果求平均。</p>
+    <div class="rem">
+      <span class="label">注记 1.1</span>
+      <p>如果一切都不随机，强化学习会退化成一条确定的路径规划问题，价值就是一个确定的数，
+        也不需要期望。正是随机性让"期望回报"（就是从当前这一步往后能拿到的奖励全加起来）成为核心概念。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 样本空间与事件</h2>
+    <div class="def">
+      <span class="label">定义 2.1（样本空间与样本点）</span>
+      <p>一次随机试验所有可能结果的集合叫<em>样本空间</em>，记作 $\Omega$。
+        $\Omega$ 中的每个元素 $\omega$ 叫一个<em>样本点</em>，也就是这次试验的一个具体结果。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 2.2（事件与概率）</span>
+      <p>样本空间的子集 $A\subseteq\Omega$ 叫<em>事件</em>。概率 $P$ 是定义在事件上的函数，满足三条：
+        (i) 非负性 $P(A)\ge 0$；(ii) 规范性 $P(\Omega)=1$；
+        (iii) 可列可加性：若 $A_1,A_2,\dots$ 两两不相交，则
+        $P\big(\bigcup_{i\ge1}A_i\big)=\sum_{i\ge1}P(A_i)$。</p>
+    </div>
+        <figure class="fig">
+      <svg viewBox="0 0 520 200" role="img" aria-label="样本空间是所有可能结果的集合，事件是它的子集">
+        <rect x="26" y="22" width="468" height="150" rx="4" class="box"/>
+        <text x="40" y="42" class="val-b">Ω　样本空间</text>
+        <circle cx="180" cy="106" r="50" class="box-a"/>
+        <text x="196" y="70" class="val-b">A</text>
+        <circle cx="168" cy="94" r="3.5" class="dot-a"/><text x="176" y="99" class="val">2</text>
+        <circle cx="200" cy="126" r="3.5" class="dot-a"/><text x="208" y="131" class="val">4</text>
+        <circle cx="212" cy="88" r="3.5" class="dot-a"/><text x="220" y="93" class="val">6</text>
+        <circle cx="330" cy="70" r="3.5" class="dot"/><text x="338" y="75" class="val">1</text>
+        <circle cx="368" cy="124" r="3.5" class="dot"/><text x="376" y="129" class="val">3</text>
+        <circle cx="424" cy="92" r="3.5" class="dot"/><text x="432" y="97" class="val">5</text>
+        <text x="40" y="160" class="lbl">事件 A = {2, 4, 6}，即"点数是偶数"</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 1.1</span>
+        样本空间 Ω 是所有可能结果的集合，事件是它的一个子集。概率 P 就是给这些子集分配"有多大可能"的规则。
+        注意"点数是 2"这件事，在数学上就是一个只含单个元素的子集 {2} ⊆ Ω。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 2.3（掷一次骰子）</span>
+      <p>$\Omega=\{1,2,3,4,5,6\}$。事件"点数是偶数"就是 $A=\{2,4,6\}$，$P(A)=3/6=1/2$。
+        事件"点数大于 4"是 $B=\{5,6\}$。两个事件不交，所以 $P(A\cup B)=3/6+2/6=5/6$，
+        这正是可列可加性。</p>
+    </div>
+    <div class="thm">
+      <span class="label">命题 2.4（补集的概率）</span>
+      <p>对任意事件 $A$，有 $P(A^c)=1-P(A)$，其中 $A^c=\Omega\setminus A$ 是 $A$ 的补集。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>$A$ 与 $A^c$ 不相交，且 $A\cup A^c=\Omega$。由可列可加性与规范性，
+        $P(A)+P(A^c)=P(\Omega)=1$。移项即得。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 随机变量：把结果翻译成数字</h2>
+    <p>我们关心的往往不是"哪个结果发生了"，而是"某个数值是多少"。随机变量就是做这个翻译的工具。</p>
+    <div class="def">
+      <span class="label">定义 3.1（随机变量）</span>
+      <p>定义在样本空间上的实值函数 $X:\Omega\to\mathbb{R}$ 叫<em>随机变量</em>。
+        对每个样本点 $\omega$，$X(\omega)$ 是这次试验对应的数值。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.2</span>
+      <p>掷两枚硬币，记"正"为正面、"反"为反面，样本空间是
+        $\Omega=\{$正正, 正反, 反正, 反反$\}$。令 $X$ 表示正面出现的次数，
+        则正正对应 $X=2$，正反与反正都对应 $X=1$，反反对应 $X=0$。
+        这里 $X$ 是随机变量，而 $X=1$ 是一个事件，$P(X=1)=2/4=1/2$。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.3（大写与小写的区别）</span>
+      <p>约定：<em>大写</em> $X$ 表示随机变量本身，<em>小写</em> $x$ 表示它可能取的一个具体值。
+        后面我们会一直写 $S_t$、$A_t$、$R_t$（大写，随机变量），
+        以及 $s$、$a$、$r$（小写，具体取值）。这个区别在写期望时很关键：
+        $E[X]$ 是对随机变量求期望，得到一个数；$E[x]$ 没有意义。</p>
+    </div>
+        <figure class="fig">
+      <svg viewBox="0 0 520 210" role="img" aria-label="随机变量把每个样本点映射成一个实数">
+        <text x="26" y="20" class="lbl">样本空间（试验结果）</text>
+        <text x="386" y="20" class="lbl">实数轴</text>
+        <circle cx="72" cy="58" r="27" class="box"/><text x="54" y="63" class="val">正正</text>
+        <circle cx="72" cy="118" r="27" class="box"/><text x="54" y="123" class="val">正反</text>
+        <circle cx="72" cy="178" r="27" class="box"/><text x="54" y="183" class="val">反反</text>
+        <line x1="330" y1="34" x2="330" y2="200" class="axis-b"/>
+        <line x1="330" y1="58" x2="500" y2="58" class="grid"/>
+        <line x1="330" y1="118" x2="500" y2="118" class="grid"/>
+        <line x1="330" y1="178" x2="500" y2="178" class="grid"/>
+        <text x="508" y="63" class="val-b">2</text>
+        <text x="508" y="123" class="val-b">1</text>
+        <text x="508" y="183" class="val-b">0</text>
+        <path d="M100 58 H320" class="arrow-a"/>
+        <path d="M100 118 H320" class="arrow-a"/>
+        <path d="M100 178 H320" class="arrow-a"/>
+        <path d="M313 53 l9 5 l-9 5" class="arrow-a"/>
+        <path d="M313 113 l9 5 l-9 5" class="arrow-a"/>
+        <path d="M313 173 l9 5 l-9 5" class="arrow-a"/>
+        <text x="330" y="206" class="lbl">X 把每个结果送到一个数字</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 1.2</span>
+        随机变量是一个<em>函数</em>，不是"一个随机的数"。它把每个试验结果映射成一个实数。
+        试验没做之前不知道会走到哪个分支，所以 X 的取值也不确定；一旦做完，X 的值就定了。
+        这正是"大写表示随机变量、小写表示具体取值"的原因。</figcaption>
+    </figure>
+
+  </section>
+
+  <section>
+    <h2>4. 分布：随机变量取值的规律</h2>
+    <div class="def">
+      <span class="label">定义 4.1（概率质量函数，离散情形）</span>
+      <p>若 $X$ 只取可数个值 $x_1,x_2,\dots$，则称 $X$ 为<em>离散型</em>随机变量，
+        函数 $p(x_i)=P(X=x_i)$ 叫它的<em>概率质量函数</em>（probability mass function，PMF）。
+        它满足 $p(x_i)\ge0$ 且 $\sum_i p(x_i)=1$。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 4.2（概率密度函数，连续情形）</span>
+      <p>若存在非负函数 $f$ 使得对任意区间 $[a,b]$ 都有
+        $P(a\le X\le b)=\int_a^b f(x)\,\d x$，则称 $X$ 为<em>连续型</em>随机变量，
+        $f$ 叫它的<em>概率密度函数</em>（probability density function，PDF），且 $\int_{-\infty}^{\infty}f(x)\,\d x=1$。</p>
+    </div>
+        <figure class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="离散分布用柱高表示概率，连续分布用曲线下的面积表示概率">
+        <text x="34" y="22" class="val-b">离散：柱高就是概率</text>
+        <line x1="40" y1="150" x2="240" y2="150" class="axis-b"/>
+        <line x1="40" y1="34" x2="40" y2="150" class="axis-b"/>
+        <rect x="58"  y="118" width="26" height="32" class="bar"/>
+        <rect x="100" y="70"  width="26" height="80" class="bar"/>
+        <rect x="142" y="50"  width="26" height="100" class="bar"/>
+        <rect x="184" y="102" width="26" height="48" class="bar"/>
+        <text x="66"  y="166" class="lbl">1</text>
+        <text x="108" y="166" class="lbl">2</text>
+        <text x="150" y="166" class="lbl">3</text>
+        <text x="192" y="166" class="lbl">4</text>
+        <text x="40" y="188" class="lbl">横轴：取值 x</text>
+        <text x="40" y="206" class="lbl">纵轴：概率 p(x) = P(X = x)</text>
+
+        <line x1="296" y1="34" x2="296" y2="206" class="grid"/>
+
+        <text x="322" y="22" class="val-b">连续：面积才是概率</text>
+        <line x1="320" y1="150" x2="532" y2="150" class="axis-b"/>
+        <line x1="320" y1="34" x2="320" y2="150" class="axis-b"/>
+        <path d="M328 148 C374 148 384 42 424 42 C464 42 474 148 522 148 Z" class="area"/>
+        <path d="M328 148 C374 148 384 42 424 42 C464 42 474 148 522 148" class="curve"/>
+        <line x1="398" y1="52" x2="398" y2="150" class="mark"/>
+        <line x1="452" y1="52" x2="452" y2="150" class="mark"/>
+        <text x="392" y="166" class="lbl">a</text>
+        <text x="446" y="166" class="lbl">b</text>
+        <text x="322" y="188" class="lbl">阴影面积 = ∫ f(x) dx</text>
+        <text x="322" y="206" class="lbl">= P(a ≤ X ≤ b)</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 1.3</span>
+        左图是离散情形：每个取值对应一根柱子，柱高就是它的概率，所有柱高加起来等于 1。
+        右图是连续情形：单点的概率是 0，只有曲线<em>下面的一块面积</em>才是概率。
+        所以密度函数的值可以大于 1，它只要求整条曲线下的总面积等于 1。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 4.3（密度不是概率）</span>
+      <p>连续型随机变量取某一个<em>确切</em>值的概率是 0：$P(X=x)=\int_x^x f=0$。
+        密度 $f(x)$ 可以大于 1，它不是概率，只有积分出来才是概率。
+        这一点在策略梯度（不绕道估价值，直接算参数往哪调能让总分更高）里会反复用到，因为高斯策略的密度值经常大于 1。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 4.4（累积分布函数）</span>
+      <p>$F(x)=P(X\le x)$ 叫<em>累积分布函数</em>（cumulative distribution function，CDF）。
+        它对离散与连续情形都适用，且单调不减、右连续，$\lim_{x\to-\infty}F(x)=0$、$\lim_{x\to\infty}F(x)=1$。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 期望：长期平均</h2>
+    <div class="def">
+      <span class="label">定义 5.1（期望）</span>
+      <p>离散型：$E[X]=\sum_i x_i\,p(x_i)$。连续型：$E[X]=\int_{-\infty}^{\infty}x f(x)\,\d x$。
+        <em>期望</em>是"同一件事重复很多次之后，结果的平均值"，
+        注意不要和"最可能出现的值"混为一谈，两者一般不同。</p>
+    </div>
+            <figure class="fig">
+      <svg viewBox="0 0 520 230" role="img" aria-label="期望相当于把分布架在支点上刚好平衡的位置">
+        <line x1="60" y1="152" x2="470" y2="152" class="axis-b"/>
+        <rect x="100" y="102" width="42" height="50" class="bar"/>
+        <rect x="180" y="62"  width="42" height="90" class="bar"/>
+        <rect x="260" y="42"  width="42" height="110" class="bar"/>
+        <rect x="340" y="92"  width="42" height="60" class="bar"/>
+        <text x="112" y="168" class="lbl">1</text>
+        <text x="192" y="168" class="lbl">2</text>
+        <text x="272" y="168" class="lbl">3</text>
+        <text x="352" y="168" class="lbl">4</text>
+        <text x="252" y="34" class="lbl">最高的柱子在这里</text>
+        <path d="M281 40 V56" class="arrow-a"/>
+        <line x1="238" y1="42" x2="238" y2="178" class="mark"/>
+        <polygon points="238,178 226,198 250,198" class="dot"/>
+        <text x="196" y="216" class="val-b">E[X]</text>
+        <text x="252" y="216" class="lbl">← 支点：两边的"重量"刚好平衡</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 1.4</span>
+        期望可以想成分布的<em>支点</em>：把柱子按概率当重量，支点放在 E[X] 处正好两边平衡。
+        它不一定等于"最可能出现"的那个值（这里最高的是 3，支点却落在 2 附近），
+        也不一定是能取到的值（掷一枚骰子的期望是 3.5，而骰子掷不出 3.5）。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">定理 5.2（期望的线性性）</span>
+      <p>设 $X,Y$ 是随机变量，$a,b\in\mathbb{R}$ 是常数，则</p>
+    <div class="eq">
+      <span class="eq-body">$$E[aX+bY]=a\,E[X]+b\,E[Y].$$</span>
+      <span class="eq-num">(1.1)</span>
+    </div>
+    <p>这里<em>不要求</em> $X$ 与 $Y$ 独立。若 $X_1,\dots,X_n$ 是随机变量，则
+        $E\big[\sum_{i=1}^n X_i\big]=\sum_{i=1}^n E[X_i]$。见式 (1.1)。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（离散情形）</span>
+      <p>设 $(X,Y)$ 的联合分布为 $p(x,y)=P(X=x,Y=y)$。按定义，
+        $$E[aX+bY]=\sum_x\sum_y (ax+by)\,p(x,y).$$
+        把求和拆成两项：
+        $$=a\sum_x x\Big(\sum_y p(x,y)\Big)+b\sum_y y\Big(\sum_x p(x,y)\Big).$$
+        括号里分别是边缘分布 $p_X(x)=\sum_y p(x,y)$ 与 $p_Y(y)=\sum_x p(x,y)$，于是
+        $$=a\sum_x x\,p_X(x)+b\sum_y y\,p_Y(y)=a\,E[X]+b\,E[Y].$$
+        整个推导只用到求和的可加性，没有用到独立性，所以结论对任意 $X,Y$ 成立。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.3（为什么线性性如此重要）</span>
+      <p>回报 $G_t=R_{t+1}+\gamma R_{t+2}+\gamma^2R_{t+3}+\cdots$ 是一长串随机变量之和。
+        正因为期望是线性的，才能把它拆成
+        $E[G_t]=\sum_{k\ge0}\gamma^k E[R_{t+k+1}]$，
+        其中 $\gamma$ 是折扣因子（越往后的奖励，算进总分时权重越小的那个系数）。
+        没有线性性，后面所有价值函数的推导都做不下去。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.4</span>
+      <p>掷一枚公平的骰子，$X$ 为点数。$E[X]=\frac{1}{6}(1+2+3+4+5+6)=3.5$。
+        注意 3.5 本身不是骰子能掷出的点数，它只是长期平均值。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. 方差：波动有多大</h2>
+    <div class="def">
+      <span class="label">定义 6.1（方差与标准差）</span>
+      <p><em>方差</em>定义为 $\var(X)=E\big[(X-E[X])^2\big]$，
+        衡量 $X$ 偏离它自己平均值的程度。$\sigma_X=\sqrt{\var(X)}$ 叫<em>标准差</em>，
+        与 $X$ 同量纲，因此更常用来描述"波动大小"。</p>
+    </div>
+            <figure class="fig">
+      <svg viewBox="0 0 520 250" role="img" aria-label="期望相同但方差不同的两个分布">
+        <line x1="50" y1="150" x2="480" y2="150" class="axis-b"/>
+        <line x1="265" y1="34" x2="265" y2="150" class="mark"/>
+        <text x="214" y="26" class="lbl">两者的 E[X] 相同</text>
+        <path d="M175 148 C222 148 236 46 265 46 C294 46 308 148 355 148" class="curve"/>
+        <path d="M80 148 C170 148 212 102 265 102 C318 102 360 148 450 148" class="curve2"/>
+        <text x="360" y="94" class="lbl">虚线：方差大，分散</text>
+        <text x="150" y="44" class="lbl">实线：方差小，集中</text>
+        <line x1="175" y1="170" x2="355" y2="170" class="arrow"/>
+        <path d="M175 166 l-9 4 l9 4" class="arrow"/>
+        <path d="M355 166 l9 4 l-9 4" class="arrow"/>
+        <text x="196" y="190" class="lbl">实线取值挤在这一段里</text>
+        <line x1="80" y1="212" x2="450" y2="212" class="arrow"/>
+        <path d="M80 208 l-9 4 l9 4" class="arrow"/>
+        <path d="M450 208 l9 4 l-9 4" class="arrow"/>
+        <text x="204" y="232" class="lbl">虚线取值铺开到这么宽</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 1.5</span>
+        两条曲线的中心落在同一处（期望一样），但胖瘦不同（方差不同）。
+        实线瘦而高，说明取值大多挤在平均值附近；虚线扁而宽，说明取值散布得远。
+        方差只看"离平均值有多远"，不看位置：把整条曲线平移，方差不变。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">定理 6.2（方差的计算公式）</span>
+      <p>见式 (1.2)。</p>
+      <p></p>
+    <div class="eq">
+      <span class="eq-body">$$\var(X)=E[X^2]-\big(E[X]\big)^2.$$</span>
+      <span class="eq-num">(1.2)</span>
+    </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记 $\mu=E[X]$。展开平方：
+        $$E\big[(X-\mu)^2\big]=E\big[X^2-2\mu X+\mu^2\big].$$
+        由期望的线性性（定理 5.2）逐项拆开，注意 $\mu$ 是常数：
+        $$=E[X^2]-2\mu E[X]+\mu^2=E[X^2]-2\mu^2+\mu^2=E[X^2]-\mu^2.$$
+        代回 $\mu=E[X]$ 即得。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">命题 6.3（方差的缩放与平移）</span>
+      <p>对常数 $a,b$：$\var(aX+b)=a^2\var(X)$。特别地，平移不改变方差。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>由线性性 $E[aX+b]=aE[X]+b$，于是 $aX+b$ 与其期望之差为 $a(X-E[X])$。
+        代入定义：$\var(aX+b)=E\big[a^2(X-E[X])^2\big]=a^2E\big[(X-E[X])^2\big]=a^2\var(X)$。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. 几个必须认识的分布</h2>
+    <div class="def">
+      <span class="label">定义 7.1（伯努利分布）</span>
+      <p>$X\in\{0,1\}$，$P(X=1)=p$，$P(X=0)=1-p$，记作 $X\sim\text{Bernoulli}(p)$。
+        则 $E[X]=p$，$\var(X)=p(1-p)$。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 7.2（均匀分布）</span>
+      <p>连续情形：$X$ 在 $[a,b]$ 上密度为常数 $f(x)=\frac{1}{b-a}$，记作 $X\sim U(a,b)$。
+        则 $E[X]=\frac{a+b}{2}$，$\var(X)=\frac{(b-a)^2}{12}$。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 7.3（正态分布）</span>
+      <p>密度 $f(x)=\frac{1}{\sqrt{2\pi}\sigma}\exp\!\big(-\frac{(x-\mu)^2}{2\sigma^2}\big)$，
+        记作 $X\sim\mathcal{N}(\mu,\sigma^2)$。它是最常见的钟形分布，
+        参数 $\mu$ 就是期望、$\sigma^2$ 就是方差。后面讲连续动作的高斯策略时我们会回到它。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>8. 独立性与同分布</h2>
+    <div class="def">
+      <span class="label">定义 8.1（相互独立）</span>
+      <p>若对任意 $x,y$ 都有 $P(X\le x,\,Y\le y)=P(X\le x)\,P(Y\le y)$，
+        则称 $X$ 与 $Y$ <em>相互独立</em>。离散情形等价于 $p(x,y)=p_X(x)\,p_Y(y)$。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 8.2（独立则乘积的期望可拆）</span>
+      <p>若 $X$ 与 $Y$ 独立，则 $E[X\cdot Y]=E[X]\,E[Y]$，见式 (1.3)。反之不成立：
+        乘积期望可拆只说明<em>不相关</em>，推不出独立。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（离散情形）</span>
+      <p>由独立性 $p(x,y)=p_X(x)p_Y(y)$，于是</p>
+    <div class="eq">
+      <span class="eq-body">$$E[X\cdot Y]=\sum_x\sum_y xy\,p_X(x)p_Y(y)=\Big(\sum_x x\,p_X(x)\Big)\Big(\sum_y y\,p_Y(y)\Big)=E[X]\,E[Y].$$</span>
+      <span class="eq-num">(1.3)</span>
+    </div>
+    <p>反过来不成立：取 $X\sim U(-1,1)$ 且 $Y=X^2$，则 $E[X\cdot Y]=E[X^3]=0=E[X]\,E[Y]$，
+        但 $Y$ 完全由 $X$ 决定，显然不独立。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="def">
+      <span class="label">定义 8.3（独立同分布）</span>
+      <p>若 $X_1,\dots,X_n$ 相互独立，且每个都服从同一个分布，则称它们<em>独立同分布</em>
+        （independent and identically distributed，i.i.d.）。
+        后面"把一个策略跑很多遍收集样本"就依赖这个假设：
+        每一遍的回报是独立同分布的随机变量。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 8.4（独立和的方差可加）</span>
+      <p>若 $X_1,\dots,X_n$ 相互独立，则 $\var\big(\sum_{i=1}^n X_i\big)=\sum_{i=1}^n \var(X_i)$，见式 (1.4)。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（$n=2$ 的情形，一般情形同理）</span>
+      <p>记 $\mu_X=E[X]$、$\mu_Y=E[Y]$。由定义与线性性，</p>
+    <div class="eq">
+      <span class="eq-body">$$\var(X+Y)=E\big[(X+Y-\mu_X-\mu_Y)^2\big]=E\big[(X-\mu_X)^2\big]+E\big[(Y-\mu_Y)^2\big]+2E\big[(X-\mu_X)(Y-\mu_Y)\big].$$</span>
+      <span class="eq-num">(1.4)</span>
+    </div>
+    <p>前两项是 $\var(X)+\var(Y)$。第三项里，由独立性
+        $E[(X-\mu_X)(Y-\mu_Y)]=E[X-\mu_X]\,E[Y-\mu_Y]=0\cdot0=0$，故得证。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 8.5（这条定理在强化学习里的分量）</span>
+      <p>它解释了为什么"多跑几遍取平均"能降低估计的波动：
+        $n$ 个独立样本的平均，方差是单个样本的 $1/n$，标准差降到 $1/\sqrt{n}$。
+        这也说明精度提升是"开平方"的：想把误差减半，样本数要翻四倍。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>9. 大数定律：为什么多试几次就准了</h2>
+    <div class="thm">
+      <span class="label">定理 9.1（弱大数定律）</span>
+      <p>设 $X_1,X_2,\dots$ 独立同分布，且 $E[X_i]=\mu$ 存在。记样本均值
+        $\bar X_n=\frac{1}{n}\sum_{i=1}^n X_i$。则对任意 $\varepsilon>0$，见式 (1.5)。</p>
+    <div class="eq">
+      <span class="eq-body">$$\lim_{n\to\infty}P\big(|\bar X_n-\mu|>\varepsilon\big)=0.$$</span>
+      <span class="eq-num">(1.5)</span>
+    </div>
+    <p>也就是说，样本量越大，样本均值落在真实期望附近的概率越高。</p>
+    </div>
+        <figure class="fig">
+      <svg viewBox="0 0 540 240" role="img" aria-label="样本均值随样本量增大收敛到真实期望">
+        <text x="26" y="22" class="lbl">样本均值 X̄ₙ</text>
+        <line x1="70" y1="34" x2="70" y2="186" class="axis-b"/>
+        <line x1="70" y1="186" x2="510" y2="186" class="axis-b"/>
+        <text x="464" y="204" class="lbl">样本量 n</text>
+        <path d="M70 40 L510 84 L510 140 L70 184 Z" class="area"/>
+        <line x1="70" y1="112" x2="510" y2="112" class="mark"/>
+        <text x="514" y="117" class="val-b">μ</text>
+        <path d="M74 48 L94 162 L110 76 L126 146 L144 92 L162 138 L184 100 L206 132 L230 108 L256 128
+                 L284 112 L314 124 L346 114 L380 121 L416 115 L454 119 L494 116" class="curve"/>
+        <text x="86" y="38" class="lbl">允许偏差 ±ε 的窗口，随 n 变窄</text>
+        <text x="130" y="228" class="lbl">n → ∞ 时，落到窗口外面的概率趋于 0（不是说一定等于 μ）</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 1.6</span>
+        横轴是样本量，纵轴是样本均值。真实期望记作 μ（就是这件事重复很多次之后的长期平均值），
+        灰色带子是允许的偏差范围 ±ε（ε 读作"艾普西龙"，是你事先指定的一个很小的正数）。
+        样本少的时候抖动剧烈、经常跑出带子；样本多了以后抖动收窄，最后几乎总待在带子里。
+        大数定律说的就是这件事：<em>落在带子外面的概率</em>趋于 0，而不是说样本均值一定等于 μ。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 9.2（为什么这里只陈述不证明）</span>
+      <p>完整证明需要切比雪夫不等式或特征函数，属于测度论概率的范围（原书附录 B）。
+        这里先把结论用起来：第四课的序列收敛（一轮轮算下去，数值不再明显变化，稳定下来了）会给出严格的收敛语言，
+        蒙特卡洛（把一整局走完、用真实拿到的总分来估计价值）那一课会用它说明"为什么用样本平均能估计价值"。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 9.3（估计一个动作的价值）</span>
+      <p>你反复拉同一个老虎机，第 $i$ 次拿到奖励 $R_i$。如果每次拉都是独立的、
+        且真实平均奖励是 $\mu$，那么拉 $n$ 次之后用 $\bar R_n$ 去估计 $\mu$ 是合理的：
+        大数定律保证 $n$ 越大它越接近真值。这正是蒙特卡洛方法的全部依据。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>随机变量是样本空间上的实值函数；大写表示变量本身，小写表示取值。</li>
+      <li>离散用 PMF，连续用 PDF；密度不是概率，连续型取单点的概率为 0。</li>
+      <li>期望是长期平均，且<em>永远</em>线性：$E[aX+bY]=aE[X]+bE[Y]$，不需要独立性。</li>
+      <li>$\var(X)=E[X^2]-(E[X])^2$；独立时方差可加，标准差按 $\sqrt{n}$ 缩小。</li>
+      <li>大数定律保证样本均值收敛到期望，这是后面所有采样方法的依据。</li>
+    </ul>
+    <p>下一课把"期望"升级成"条件期望"。强化学习里几乎每个公式都带一个竖线
+      $\mid$，比如 $E[R_{t+1}\mid S_t=s]$，读作"在已知 $S_t=s$ 的条件下求平均"。
+      全期望公式更是贝尔曼方程的推导起点。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 关于随机变量，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>随机变量就是一次试验中那个不确定的结果本身</li>
+        <li>随机变量是一个数，试验结束后它的值就确定了</li>
+        <li>随机变量是定义在样本空间上的函数，试验前不知道取值</li>
+        <li>只有连续取值的量才叫随机变量，离散取值只能叫事件</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：随机变量的本质是"函数"，它把每个样本点映射成一个实数。
+          它本身不是那个结果，而是结果的数值化描述。</p>
+        <p>A 错在把随机变量与样本点混为一谈。B 错在漏掉了"试验前不知道"这一性质，
+          而且把随机变量说成"一个数"也不对，它是一个函数。D 完全说反了：
+          离散型随机变量是最基本的一类。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 设 $X\sim U(0,4)$，其密度函数 $f(x)$ 在 $[0,4]$ 上的取值是多少？</p>
+      <ol class="mcq-options">
+        <li>$1/4$，因为密度必须在 $[0,1]$ 之间</li>
+        <li>$1/4$，因为密度在区间上积分为 1</li>
+        <li>$4$，因为区间长度为 4</li>
+        <li>无法确定，密度依赖于具体的样本点</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：均匀分布的密度是常数 $1/(b-a)=1/4$，由 $\int_0^4 f\,\d x=1$ 定出。
+          注意 A 的理由是错的：密度可以大于 1，它不受 $[0,1]$ 限制。</p>
+        <p>C 错在把"区间长度"当成密度。D 错在把密度和概率混淆：
+          均匀分布的密度在整个区间上是同一个常数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 证明 $E[aX+bY]=aE[X]+bE[Y]$ 时，哪一步用到了"$X$ 与 $Y$ 独立"？</p>
+      <ol class="mcq-options">
+        <li>把二重求和拆成两个单重求和的那一步</li>
+        <li>把常数 $a$、$b$ 提到求和号外面的那一步</li>
+        <li>用 $p_X(x)=\sum_y p(x,y)$ 替换边缘分布的那一步</li>
+        <li>一步都没用到，期望的线性性对任意 $X$、$Y$ 都成立</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：整个推导只用求和的可加性。独立性会给出 $p(x,y)=p_X(x)p_Y(y)$，
+          但线性性的证明根本不需要它。</p>
+        <p>A、B、C 三步都只用到求和与乘法的基本性质，与独立性无关。
+          记住这个结论很重要：不要误以为"期望可加"需要独立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 已知 $E[X]=3$、$\var(X)=4$，则 $E[X^2]$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$E[X^2]=13$，由 $\var(X)+(E[X])^2$ 算得</li>
+        <li>$E[X^2]=7$，由 $\var(X)+E[X]$ 算得</li>
+        <li>$E[X^2]=25$，由 $(\var(X)+E[X])^2$ 算得</li>
+        <li>条件不足，无法确定 $E[X^2]$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由 $\var(X)=E[X^2]-(E[X])^2$ 得 $E[X^2]=\var(X)+(E[X])^2=4+9=13$。</p>
+        <p>B 错在把方差和期望直接相加，丢掉了平方。C 错在把 $(E[X])^2$ 又平方了一次。
+          D 错在不知道上面那条恒等式，它是方差最基本的变形。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 设 $X$ 与 $Y$ 满足 $E[X\cdot Y]=E[X]E[Y]$，可以推出什么？</p>
+      <ol class="mcq-options">
+        <li>$X$ 与 $Y$ 一定相互独立</li>
+        <li>$X$ 与 $Y$ 一定不独立</li>
+        <li>$X$ 与 $Y$ 不相关，但未必独立</li>
+        <li>什么也推不出来，这只是个恒等式</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$E[X\cdot Y]=E[X]E[Y]$ 正是"不相关"的定义，它比独立弱。
+          独立一定不相关，反之不成立。</p>
+        <p>A 是常见错误，把充分条件当成了必要条件。反例：$X\sim U(-1,1)$、$Y=X^2$，
+          乘积期望为 0，但 $Y$ 由 $X$ 完全决定。D 错在这确实是一个有内容的性质。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 对连续型随机变量 $X$，$P(X=x_0)$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$f(x_0)$，即该点的密度值</li>
+        <li>$F(x_0)$，即该点的累积分布值</li>
+        <li>$f(x_0)$ 与区间长度的乘积</li>
+        <li>$0$，因为单点区间的积分为零</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：连续型随机变量在任意单点上的概率都是 0，
+          $P(X=x_0)=\int_{x_0}^{x_0}f\,\d x=0$。</p>
+        <p>A 是最容易犯的错：密度不是概率。B 混淆了 $P(X\le x_0)$ 与 $P(X=x_0)$。
+          C 描述的是短区间上的近似概率，不是单点概率。这个结论在策略梯度里会用到：
+          高斯策略的对数密度可以大于 1，但它不是一个概率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">7. 若 $Y=2X+5$ 且 $\var(X)=3$，则 $\var(Y)$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$6$</li>
+        <li>$12$</li>
+        <li>$17$</li>
+        <li>$3$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\var(aX+b)=a^2\var(X)=4\times3=12$。常数平移 $+5$ 对方差没有任何影响。</p>
+        <p>A 错在用了 $a$ 而不是 $a^2$。C 错在把平移量也算进了方差。
+          D 错在以为缩放不改变方差。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 把同一个策略跑 $n$ 遍，得到 $n$ 个独立同分布的回报，用它们的平均估计价值。
+        若想让估计的标准差减半，$n$ 大约要变成原来的多少倍？</p>
+      <ol class="mcq-options">
+        <li>$4$ 倍</li>
+        <li>$2$ 倍</li>
+        <li>$1/2$ 倍</li>
+        <li>$n$ 倍</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$n$ 个独立样本均值的标准差是 $\sigma/\sqrt{n}$。
+          要让 $\sqrt{n}$ 翻倍，$n$ 必须翻四倍。</p>
+        <p>B 错在把标准差与方差混为一谈：方差确实只需 $1/2$，但标准差不是。
+          D 错得很离谱，精度提升从来不是线性的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 大数定律说样本均值 $\bar X_n$ 收敛到 $E[X]$，这里的"收敛"最准确的理解是？</p>
+      <ol class="mcq-options">
+        <li>只要 $n$ 足够大，$\bar X_n$ 就恒等于 $E[X]$</li>
+        <li>$\bar X_n$ 是一个确定的数列，它单调趋近 $E[X]$</li>
+        <li>$n$ 越大，$\bar X_n$ 落在 $E[X]$ 附近的概率越小，但二者无关</li>
+        <li>$n\to\infty$ 时 $\bar X_n$ 偏离 $E[X]$ 超过任意给定量的概率趋于 0</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：弱大数定律的结论是一个关于<em>概率</em>的极限，
+          即 $P(|\bar X_n-\mu|>\varepsilon)\to0$。它说的是"偏离较大的可能性越来越小"，
+          不是"一定等于"。</p>
+        <p>A 错在把概率收敛当成了必然相等。B 错在把 $\bar X_n$ 当成确定数列：
+          它是随机变量，每做一次实验序列都不同。C 说反了方向。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">10. 为什么说"回报的期望可以逐项拆开"是强化学习里最关键的一步？</p>
+      <ol class="mcq-options">
+        <li>因为回报里每一项都相互独立，所以才能拆</li>
+        <li>因为折扣因子 $\gamma<1$ 保证了级数一定收敛</li>
+        <li>因为期望是线性的，拆开不需要各步奖励相互独立</li>
+        <li>因为回报一定是有限项之和，可以直接分配期望</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$E[G_t]=E[\sum_k\gamma^kR_{t+k+1}]=\sum_k\gamma^kE[R_{t+k+1}]$
+          只依赖期望的线性性。而同一条轨迹上各步奖励通常是<em>不</em>独立的
+          （下一步在哪个状态，取决于这一步走到了哪），所以 A 恰好说反了。</p>
+        <p>B 讲的是级数收敛，那是把期望拆开之后才需要考虑的问题，不是拆开的理由。
+          D 错在回报往往是无限项之和，而且"有限项"也不是能分配期望的原因。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        附录 A「Preliminaries for Probability Theory」。本课的样本空间、随机变量、
+        期望与方差的口径与之一致。</p>
+      <p>想补更完整的概率论（含大数定律的严格证明），可读
+        <em>Probability and Random Processes</em>（Grimmett &amp; Stirzaker）第 1、3、5 章，
+        或任何一本本科概率论教材的条件期望与收敛章节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把期望的线性性用我熟悉的掷骰子再讲一遍"，
+      或者 "为什么连续型随机变量取单点的概率是 0，直观上怎么理解？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0029 · QAC 与 A2C — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0029" data-slug="qac-a2c" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法</p>
+    <h1>QAC 与 A2C：基线不变性</h1>
+    <p class="lede">REINFORCE 有两个毛病：必须跑完整局，而且方差大。这一课请出第二个网络
+      来解决第一个毛病：一边学策略（看到什么状态就选什么动作的规则）、一边学价值，让价值来当那个"打分的人"。
+      这一分工叫 Actor-Critic。再把上一课"减去一个参照值"的思想用足，就得到 A2C（Advantage Actor-Critic，用"比平均好多少"当权重的 Actor-Critic）。
+      它是本书介绍的最后一个随机策略（同一个状态按概率选不同动作，而不是永远选同一个）算法家族的骨架。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>说清 actor 与 critic 各自学什么、为什么这样分工能降低方差</li>
+        <li>写出最简单的 Actor-Critic（QAC）的两条更新式</li>
+        <li>写出优势函数 $A(s,a)=q_\pi(s,a)-v_\pi(s)$ 并说明它的含义</li>
+        <li>证明减去状态值基线不改变策略梯度的期望，并说明它为什么优于常数基线</li>
+        <li>说清 A2C 与 REINFORCE 在数据使用方式上的差别</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 为什么需要一个"打分的人"</h2>
+    <p>先把上一课的两条更新式并排看。REINFORCE 用的是</p>
+    <div class="eq">
+      <span class="eq-body">$$\theta\leftarrow\theta+\alpha\,\gamma^t\,G_t\,\nabla\log\pi(a_t|s_t,\theta).$$</span>
+      <span class="eq-num">(29.1)</span>
+    </div>
+    <p>其中 $G_t$ 是跑完整局之后才知道的实际回报（从这一步往后拿到的奖励加起来），而所谓基线，就是从回报里减去的一个参照值，用来压低波动。两个毛病都出在 $G_t$ 上：
+      要等整局结束（不能边走边学），而且它是单次采样的结果（方差大）。</p>
+    <p>关键的想法是：$G_t$ 的作用只是"给这一步的动作打个分"。
+      既然是打分，为什么不让一个专门学打分的网络来做？这个网络见过很多次"从某状态某动作出发会怎样"，
+      它的估计比单次 $G_t$ 稳定得多。</p>
+    <div class="def">
+      <span class="label">定义 1.1（actor 与 critic）</span>
+      <p><em>actor</em>（演员）指策略网络 $\pi(a|s,\theta)$，它负责做决定，
+        也就是"出招的那一方"。<em>critic</em>（评论家）指价值网络，
+        它负责估计"现在这个局面值多少分"，也就是"打分的那一方"。
+        用 critic 的输出代替 $G_t$ 去更新 actor，这一结构就叫 <em>Actor-Critic</em>。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 250" role="img" aria-label="Actor-Critic 的结构：actor 做决定，critic 打分，critic 反过来指导 actor">
+        <rect x="40" y="40" width="150" height="60" rx="5" class="box-a"/>
+        <text x="78" y="66" class="val-b">actor（演员）</text>
+        <text x="60" y="86" class="lbl">策略 π(a|s,θ)：做决定</text>
+        <rect x="350" y="40" width="150" height="60" rx="5" class="box"/>
+        <text x="382" y="66" class="val-b">critic（评论家）</text>
+        <text x="366" y="86" class="lbl">价值 v(s,w) 或 q(s,a,w)</text>
+        <rect x="180" y="160" width="180" height="56" rx="5" class="box"/>
+        <text x="222" y="186" class="val">环境</text>
+        <text x="196" y="204" class="lbl">给出奖励与下一个状态</text>
+        <path d="M115 104 L115 188 L176 188" class="arrow-a"/>
+        <path d="M169 183 l9 5 l-9 5" class="arrow-a"/>
+        <text x="112" y="146" class="lbl">动作 a</text>
+        <path d="M364 188 L425 188 L425 104" class="arrow"/>
+        <path d="M420 111 l5 -9 l5 9" class="arrow"/>
+        <text x="366" y="146" class="lbl">状态 s、奖励 r</text>
+        <path d="M350 70 L196 70" class="arrow-a"/>
+        <path d="M203 65 l-9 5 l9 5" class="arrow-a"/>
+        <text x="230" y="58" class="lbl">打分 / 优势，用来调策略</text>
+        <text x="40" y="238" class="lbl">actor 决定做什么，critic 评价做得怎么样，评价反过来改 actor</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 29.1</span>
+        Actor-Critic 的分工：actor 与环境交互、做决定；critic 观察这些经历，
+        学"每个局面值多少分"；然后用 critic 的打分去更新 actor。
+        与 REINFORCE 的区别在于：打分不再来自一次性的整局回报，而来自一个被反复训练的网络。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 最简单的 Actor-Critic（QAC）</h2>
+    <p>最直接的做法：让 critic 学动作值 $q_\pi(s,a)$，学的办法就是上一部分学过的
+      Sarsa（第 0021 课）。把它和策略梯度（算出参数往哪调能让总分更高）拼起来，就得到 QAC。</p>
+    <div class="def">
+      <span class="label">算法 2.1（QAC：Q Actor-Critic）</span>
+      <p>维护两套参数：actor 的 $\theta$ 与 critic 的 $w$。每一步 $t$ 拿到
+        $(s_t,a_t,r_{t+1},s_{t+1},a_{t+1})$ 之后：</p>
+      <p>① <em>critic 更新</em>用时序差分（一步的即时奖励加上下一步的估计，不必等整局结束）来学 $q$：
+        $$w\leftarrow w+\alpha_w\,\delta_t\,\nabla_w q(s_t,a_t,w),\qquad
+        \delta_t=r_{t+1}+\gamma\,q(s_{t+1},a_{t+1},w)-q(s_t,a_t,w);$$</p>
+      <p>② <em>actor 更新</em>（把 $q$ 当作权重，学策略）：
+        $$\theta\leftarrow\theta+\alpha_\theta\,q(s_t,a_t,w)\,\nabla_\theta\log\pi(a_t|s_t,\theta).$$</p>
+      <p>两条更新交替进行，可以边走边学，不必等整局结束。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.2（两个"人"要在同一时间尺度上学习）</span>
+      <p>若 actor 学得太快，它会追着一个还不准的 critic 跑；若 critic 学得太快，
+        它衡量的又已经是一个过时的策略。实践中常让 critic 的学习率（每次更新时往新信息的方向挪多远）略大于 actor，
+        或让 actor 的更新更保守。这个"两个时间尺度"的问题在 Actor-Critic 里普遍存在。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 优势函数：比"绝对分数"更好的信号</h2>
+    <p>QAC 用 $q(s,a)$ 当权重。但 $q(s,a)$ 是一个<em>绝对</em>的分数：
+      在某个状态里，所有动作的 $q$ 值可能都很大（因为那个状态本身很好），
+      于是无论选哪个动作，权重都很大，策略被推动的方向反而混乱。</p>
+    <p>我们真正想知道的是"在这个状态里，选这个动作比<em>平均</em>好多少"，这个量叫优势（advantage，比平均水平好多少），记作 $A_\pi(s,a)$。</p>
+    <div class="def">
+      <span class="label">定义 3.1（优势函数，意思是"比按策略平均要好多少"）</span>
+      <p>$$A_\pi(s,a)=q_\pi(s,a)-v_\pi(s),\qquad\text{其中 } v_\pi(s)=\sum_a\pi(a|s)q_\pi(s,a).$$
+        优势函数 $A_\pi(s,a)$ 表示"在某个状态下，选这个动作比按策略平均要好多少"。
+        由定义，对固定的 $s$ 有 $\sum_a\pi(a|s)A_\pi(s,a)=0$：
+        优势在策略下加权平均恰好为零，正值表示比平均好，负值表示比平均差。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.2（为什么 $v_\pi(s)$ 天然是一个好基线）</span>
+      <p>上一课证明了减去任何只依赖状态的 $b(s)$ 都不改变梯度期望。
+        把 $b$ 取成 $v_\pi(s)$，权重就从 $q_\pi$ 变成 $q_\pi-v_\pi=A_\pi$。
+        这个选择不只是"合法"，而且很合适：它的均值是零，
+        不会再有那个"整体偏大"的公共偏移。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 3.3（优势形式的策略梯度）</span>
+      <p>$$\nabla J(\theta)=\E\Big[\nabla\log\pi(A|S,\theta)\,A_\pi(S,A)\Big].$$
+        它与式 (28.1) 的 $q_\pi$ 形式给出<em>完全相同</em>的期望。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>把 $A_\pi(S,A)=q_\pi(S,A)-v_\pi(S)$ 代入，得
+        $$\E\big[\nabla\log\pi\cdot A_\pi\big]
+        =\E\big[\nabla\log\pi\cdot q_\pi\big]-\E\big[\nabla\log\pi\cdot v_\pi(S)\big].$$
+        第一项就是原来的梯度。第二项里 $v_\pi(S)$ 只依赖状态，
+        由上一课定理 5.1（基线不变性），它等于零。故两项之差等于第一项，
+        结论成立。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 235" role="img" aria-label="优势函数去掉状态本身的绝对水平，只保留动作之间的相对好坏">
+        <text x="26" y="20" class="lbl">同一状态下三个动作的 q 值</text>
+        <line x1="50" y1="140" x2="250" y2="140" class="axis-b"/>
+        <rect x="70"  y="60" width="40" height="80" class="bar"/>
+        <rect x="130" y="46" width="40" height="94" class="bar"/>
+        <rect x="190" y="86" width="40" height="54" class="bar"/>
+        <text x="76"  y="156" class="lbl">a₁</text><text x="136" y="156" class="lbl">a₂</text>
+        <text x="196" y="156" class="lbl">a₃</text>
+        <line x1="50" y1="100" x2="250" y2="100" class="mark"/>
+        <text x="254" y="104" class="val-b">v(s)</text>
+        <text x="60" y="40" class="lbl">三个 q 都很大，但彼此差别不大</text>
+        <path d="M270 110 H330" class="arrow-a"/>
+        <path d="M323 105 l9 5 l-9 5" class="arrow-a"/>
+        <text x="336" y="20" class="lbl">减去 v(s) 得到优势</text>
+        <line x1="350" y1="140" x2="510" y2="140" class="axis-b"/>
+        <rect x="366" y="120" width="34" height="20" class="bar-hi"/>
+        <rect x="414" y="100" width="34" height="40" class="bar-hi"/>
+        <rect x="462" y="130" width="34" height="10" class="bar-hi"/>
+        <text x="370" y="156" class="lbl">−0.5</text>
+        <text x="420" y="156" class="lbl">+1.0</text>
+        <text x="468" y="156" class="lbl">−0.5</text>
+        <text x="350" y="190" class="lbl">正负分明：哪个动作更好一目了然</text>
+        <text x="26" y="218" class="lbl">优势把"这个状态有多好"这一层公共信息剥掉，只留下"动作之间的比较"</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 29.2</span>
+        左边：三个动作的 $q$ 值都很大，因为状态本身很好；直接用它们当权重，
+        策略接收到的信号是"都很重要"。右边：各自减去 $v_\pi(s)$ 之后，
+        正负立刻分明，真正好的动作才被抬高。这就是优势作为权重的价值。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4. A2C：用优势当权重</h2>
+    <div class="def">
+      <span class="label">算法 4.1（A2C：Advantage Actor-Critic）</span>
+      <p>与 QAC 结构相同，只把 actor 的权重从 $q$ 换成优势：</p>
+      <p>① critic 学状态值 $v(s,w)$，把 Sarsa 换成 TD（temporal difference，时序差分）来学状态值，用一步的即时奖励加下一步的估计来更新，见第 0020 课：
+        $$w\leftarrow w+\alpha_w\,\delta_t\,\nabla_w v(s_t,w),\qquad
+        \delta_t=r_{t+1}+\gamma\,v(s_{t+1},w)-v(s_t,w);$$</p>
+      <p>② actor 用<b>优势估计</b>更新：
+        $$\theta\leftarrow\theta+\alpha_\theta\,\hat A_t\,\nabla_\theta\log\pi(a_t|s_t,\theta).$$</p>
+      <p>最常见的优势估计就是 TD 误差本身：$\hat A_t=\delta_t$。
+        原因见下面的注记。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.2（为什么可以用 TD 误差当优势）</span>
+      <p>TD 误差 $\delta_t=r_{t+1}+\gamma v(s_{t+1})-v(s_t)$ 的期望就是
+        $q_\pi(s_t,a_t)-v_\pi(s_t)=A_\pi(s_t,a_t)$：
+        第一项与第二项合起来给出 $q_\pi$，第三项是 $v_\pi$。
+        所以 $\delta_t$ 是优势的一个<em>无偏估计</em>，而且只需一步就能算出来，
+        不必等整局结束。这与第 0021 课里 n 步回报的取舍是同一件事。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 215" role="img" aria-label="A2C 与 REINFORCE 在数据使用方式上的差别">
+        <text x="26" y="20" class="lbl">REINFORCE：等一整局结束才更新</text>
+        <line x1="60" y1="56" x2="500" y2="56" class="axis-b"/>
+        <circle cx="100" cy="56" r="5" class="dot"/><circle cx="180" cy="56" r="5" class="dot"/>
+        <circle cx="260" cy="56" r="5" class="dot"/><circle cx="340" cy="56" r="5" class="dot"/>
+        <circle cx="420" cy="56" r="5" class="dot"/><circle cx="486" cy="56" r="5" class="dot"/>
+        <text x="100" y="42" class="lbl">t=0 …</text>
+        <text x="428" y="42" class="lbl">回合结束</text>
+        <text x="428" y="82" class="val-b">↑ 此时才更新</text>
+        <line x1="26" y1="104" x2="514" y2="104" class="grid"/>
+        <text x="26" y="130" class="lbl">A2C：每一步都能更新</text>
+        <line x1="60" y1="166" x2="500" y2="166" class="axis-b"/>
+        <circle cx="100" cy="166" r="5" class="dot-a"/><circle cx="180" cy="166" r="5" class="dot-a"/>
+        <circle cx="260" cy="166" r="5" class="dot-a"/><circle cx="340" cy="166" r="5" class="dot-a"/>
+        <circle cx="420" cy="166" r="5" class="dot-a"/><circle cx="486" cy="166" r="5" class="dot-a"/>
+        <text x="92" y="196" class="lbl">每个点都是一次更新，靠 critic 的打分</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 29.3</span>
+        REINFORCE 要等整局结束才能算出 $G_t$，所以只在回合末尾更新一次；
+        A2C 用 critic 的估计当权重，每一步都能更新。这让它可以处理很长的回合，
+        也让同一批数据被更充分地利用。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. A2C 与 REINFORCE 的取舍</h2>
+    <ul>
+      <li><em>偏差与方差</em>：REINFORCE 的权重 $G_t$ 无偏但方差大；
+        A2C 的权重 $\delta_t$ 依赖还没学准的 critic，因此有偏，但方差小得多。</li>
+      <li><em>数据效率</em>：A2C 每一步都能更新，同一批经历能用得更充分。</li>
+      <li><em>实现复杂度</em>：A2C 要同时训练两个网络，还多了一个"两个时间尺度"的调参问题。</li>
+    </ul>
+    <div class="rem">
+      <span class="label">注记 5.1（这条线索还没走完）</span>
+      <p>A2C 的策略梯度只对<em>当前策略</em>产生的数据有效，这叫 on-policy（只用自己的数据学，学完这批就不能再用）。下一课用重要性采样（用另一套分布采到的数据来估计目标分布的期望，靠一个比值加权）
+        把它改成 off-policy（可以拿别人或自己以前的数据来学），让旧数据也能用；再下一课把策略从随机改成确定性，得到 DPG（deterministic policy gradient）定理，也就是确定性策略（每一步都选同一个动作）的梯度定理。
+        这两步合起来，就是现代连续控制算法的理论基础。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>Actor-Critic 用两个网络：actor 做决定，critic 打分。</li>
+      <li>QAC 用 $q(s,a)$ 当权重，critic 用 Sarsa 学（算法 2.1）。</li>
+      <li>优势 $A_\pi(s,a)=q_\pi(s,a)-v_\pi(s)$ 剥掉了"状态本身多好"这层公共信息（定义 3.1）。</li>
+      <li>用优势代替 $q$ 不改变梯度期望（定理 3.3），因为 $v_\pi(S)$ 满足基线不变性。</li>
+      <li>A2C 用 TD 误差 $\delta_t$ 当优势估计，可以边走边学（算法 4.1）。</li>
+    </ul>
+    <p>下一课处理 on-policy 的限制：A2C 产生的数据用完即弃，太浪费。
+      要复用旧数据，就得在梯度里乘一个"两套策略概率的比值"，
+      这就是重要性采样，也是 off-policy Actor-Critic 的入口。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. Actor-Critic 里 critic 的根本作用是什么？</p>
+      <ol class="mcq-options">
+        <li>直接输出动作，代替 actor 做决策以减轻其负担</li>
+        <li>提供比单次整局回报更稳定的打分，用来更新 actor</li>
+        <li>把历史经历存起来，供 actor 反复采样使用</li>
+        <li>保证策略一路改进到全局最优，弥补策略梯度的不足</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$G_t$ 是单次采样的结果，方差大；critic 见过很多次类似情形，
+          它的 $q$ 或 $v$ 估计更稳定。用它当权重就降低了梯度估计的波动。</p>
+        <p>A 错在 critic 不输出动作。C 描述的是"把旧经历存起来反复用"的缓冲区，不是 critic。
+          D 错在 Actor-Critic 一般只能到局部最优，critic 不提供全局性保证。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. QAC 与 A2C 的核心差别在哪里？</p>
+      <ol class="mcq-options">
+        <li>QAC 不需要 critic，只靠 actor 自己估计价值</li>
+        <li>QAC 是 off-policy 的，A2C 是 on-policy 的</li>
+        <li>QAC 只能用于离散动作，A2C 只能用于连续动作</li>
+        <li>critic 学什么不同：QAC 学动作值 $q$，A2C 学状态值 $v$ 并用优势当权重</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：QAC 的 critic 用 Sarsa 学 $q(s,a)$，actor 直接用 $q$ 当权重；
+          A2C 的 critic 学 $v(s)$，actor 用优势（常见是 TD 误差）当权重。</p>
+        <p>A 错在 QAC 也有 critic。B 错在两者都是 on-policy。
+          C 错在两者对"动作有多少种选择"没有这样的限制。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 优势函数 $A_\pi(s,a)=q_\pi(s,a)-v_\pi(s)$ 在固定状态 $s$ 下按策略加权求和等于多少？</p>
+      <ol class="mcq-options">
+        <li>$0$，因为 $v_\pi(s)$ 就是 $q_\pi(s,a)$ 的策略加权平均</li>
+        <li>等于 $1$，因为优势是经过归一化处理的量</li>
+        <li>等于 $v_\pi(s)$，因为被减掉的项又加回来了</li>
+        <li>没有固定值，要取决于具体用的是哪一套策略</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\sum_a\pi(a|s)A_\pi(s,a)=\sum_a\pi(a|s)q_\pi(s,a)-v_\pi(s)\sum_a\pi(a|s)
+          =v_\pi(s)-v_\pi(s)=0$。这个性质说明优势衡量的是"相对好坏"，
+          不含状态本身的绝对水平。</p>
+        <p>B 错在优势没有被归一化。C 错在减去的项恰好等于求和的结果。
+          D 错在这个恒等式对任何策略都成立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 为什么把权重从 $q_\pi(s,a)$ 换成 $A_\pi(s,a)$ 不改变梯度的期望？</p>
+      <ol class="mcq-options">
+        <li>因为 $q_\pi$ 与 $A_\pi$ 在任何状态下都相等</li>
+        <li>因为 $\nabla\log\pi$ 的期望为零，乘什么都无所谓</li>
+        <li>因为 $v_\pi(s)$ 只依赖状态，满足基线不变性</li>
+        <li>因为优势的方差更小，所以期望自然相同</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：多减去的项是 $\E[\nabla\log\pi\cdot v_\pi(S)]$，
+          而 $v_\pi(S)$ 只依赖状态、不依赖动作，由上一课的基线不变性它等于零。</p>
+        <p>A 错在两者一般不相等。B 错在 $\nabla\log\pi$ 的期望并不为零
+          （否则梯度恒为零，学不到任何东西）。D 错在方差大小与期望是否相等无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. 为什么 TD 误差 $\delta_t=r_{t+1}+\gamma v(s_{t+1})-v(s_t)$ 可以作为优势的无偏估计？</p>
+      <ol class="mcq-options">
+        <li>因为 $\delta_t$ 一定大于零，符合优势的定义</li>
+        <li>因为 $\delta_t$ 与 $A_\pi$ 的方差相同，只是记号不同</li>
+        <li>因为 $\delta_t$ 只用了一步信息，所以必然无偏</li>
+        <li>因为它的期望等于 $q_\pi(s_t,a_t)-v_\pi(s_t)$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$r_{t+1}+\gamma v(s_{t+1})$ 的期望就是 $q_\pi(s_t,a_t)$，
+          减去 $v_\pi(s_t)$ 就得到优势。这是"无偏"的来源。</p>
+        <p>A 错在 $\delta_t$ 可正可负。B 错在两者方差不相同。
+          C 错在"只用了 TD 目标"正好是它<em>有偏</em>的原因（因为 $v$ 本身是估计），
+          这里的无偏性来自 $v$ 取真值时的期望计算。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">6. 与 REINFORCE 相比，A2C 的权重引入了什么代价？</p>
+      <ol class="mcq-options">
+        <li>权重依赖还没学准的 critic，因此梯度估计有偏</li>
+        <li>需要把整局跑完才能开始更新，延迟更大</li>
+        <li>必须存储全部历史轨迹，内存开销随回合长度增长</li>
+        <li>无法处理动作为连续值的情形，只能用于离散动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v(s,w)$ 是估计值，用它算出的 $\delta_t$ 与真实优势有差距，
+          于是引入偏差。这是"用估计换方差"的典型取舍。</p>
+        <p>B 说反了，A2C 的优势就是可以边走边学。C 描述的是需要完整轨迹的方法
+          （如 REINFORCE 或 n 步方法在 n 很大时）。D 错在两者都能处理连续动作。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">7. 若 critic 学得太慢（远落后于当前策略），最可能出现什么现象？</p>
+      <ol class="mcq-options">
+        <li>actor 的更新量会变成零，学习完全停滞</li>
+        <li>critic 的损失会发散，导致数值溢出</li>
+        <li>actor 会追着一个过时的打分标准改进，策略可能绕圈或变差</li>
+        <li>算法自动退化成 REINFORCE，方差反而降低</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：critic 衡量的是"旧策略"下的价值，而 actor 已经变了。
+          用错误的打分标准去改策略，方向就可能不对。这就是两个时间尺度问题。</p>
+        <p>A 错在更新量一般不为零，只是方向可能不对。
+          B 错在发散不是必然结果，更常见的是性能停滞或震荡。
+          D 错在退化不会自动发生，也不会降方差。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. A2C 为什么被称为 on-policy 方法？</p>
+      <ol class="mcq-options">
+        <li>因为它只在回合结束时更新一次参数</li>
+        <li>因为它的梯度估计只用当前策略产生的数据，旧数据不能直接用</li>
+        <li>因为它必须使用每一步都选同一个动作的策略</li>
+        <li>因为它不需要任何价值网络，只依赖策略网络</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\E[\nabla\log\pi\cdot A_\pi]$ 里的期望是对<em>当前</em>策略取的。
+          如果数据来自另一套（旧的）策略，这个期望就不再等于目标梯度，
+          除非引入重要性采样来修正。这就是下一课的内容。</p>
+        <p>A 描述的是更新时机的特点，与 on/off-policy 无关。
+          C 错在 A2C 用的就是随机策略。D 错在 A2C 必须有 critic。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 在 QAC 中，critic 的更新方式与下面哪个算法最接近？</p>
+      <ol class="mcq-options">
+        <li>值迭代，因为它要对所有动作取最大值</li>
+        <li>把一整局走完再更新，因为它用整局总回报当目标</li>
+        <li>REINFORCE，因为它直接用 $\nabla\log\pi$ 更新价值</li>
+        <li>Sarsa，因为它的目标里含有实际选出的下一个动作 $a_{t+1}$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：QAC 的 critic 目标是 $r+\gamma q(s_{t+1},a_{t+1})$，
+          含实际的下一个动作，这就是 Sarsa 的标志。若换成 $\max_a$，
+          就变成 Q-learning 风格的 critic。</p>
+        <p>A 错在没有取最大值。B 错在目标是单步的，不是整局回报。
+          C 错在 critic 的价值更新与策略梯度无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 把基线取成状态的常数（如 $b=50$）与取成 $v_\pi(s)$，主要区别是什么？</p>
+      <ol class="mcq-options">
+        <li>两者都无偏，但 $v_\pi(s)$ 逐状态自适应，降方差更好</li>
+        <li>常数基线有偏，只有 $v_\pi(s)$ 才是无偏的</li>
+        <li>$v_\pi(s)$ 会让梯度期望变成零，不能用</li>
+        <li>两者完全等价，只是计算复杂度不同罢了</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：基线不变性对任意只依赖状态的 $b$ 都成立，所以两者都无偏。
+          但不同状态的"平均收益"差别很大，用逐状态的 $v_\pi(s)$ 才能把
+          各状态内部的公共偏移都减掉，降方差效果更好。</p>
+        <p>B 错在常数基线也是无偏的。C 错在减 $v_\pi$ 不会让期望变成零。
+          D 错在降方差效果明显不同，不是等价的。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 10 章 10.1–10.2 节。优势函数与基线不变性的口径与之一致。</p>
+      <p>A2C 作为工程算法由 Mnih 等人（2016）在 <em>Asynchronous Methods for Deep
+        Reinforcement Learning</em> 中推广；该文同时提出了异步训练的做法。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 QAC 的两条更新式在我这个任务上写出来"，
+      或者 "为什么优势在策略下的加权平均是零，直观上怎么理解？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

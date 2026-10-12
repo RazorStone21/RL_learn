@@ -1,0 +1,261 @@
+{
+ "title": "进阶篇 · 原课程存档",
+ "subtitle": "27 课：多臂老虎机、深度价值方法、策略梯度、连续控制、离线与对齐",
+ "lessonCount": 27,
+ "parts": [
+  {
+   "id": "A1",
+   "name": "进阶篇 · 第一部分 · 基础概念",
+   "lessons": [
+    "A01",
+    "A02",
+    "A03",
+    "A04",
+    "A05",
+    "A06"
+   ]
+  },
+  {
+   "id": "A2",
+   "name": "进阶篇 · 第二部分 · 无模型方法",
+   "lessons": [
+    "A07",
+    "A08",
+    "A09",
+    "A10",
+    "A11",
+    "A12"
+   ]
+  },
+  {
+   "id": "A3",
+   "name": "进阶篇 · 第三部分 · 深度价值方法",
+   "lessons": [
+    "A13",
+    "A14",
+    "A15",
+    "A16"
+   ]
+  },
+  {
+   "id": "A4",
+   "name": "进阶篇 · 第四部分 · 策略梯度与 Actor-Critic",
+   "lessons": [
+    "A17",
+    "A18",
+    "A19",
+    "A20"
+   ]
+  },
+  {
+   "id": "A5",
+   "name": "进阶篇 · 第五部分 · 连续控制与最大熵",
+   "lessons": [
+    "A21",
+    "A22",
+    "A23"
+   ]
+  },
+  {
+   "id": "A6",
+   "name": "进阶篇 · 第六部分 · 模型基、离线与对齐",
+   "lessons": [
+    "A24",
+    "A25",
+    "A26",
+    "A27"
+   ]
+  }
+ ],
+ "lessons": [
+  {
+   "number": "A01",
+   "file": "A01-what-is-rl.html",
+   "slug": "what-is-rl",
+   "title": "强化学习到底是什么",
+   "part": "进阶篇 · 第一部分 · 基础概念"
+  },
+  {
+   "number": "A02",
+   "file": "A02-bandits.html",
+   "slug": "bandits",
+   "title": "多臂老虎机：探索与利用",
+   "part": "进阶篇 · 第一部分 · 基础概念"
+  },
+  {
+   "number": "A03",
+   "file": "A03-mdp.html",
+   "slug": "mdp",
+   "title": "马尔可夫决策过程",
+   "part": "进阶篇 · 第一部分 · 基础概念"
+  },
+  {
+   "number": "A04",
+   "file": "A04-value-bellman.html",
+   "slug": "value-bellman",
+   "title": "价值函数与贝尔曼方程",
+   "part": "进阶篇 · 第一部分 · 基础概念"
+  },
+  {
+   "number": "A05",
+   "file": "A05-dynamic-programming.html",
+   "slug": "dynamic-programming",
+   "title": "动态规划：策略迭代与价值迭代",
+   "part": "进阶篇 · 第一部分 · 基础概念"
+  },
+  {
+   "number": "A06",
+   "file": "A06-modeling-your-problem.html",
+   "slug": "modeling-your-problem",
+   "title": "把你的工作问题建模成 MDP",
+   "part": "进阶篇 · 第一部分 · 基础概念"
+  },
+  {
+   "number": "A07",
+   "file": "A07-monte-carlo.html",
+   "slug": "monte-carlo",
+   "title": "蒙特卡洛方法",
+   "part": "进阶篇 · 第二部分 · 无模型方法"
+  },
+  {
+   "number": "A08",
+   "file": "A08-td-learning.html",
+   "slug": "td-learning",
+   "title": "时序差分 TD(0)",
+   "part": "进阶篇 · 第二部分 · 无模型方法"
+  },
+  {
+   "number": "A09",
+   "file": "A09-sarsa.html",
+   "slug": "sarsa",
+   "title": "SARSA：on-policy 控制",
+   "part": "进阶篇 · 第二部分 · 无模型方法"
+  },
+  {
+   "number": "A10",
+   "file": "A10-q-learning.html",
+   "slug": "q-learning",
+   "title": "Q-Learning：off-policy 控制",
+   "part": "进阶篇 · 第二部分 · 无模型方法"
+  },
+  {
+   "number": "A11",
+   "file": "A11-nstep-td-lambda.html",
+   "slug": "nstep-td-lambda",
+   "title": "n-step 回报与 TD(λ)",
+   "part": "进阶篇 · 第二部分 · 无模型方法"
+  },
+  {
+   "number": "A12",
+   "file": "A12-function-approximation.html",
+   "slug": "function-approximation",
+   "title": "函数逼近与致命三元组",
+   "part": "进阶篇 · 第二部分 · 无模型方法"
+  },
+  {
+   "number": "A13",
+   "file": "A13-dqn.html",
+   "slug": "dqn",
+   "title": "DQN：经验回放与目标网络",
+   "part": "进阶篇 · 第三部分 · 深度价值方法"
+  },
+  {
+   "number": "A14",
+   "file": "A14-double-dueling-dqn.html",
+   "slug": "double-dueling-dqn",
+   "title": "Double DQN 与 Dueling DQN",
+   "part": "进阶篇 · 第三部分 · 深度价值方法"
+  },
+  {
+   "number": "A15",
+   "file": "A15-prioritized-replay.html",
+   "slug": "prioritized-replay",
+   "title": "优先经验回放 PER",
+   "part": "进阶篇 · 第三部分 · 深度价值方法"
+  },
+  {
+   "number": "A16",
+   "file": "A16-rainbow-distributional.html",
+   "slug": "rainbow-distributional",
+   "title": "Rainbow 与分布式 RL",
+   "part": "进阶篇 · 第三部分 · 深度价值方法"
+  },
+  {
+   "number": "A17",
+   "file": "A17-policy-gradient.html",
+   "slug": "policy-gradient",
+   "title": "策略梯度与 REINFORCE",
+   "part": "进阶篇 · 第四部分 · 策略梯度与 Actor-Critic"
+  },
+  {
+   "number": "A18",
+   "file": "A18-actor-critic.html",
+   "slug": "actor-critic",
+   "title": "A2C 与 A3C：Actor-Critic",
+   "part": "进阶篇 · 第四部分 · 策略梯度与 Actor-Critic"
+  },
+  {
+   "number": "A19",
+   "file": "A19-gae-trpo.html",
+   "slug": "gae-trpo",
+   "title": "优势估计 GAE 与 TRPO",
+   "part": "进阶篇 · 第四部分 · 策略梯度与 Actor-Critic"
+  },
+  {
+   "number": "A20",
+   "file": "A20-ppo.html",
+   "slug": "ppo",
+   "title": "PPO：裁剪目标与工程实践",
+   "part": "进阶篇 · 第四部分 · 策略梯度与 Actor-Critic"
+  },
+  {
+   "number": "A21",
+   "file": "A21-ddpg.html",
+   "slug": "ddpg",
+   "title": "DDPG：确定性策略梯度",
+   "part": "进阶篇 · 第五部分 · 连续控制与最大熵"
+  },
+  {
+   "number": "A22",
+   "file": "A22-td3.html",
+   "slug": "td3",
+   "title": "TD3：双评论家与延迟更新",
+   "part": "进阶篇 · 第五部分 · 连续控制与最大熵"
+  },
+  {
+   "number": "A23",
+   "file": "A23-sac.html",
+   "slug": "sac",
+   "title": "SAC：最大熵强化学习",
+   "part": "进阶篇 · 第五部分 · 连续控制与最大熵"
+  },
+  {
+   "number": "A24",
+   "file": "A24-model-based-planning.html",
+   "slug": "model-based-planning",
+   "title": "基于模型与规划：Dyna、MCTS 与 AlphaZero",
+   "part": "进阶篇 · 第六部分 · 模型基、离线与对齐"
+  },
+  {
+   "number": "A25",
+   "file": "A25-offline-imitation.html",
+   "slug": "offline-imitation",
+   "title": "离线 RL 与模仿学习",
+   "part": "进阶篇 · 第六部分 · 模型基、离线与对齐"
+  },
+  {
+   "number": "A26",
+   "file": "A26-rlhf-dpo.html",
+   "slug": "rlhf-dpo",
+   "title": "RLHF 与 DPO：大模型对齐",
+   "part": "进阶篇 · 第六部分 · 模型基、离线与对齐"
+  },
+  {
+   "number": "A27",
+   "file": "A27-capstone.html",
+   "slug": "capstone",
+   "title": "综合实战：为你的工作问题选算法",
+   "part": "进阶篇 · 第六部分 · 模型基、离线与对齐"
+  }
+ ]
+}

@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A17 · 策略梯度与 REINFORCE — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A17" data-slug="policy-gradient" data-part="进阶篇 · 第四部分 · 策略梯度与 Actor-Critic">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第四部分 · 策略梯度与 Actor-Critic</p>
+    <h1>策略梯度与 REINFORCE</h1>
+    <p class="lede">读完这一节，你应该能写出策略梯度（不绕道估价值，
+      直接算参数往哪调能让总分更高）的目标与 REINFORCE 更新式，
+      说清它凭什么只靠采样就能求梯度，以及从总分里减掉一个参照值
+      为什么不引入偏差，却能把波动压下来。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 ∇J = 𝔼[∇log π(a|s)·G] 并解释它相对 Q-learning 的优势与代价</li>
+        <li>能说清"减基线不改变期望"的那一步推导依据</li>
+        <li>能指出 REINFORCE 方差大在哪，并知道下一步该用 actor-critic 修什么</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>为什么不继续走价值路线</h2>
+    <p>前面十六课都在学价值，再用 <span class="math">arg max<sub>a</sub> Q(s,a)</span> 提取动作。
+      这里的价值指的是"某个局面或某个动作估计能拿多少总分"，也就是回报
+      （从此刻起一直走到结束，把每一步奖励加起来的总分）；
+      arg max 是挑出让后面那个式子最大的选择。这条路有两处会卡住。</p>
+    <ul>
+      <li>连续动作没法求 max。机械臂的关节力矩是实数、广告出价是连续金额，
+        要对 <var>a</var> 求最大值，就得每一步都解一个优化问题。</li>
+      <li>最优做法本身可能是随机的。在信息不完整或对手会观察你的场景里，
+        最优做法是按概率出招（石头剪刀布就是最直白的例子），这套规则叫随机策略
+        （同样的局面不固定给同一个动作，而是按概率挑一个）。
+        而贪心（在当前估计里挑看起来最好的那个）的做法永远是确定性的。</li>
+    </ul>
+    <p><span class="term">策略梯度（policy gradient）</span>换一条路：
+      把策略（一套"看到什么状态就选什么动作"的规则，就是出招习惯）直接参数化成
+      <span class="math">π<sub>θ</sub>(a|s)</span>，其中
+      θ（策略参数，决定这套出招习惯的那组数字）决定它，
+      π（策略分布，从它采样动作的那个概率分布）是从它采样动作的分布。
+      然后对"期望回报"这个目标做梯度上升。探索被写进了策略本身，
+      推理时也只需要一次前向计算。</p>
+  </section>
+
+  <section>
+    <h2>目标与似然比技巧</h2>
+    <p>目标是策略的期望回报：</p>
+    <div class="eq">
+      <span class="eq-body">J(θ) = 𝔼<sub>τ ∼ π<sub>θ</sub></sub>[ Σ<sub>t</sub> γ<sup>t</sup> r<sub>t+1</sub> ]</span>
+      <span class="eq-num">(17.1)</span>
+    </div>
+    <p>式中 γ 是折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折），
+      τ 是一条采样轨迹（从开始到结束，把状态、动作、奖励都记下来的那一串，也就是一整局的棋谱），
+      𝔼 是期望（同一件事重复很多次之后的平均结果），Σ 是求和号（把后面那串东西全加起来）。
+      下标 τ ∼ π_θ 表示这些轨迹是按当前策略跑出来的。</p>
+    <p>先认一个词。似然（当前这套参数，产生出我们观测到的这些数据的可能性有多大）：
+      放在这里，它问的是"这套出招习惯做出刚才那串动作的可能性有多大"。</p>
+    <p>难处在于期望所用的分布本身依赖 <var>θ</var>，直接求导要面对状态分布对 <var>θ</var> 的导数。
+      这时用一个小恒等式：
+      <span class="math">∇<sub>θ</sub>π<sub>θ</sub>(a|s) = π<sub>θ</sub>(a|s) ∇<sub>θ</sub> log π<sub>θ</sub>(a|s)</span>。
+      式子里 ∇ 读作梯度（往哪个方向调参数能让结果降得最快，这里反过来用，让它涨得最快），
+      log 是对数，可以理解成把很小的数压得不那么小的换算。
+      这个恒等式就是似然比技巧（likelihood ratio trick）：把"对概率求导"改成
+      "先取对数概率（把概率取对数，概率很小的时候也不会变成 0，方便计算），
+      再对它求导，然后乘回概率"。</p>
+    <p>这样一来，期望的写法不需要变，状态分布那部分的求导正好绕开了。结果是
+      策略梯度定理（policy gradient theorem）：</p>
+    <div class="eq">
+      <span class="eq-body">∇<sub>θ</sub>J(θ) = 𝔼<sub>π<sub>θ</sub></sub>[ Σ<sub>t</sub> ∇<sub>θ</sub> log π<sub>θ</sub>(A<sub>t</sub>|S<sub>t</sub>) · G<sub>t</sub> ]</span>
+      <span class="eq-num">(17.2)</span>
+    </div>
+    <p>怎么读它：<span class="math">G<sub>t</sub></span> 是从这一步起真实的折扣回报
+      （把未来的奖励一步步打折再加起来的总分），它当权重；
+      <span class="math">∇log π</span> 是方向，指向"让这个动作更可能发生"。
+      回报高就是正权重，把动作概率往上推；回报低就是负权重，压下去。
+      整个式子只需要采样出来的 <span class="math">(s, a, G)</span>，不需要环境模型。
+      推导见 Sutton &amp; Barto 第 13.2 节
+      <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a>
+      与 <a class="cite" href="https://web.stanford.edu/class/cs234/">Stanford CS234</a> 的讲义。</p>
+    <p>对一个 softmax（把原始分数变成一组加起来等于 1 的概率，分数高的概率大）策略，
+      这个方向有很干净的形式：
+      <span class="math">∇<sub>z</sub> log π(a|s) = e<sub>a</sub> − π(·|s)</span>，
+      其中 <span class="math">e<sub>a</sub></span> 是动作 <var>a</var> 的 one-hot 向量
+      （只有对应的那一格是 1，其余全是 0），
+      也就是"把被选动作的 logit（还没变成概率的原始分数）抬 1，其余按概率往下压"。</p>
+  </section>
+
+  <section>
+    <h2>REINFORCE：最朴素的实现</h2>
+    <p>把式 (17.2) 直接变成算法，就是 <span class="term">REINFORCE</span>：
+      用当前策略跑完一整个回合（从开始到结束的一整局），记下每步的
+      <span class="math">(s<sub>t</sub>, a<sub>t</sub>)</span> 与折扣回报
+      <span class="math">G<sub>t</sub></span>，然后按下面的方向更新：</p>
+    <p>更新规则里的 ← 读作"更新为"，意思是把右边算出来的新值赋给 θ；
+      α 是学习率（每次更新往新信息的方向挪多远，太大会来回震荡、太小就学得慢），也就是步长。
+      它叫超参，就是需要你自己设定、而不是训练学出来的参数。写成一行就是</p>
+    <p><span class="math">θ ← θ + α Σ<sub>t</sub> G<sub>t</sub> ∇log π<sub>θ</sub>(a<sub>t</sub>|s<sub>t</sub>)</span>。</p>
+    <p><var>G</var><sub>t</sub> 是从这一步起的折扣回报。数据用一次就丢，
+      因为式 (17.2) 的期望是在当前策略的分布下求的。这就是它必须 on-policy
+      （边学的那套策略，就是正在用来产生数据的那套）的根本原因，
+      也是它样本效率（拿到同样多的经验能学多好，效率高就是更省数据）低的根源。</p>
+    <p>另一个细节是因果性：第 <var>t</var> 步的动作不可能影响它之前就已经发生的奖励，
+      所以权重只用 <span class="math">G<sub>t</sub></span>（从 <var>t</var> 往后的折扣回报），
+      不用整条回合的总回报。数学上两者的期望相同，但前者的波动更小。</p>
+  </section>
+
+  <section>
+    <h2>基线：减掉一个与动作无关的量</h2>
+    <p>回报 <span class="math">G<sub>t</sub></span> 的绝对大小常常是几百上千，
+      而"这个动作比平均好多少"可能只有几。用绝对值当权重，
+      梯度几乎全被这个公共的常数淹没，每次更新的方向就抖得厉害。
+      办法是减掉一个只依赖状态的基线（从回报里减掉的一个参照值，
+      只用来降波动，不改变平均方向），像打分时先减去一条及格线：</p>
+    <div class="eq">
+      <span class="eq-body">∇<sub>θ</sub>J(θ) ≈ Σ<sub>t</sub> ( G<sub>t</sub> − b(S<sub>t</sub>) ) ∇<sub>θ</sub> log π<sub>θ</sub>(A<sub>t</sub>|S<sub>t</sub>)</span>
+      <span class="eq-num">(17.3)</span>
+    </div>
+    <p>减去它不会引入偏差。因为对任意 <var>b</var>(<var>s</var>)，
+      <span class="math">𝔼<sub>a∼π</sub>[ b(s) ∇log π(a|s) ] = b(s) Σ<sub>a</sub> ∇π(a|s) = b(s) ∇(1) = 0</span>。
+      意思是：所有动作的概率加起来永远等于 1，1 是常数，对常数求导就是 0，
+      这一项在长期平均里正好抵消。
+      注意这个证明要求 <var>b</var> 不能依赖动作：一旦改用
+      <span class="math">Q(s,a)</span> 当基线，期望不再为零，偏差就进来了。</p>
+    <p>常用基线就是状态价值（只看状态、不管具体选哪个动作的那个价值，
+      回答"现在这个局面好不好"），写成 <span class="math">V(s)</span>。
+      此时权重变成 <span class="math">G<sub>t</sub> − V(S<sub>t</sub>)</span>，
+      也就是优势（在某个状态下，选这个动作比"平均水平"好多少）的一个估计。
+      估它的办法是蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值），
+      所以这个量也叫优势函数（advantage function）。相关定义见
+      <a href="../reference/glossary.html">术语表</a>。
+      "把绝对收益换成相对好坏"是最有效的一次波动削减。</p>
+  </section>
+
+  <section>
+    <h2>它的问题与下一步</h2>
+    <p>即便加了基线，REINFORCE 仍然要用整条回合的实际回报当权重，随机性直接进了梯度，
+      波动还是大：同一个任务跑两次，更新方向可能差很远。学得慢、对学习率敏感，
+      一次坏更新就能把策略推到几乎固定的坏动作上，而且无法回滚。</p>
+    <p>它保证的是收敛（一轮轮算下去，数值不再明显变化，稳定下来了）到局部最优，
+      不是全局最优。修法与 <a href="A11-nstep-td-lambda.html">0011 课</a>的
+      TD（temporal difference）思路一致，也就是时序差分
+      （不用等到一局结束，用"走一步之后的新估计"来更新"走这一步之前的估计"）：
+      用自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）
+      算出来的、波动更小的估计，去替代整条回报。</p>
+    <p>这就是 <a href="A18-actor-critic.html">0018 课的 actor-critic</a>
+      （一边出招、一边打分，用打出来的分去改出招习惯）。那里
+      actor（出招的那一方，负责决定这一步做什么动作，也叫策略网络）每步都能更新，
+      critic（打分的那一方，负责估计现在这个局面值多少分，也叫价值网络）学
+      <var>V</var>(<var>s</var>)，用 TD 误差当优势。</p>
+    <p>策略梯度不需要目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次）。
+      如果手上只有一份离线（不能与真实环境交互，只能用已经攒下来的历史数据学）日志，
+      想复用旧数据就得做重要性采样（用另一套策略产生的数据来估计当前策略，
+      要按概率比例做修正）。REINFORCE 的价值在于它是这套东西最干净的原型：
+      看懂式 (17.2) 与式 (17.3)，后面所有策略梯度算法都是在这两项上做文章。
+      它们的名字分别是 A2C（advantage actor-critic，优势演员-评论家）、
+      TRPO（trust region policy optimization）、PPO（proximal policy optimization，近端策略优化）、
+      SAC（soft actor-critic，软演员-评论家）。其中 TRPO 给每步改动加了上限，
+      那叫信赖域（规定这一步只允许在"离旧策略不太远"的范围内改）。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 相比 DQN（deep Q-network，深度 Q 网络）一族，策略梯度最直接的优势是什么？</p>
+      <ol class="mcq-options">
+        <li>它能反复复用历史数据，样本效率因此比 DQN 高得多</li>
+        <li>它能直接处理连续动作，也能学出最优的随机策略</li>
+        <li>它不需要与环境交互，只用一份离线日志就能完成训练</li>
+        <li>它的梯度估计是无偏的，所以几乎不需要再调学习率</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：策略输出的是动作分布，连续动作直接采样即可，不需要
+          <span class="math">arg max</span>；随机性又是策略本身的一部分，
+          所以在"最优策略必须随机"的场景里它天然合适。</p>
+        <p>A 恰好说反了：REINFORCE 是 on-policy（边学的那套策略就是正在产生数据的那套），
+          数据用一次就丢，样本效率通常<em>低于</em> DQN。
+          C 不对，式 (17.2) 的期望仍然要在策略诱导的分布下采样。
+          D 混淆了无偏与稳定：梯度无偏不等于方差小，学习率依然是它最敏感的超参。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 引入似然比技巧 ∇π = π∇log π 之后，我们得到了什么？</p>
+      <ol class="mcq-options">
+        <li>它把期望回报的梯度化成了对环境模型的求导运算</li>
+        <li>它证明了策略梯度一定能收敛到全局最优的那个策略</li>
+        <li>它让策略梯度可以像 DQN 那样对动作集合取最大值</li>
+        <li>它只用采样就能估计梯度，不必知道状态分布</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：技巧的作用是把"对含 <var>θ</var> 的分布求导"改写成
+          "对 log π 求导、再乘回概率"，于是期望可以直接用采样平均来估，
+          状态分布对 <var>θ</var> 的依赖不再需要显式计算。</p>
+        <p>A 与事实相反：它最大的价值就是不需要模型。
+          B 是过度承诺，策略梯度只保证收敛到局部最优（或稳定点）。
+          C 说反了：策略梯度面向的，恰好是没法对动作取 max 的场合。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 减去基线 b(s) 为什么不会引入偏差？</p>
+      <ol class="mcq-options">
+        <li>因为 Σ<sub>a</sub> ∇π(a|s) = 0，这一项在期望上就等于零</li>
+        <li>因为基线只依赖状态，所以它必然等于真实的状态价值 V(s)</li>
+        <li>因为回报 G 的期望本来就是零，减去任何量都不改变期望</li>
+        <li>因为重要性采样权重会把基线带来的偏差重新修正回来</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：基线项在期望里是
+          <span class="math">b(s) Σ<sub>a</sub> ∇π(a|s)</span>，而概率之和恒为 1，
+          它的梯度恒为 0。这也解释了基线为什么不能依赖动作：只要 <var>b</var> 与 <var>a</var> 无关，
+          就能提到求和号外，逐项抵消。</p>
+        <p>B 不对：基线可以是任何与动作无关的函数，不需要等于 <var>V</var>(<var>s</var>)，
+          估计得差只会影响方差，不会影响期望。C 与事实不符，回报的期望一般不为零。
+          D 里没有重要性采样，这与 off-policy 修正无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. REINFORCE 为什么必须是 on-policy 的？</p>
+      <ol class="mcq-options">
+        <li>因为它必须每个时间步都更新，不能等到回合结束再更新</li>
+        <li>因为它的损失函数里包含了一份目标网络的参数副本</li>
+        <li>因为梯度权重 G 是在当前策略的分布下采样得到的量</li>
+        <li>因为它必须用 ε-greedy（ε 是探索率）才能保证所有动作都被访问到</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (17.2) 的期望写的是
+          <span class="math">𝔼<sub>π<sub>θ</sub></sub></span>：梯度里的
+          <span class="math">G<sub>t</sub></span> 是当前策略跑出来的回报。
+          策略一更新，旧数据的分布就对不上，只能丢掉重新采样。</p>
+        <p>A 说反了：REINFORCE 是<em>必须</em>等回合结束才能算
+          <span class="math">G<sub>t</sub></span>。B 是 DQN 的装备，策略梯度不需要目标网络。
+          D 不对：探索由随机策略本身提供，不需要 ε-greedy 机制。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 策略梯度方差大的主要来源是什么？</p>
+      <ol class="mcq-options">
+        <li>策略网络的参数太多，导致梯度里混进了大量噪声</li>
+        <li>权重用的是整条回合的实际回报 G，随机性直接进了更新</li>
+        <li>log π 的取值没有上界，很容易造成数值上的溢出</li>
+        <li>基线 b(s) 的估计误差会把方差进一步放大</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：<span class="math">G<sub>t</sub></span> 是一条采样轨迹的
+          实际回报，包含后续所有随机性。同一个动作在不同回合里可能拿到差别很大的
+          <span class="math">G<sub>t</sub></span>，梯度方向因此抖动。
+          减基线、用因果性权重、乃至换成自举的 critic，都是在压这个抖动。</p>
+        <p>A 把参数量与梯度方差混为一谈。C 是数值问题，可以用 log-softmax 稳定住，
+          与统计方差无关。D 说反了：基线的作用是降低方差，估计不准只是让它降得少一点。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0017-code-1">
+      <h3>代码题 1 · 用 softmax 算对数概率与 ∇log π</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>策略梯度把策略写成 softmax 分布之后，
+          每一步更新都要用到两个量：所选动作的对数概率 log π(a|s)，以及它对 logits 的梯度。
+          前者是式 (17.2) 里的权重因子，后者决定参数往哪个方向走。训练循环采集完一个
+          batch（一批样本）的状态与动作后调用这两个函数，把返回值直接乘进 REINFORCE
+          的梯度估计。只许用标准库与 numpy，按惯例写 <code>import numpy as np</code>。</p>
+        <p>请实现 <code>log_softmax(logits)</code> 与 <code>log_prob_grad(logits, actions)</code>。
+          <span class="cp-label">签名与 starter 保持一致。</span></p>
+        <p>补一句 numpy。数组就是一排数字的容器，形状 <code>(B, A)</code> 表示
+          <code>B</code> 行、每行 <code>A</code> 个数；<code>logits.max(axis=1, keepdims=True)</code>
+          表示沿每一行取最大值，并且保留成 <code>(B, 1)</code> 的形状，
+          这样它和 <code>(B, A)</code> 相减时能自动铺开对齐，这个规则叫广播。
+          下标都从 <code>0</code> 开始。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>logits</code>（两个函数共有）：形状 <code>(B, A)</code> 的 float 数组，<code>B</code> 是 batch 里的状态数，<code>A</code> 是动作数。每行是策略网络对一个状态输出的原始分数，还没变成概率。</li>
+          <li><code>actions</code>（<code>log_prob_grad</code>）：形状 <code>(B,)</code> 的整数数组，取值 <code>0 ~ A−1</code>，第 i 个元素是该状态上实际执行的动作。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>log_softmax</code> 返回形状 <code>(B, A)</code> 的 <code>np.ndarray</code>：第 (i, a) 个元素是 <span class="math">log π(a|s<sub>i</sub>)</span>，每行取 exp 之后沿 a 求和为 1。</li>
+          <li><code>log_prob_grad</code> 返回形状 <code>(B, A)</code> 的 <code>np.ndarray</code>：第 i 行是 <span class="math">∇<sub>z</sub> log π(a<sub>i</sub>|s<sub>i</sub>)</span>，数值上等于 one-hot(a_i) 减 softmax 概率，整行之和为 0。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会检查 <code>exp(返回值)</code> 每行之和为 1，小 logits 下与朴素写法一致；把 logits 取到 ±1000 时结果仍然有限、最大那一项接近 0；梯度每行之和为 0，并与数值微分逐项一致，数值微分就是给某个输入加一点再减一点、用两次结果之差近似导数；两个动作等概率时被选中的那一项是 +0.5、另一个是 −0.5。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>稳定性靠减去每行最大值：先 <code>m = logits.max(axis=1, keepdims=True)</code>，
+            再算 <code>shifted = logits - m</code>，最后
+            <code>shifted - np.log(np.sum(np.exp(shifted), axis=1, keepdims=True))</code>。
+            <code>axis=1</code> 表示沿每一行算，<code>keepdims=True</code> 让结果保持
+            <code>(B, 1)</code> 的形状，方便广播相减。</li>
+          <li><code>π</code> 就是 <code>np.exp(log_softmax(logits))</code>，不用另写一遍归一化。</li>
+          <li>构造 one-hot 可以先用 <code>np.zeros_like(logits)</code> 造一张同形状的 0 表，
+            再写 <code>g[np.arange(B), actions] = 1.0</code>，其中 <code>B = logits.shape[0]</code>。
+            最后返回 <code>g - probs</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def log_softmax(logits):
+    # TODO: 数值稳定的 log softmax
+    return np.zeros_like(np.asarray(logits, dtype=float))
+
+
+def log_prob_grad(logits, actions):
+    # TODO: 返回 onehot(actions) - softmax(logits)
+    return np.zeros_like(np.asarray(logits, dtype=float))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+z = np.array([[1.0, 0.0, -1.0], [0.5, 0.5, 0.5]])
+ls = np.asarray(log_softmax(z), dtype=float)
+check(ls.shape == (2, 3), f"形状应为 (2,3)，实际 {ls.shape}")
+check(np.allclose(np.exp(ls).sum(axis=1), 1.0),
+      f"exp(log_softmax) 每行之和应为 1，实际 {np.exp(ls).sum(axis=1)}")
+naive = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+check(np.allclose(ls, naive, atol=1e-12), f"小 logits 时应与朴素写法一致，实际 {ls}")
+
+big = np.array([[1000.0, 0.0, -1000.0]])
+lb = np.asarray(log_softmax(big), dtype=float)
+check(np.all(np.isfinite(lb)), f"logits 到 ±1000 时结果必须有限，实际 {lb}")
+check(abs(lb[0, 0] - 0.0) < 1e-12 and lb[0, 2] < -1e3,
+      f"最大值那一项的对数概率应为 0 附近，最小的一项应极小，实际 {lb[0]}")
+
+a = np.array([0, 2])
+g = np.asarray(log_prob_grad(z, a), dtype=float)
+check(g.shape == (2, 3), f"梯度形状应为 (2,3)，实际 {g.shape}")
+check(np.allclose(g.sum(axis=1), 0.0),
+      f"每行梯度之和必须为 0（因为 Σ_a ∇π(a|s) = 0），实际 {g.sum(axis=1)}")
+p = np.exp(ls)
+check(np.allclose(g, np.eye(3)[a] - p),
+      f"梯度应等于 onehot(a) - softmax(z)，实际 {g}")
+
+eps = 1e-6
+num = np.zeros_like(z)
+for i in range(z.shape[0]):
+    for j in range(z.shape[1]):
+        up = z.copy(); up[i, j] += eps
+        dn = z.copy(); dn[i, j] -= eps
+        num[i, j] = (log_softmax(up)[i, a[i]] - log_softmax(dn)[i, a[i]]) / (2 * eps)
+check(np.allclose(num, g, atol=1e-6),
+      f"数值微分应与解析梯度一致，实际解析 {g} 对 数值 {num}")
+
+g0 = np.asarray(log_prob_grad(np.array([[0.0, 0.0]]), np.array([0])), dtype=float)
+check(np.allclose(g0, np.array([[0.5, -0.5]])),
+      f"两个动作等概率时，被选中动作的梯度是 +0.5、另一个是 -0.5，实际 {g0}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def log_softmax(logits):
+    logits = np.asarray(logits, dtype=float)
+    m = np.max(logits, axis=1, keepdims=True)
+    shifted = logits - m
+    return shifted - np.log(np.sum(np.exp(shifted), axis=1, keepdims=True))
+
+
+def log_prob_grad(logits, actions):
+    logits = np.asarray(logits, dtype=float)
+    actions = np.asarray(actions, dtype=int)
+    B = logits.shape[0]
+    probs = np.exp(log_softmax(logits))
+    grad = np.zeros_like(logits)
+    grad[np.arange(B), actions] = 1.0
+    return grad - probs
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0017-code-2">
+      <h3>代码题 2 · 用基线算 REINFORCE 梯度</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>REINFORCE 跑完一整条回合才更新一次。
+          训练循环拿到奖励序列后，先用 <code>returns_to_go</code> 把奖励折成每一步的折扣回报
+          <span class="math">G<sub>t</sub></span> 当权重，再用 <code>reinforce_gradient</code>
+          把权重乘上每步的 <span class="math">∇log π</span> 并在时间轴上取平均，
+          得到可以直接交给优化器的梯度估计。奖励来自环境，基线是那个与动作无关、
+          只用来压波动的参照值。只许用标准库与 numpy，两个函数都不修改输入。</p>
+        <p>请实现 <code>returns_to_go(rewards, gamma)</code> 与
+          <code>reinforce_gradient(grad_log_probs, returns, baselines)</code>。
+          <span class="cp-label">签名与 starter 保持一致。</span></p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>（<code>returns_to_go</code>）：形状 <code>(T,)</code> 的 float 数组，<code>T</code> 是回合长度，第 t 项是 <span class="math">r<sub>t</sub></span>。</li>
+          <li><code>gamma</code>（<code>returns_to_go</code>）：Python float 标量，折扣因子 γ，给未来的奖励打折。</li>
+          <li><code>grad_log_probs</code>（<code>reinforce_gradient</code>）：形状 <code>(T, A)</code> 的 float 数组，第 t 行是 <span class="math">∇<sub>θ</sub> log π<sub>θ</sub>(a<sub>t</sub>|s<sub>t</sub>)</span>。</li>
+          <li><code>returns</code>（<code>reinforce_gradient</code>）：形状 <code>(T,)</code> 的 float 数组，第 t 项是 <span class="math">G<sub>t</sub></span>。</li>
+          <li><code>baselines</code>（<code>reinforce_gradient</code>）：形状 <code>(T,)</code> 的 float 数组或 Python 标量，两种都要支持，第 t 项是 <span class="math">b<sub>t</sub></span>。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>returns_to_go</code> 返回形状 <code>(T,)</code> 的 <code>np.ndarray</code>：第 t 项是从第 t 步起的折扣回报 <span class="math">G<sub>t</sub> = Σ<sub>k≥t</sub> γ<sup>k−t</sup> r<sub>k</sub></span>。</li>
+          <li><code>reinforce_gradient</code> 返回形状 <code>(A,)</code> 的 <code>np.ndarray</code>：式 (17.4) 在 T 步上取平均的梯度估计，第 a 个元素对应第 a 个动作。</li>
+        </ul>
+        <div class="eq">
+          <span class="eq-body">ĝ = (1 / T) Σ<sub>t</sub> ( G<sub>t</sub> − b<sub>t</sub> ) ∇<sub>θ</sub> log π<sub>θ</sub>(a<sub>t</sub>|s<sub>t</sub>)</span>
+          <span class="eq-num">(17.4)</span>
+        </div>
+        <p>式子里 ĝ 是这一步算出来的梯度估计，Σ 是求和号（把后面那串东西全加起来），
+          T 是回合长度。</p>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会核对 <code>gamma=0.5</code> 与 <code>gamma=1</code> 两种折扣下的回报值，以及长度为 1 的序列返回奖励本身；基线恰好等于回报时梯度全为 0，基线整体平移一个常数后结果不变，并按动作概率加权核对期望梯度。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>returns_to_go</code> 从后往前累加最省事：先设 <code>running = 0.0</code>，
+            再让 <code>t</code> 从 <code>T-1</code> 数到 <code>0</code>，每次做
+            <code>running = rewards[t] + gamma * running</code>，并把 <code>running</code>
+            写进 <code>out[t]</code>。</li>
+          <li>式 (17.4) 里的权重是 <code>weights = returns - baselines</code>，形状 <code>(T,)</code>。
+            要乘到形状 <code>(T, A)</code> 的 <code>grad_log_probs</code> 上，先把它变成一列：
+            <code>weights[:, None]</code> 得到 <code>(T, 1)</code>，广播之后每一步的每个动作
+            都用同一个权重。</li>
+          <li>最后沿时间轴取平均：
+            <code>np.mean(weights[:, None] * grad_log_probs, axis=0)</code>，
+            <code>axis=0</code> 表示沿着第 0 维也就是时间那一维算平均，得到长度为
+            <code>A</code> 的向量。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def returns_to_go(rewards, gamma):
+    # TODO: 从后往前累加折扣回报
+    return np.zeros(len(rewards))
+
+
+def reinforce_gradient(grad_log_probs, returns, baselines):
+    # TODO: (1/T) * sum_t (G_t - b_t) * grad_log_probs[t]
+    g = np.asarray(grad_log_probs, dtype=float)
+    return np.zeros(g.shape[1])
+</script>
+
+      <script type="text/x-python" data-role="tests">
+G1 = np.asarray(returns_to_go(np.array([1.0, 2.0, 3.0]), 0.5), dtype=float)
+check(G1.shape == (3,), f"返回值形状应为 (3,)，实际 {G1.shape}")
+check(np.allclose(G1, np.array([2.75, 3.5, 3.0])),
+      f"gamma=0.5 时 G = [1+0.5*2+0.25*3, 2+0.5*3, 3] = [2.75, 3.5, 3.0]，实际 {G1}")
+G2 = np.asarray(returns_to_go(np.array([1.0, 2.0, 3.0]), 1.0), dtype=float)
+check(np.allclose(G2, np.array([6.0, 5.0, 3.0])),
+      f"gamma=1 时就是后缀和 [6, 5, 3]，实际 {G2}")
+G3 = np.asarray(returns_to_go(np.array([-1.0]), 0.9), dtype=float)
+check(np.allclose(G3, np.array([-1.0])), f"单步序列的回报就是奖励本身，实际 {G3}")
+
+grads = np.array([[1.0, -1.0], [1.0, -1.0], [1.0, -1.0]])
+rets = np.array([1.0, 2.0, 3.0])
+g0 = np.asarray(reinforce_gradient(grads, rets, 0.0), dtype=float)
+check(g0.shape == (2,), f"梯度形状应为 (2,)，实际 {g0.shape}")
+check(np.allclose(g0, np.array([2.0, -2.0])),
+      f"权重均值为 (1+2+3)/3 = 2，梯度应为 [2, -2]，实际 {g0}")
+gmean = np.asarray(reinforce_gradient(grads, rets, np.full(3, -4.0)), dtype=float)
+check(np.allclose(gmean, np.array([6.0, -6.0])),
+      f"减掉 -4 相当于每个权重加 4，梯度应为 [6, -6]，实际 {gmean}")
+
+zero = np.asarray(reinforce_gradient(grads, rets, rets), dtype=float)
+check(np.allclose(zero, 0.0),
+      f"当基线正好等于回报时，(G - b) 全为 0，梯度必须为 0，实际 {zero}")
+
+pi = np.array([0.5, 0.3, 0.2])
+gmat = np.eye(3) - pi
+counts = np.array([500, 300, 200])
+Grewards = np.array([1.0, 0.4, -0.2])
+rows = np.repeat(gmat, counts, axis=0)
+rets2 = np.repeat(Grewards, counts)
+grad_nb = np.asarray(reinforce_gradient(rows, rets2, np.zeros(1000)), dtype=float)
+manual = sum(pi[k] * Grewards[k] * gmat[k] for k in range(3))
+check(np.allclose(grad_nb, manual, atol=1e-12),
+      f"按动作概率加权的期望梯度应为 {manual}，实际 {grad_nb}")
+for b in (5.0, -3.0):
+    gb = np.asarray(reinforce_gradient(rows, rets2, np.full(1000, b)), dtype=float)
+    check(np.allclose(gb, grad_nb, atol=1e-10),
+          f"基线取常数 {b} 时梯度不应改变（Σ_a π_a ∇log π_a = 0），实际 {gb} 对 {grad_nb}")
+
+pi2 = np.array([0.25, 0.75])
+gmat2 = np.eye(2) - pi2
+rows2 = np.repeat(gmat2, [250, 750], axis=0)
+rets3 = np.repeat(np.array([2.0, -1.0]), [250, 750])
+ga = np.asarray(reinforce_gradient(rows2, rets3, np.zeros(1000)), dtype=float)
+gb2 = np.asarray(reinforce_gradient(rows2, rets3, np.full(1000, 2.5)), dtype=float)
+manual2 = sum(pi2[k] * np.array([2.0, -1.0])[k] * gmat2[k] for k in range(2))
+check(np.allclose(ga, manual2, atol=1e-12),
+      f"换一组动作数与策略后，期望梯度应为 {manual2}，实际 {ga}")
+check(np.allclose(ga, gb2, atol=1e-10),
+      "基线取值不同但都不依赖动作时，梯度估计应当一致")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def returns_to_go(rewards, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    out = np.zeros_like(rewards)
+    running = 0.0
+    for t in range(rewards.shape[0] - 1, -1, -1):
+        running = rewards[t] + gamma * running
+        out[t] = running
+    return out
+
+
+def reinforce_gradient(grad_log_probs, returns, baselines):
+    grad_log_probs = np.asarray(grad_log_probs, dtype=float)
+    returns = np.asarray(returns, dtype=float)
+    baselines = np.asarray(baselines, dtype=float)
+    weights = returns - baselines
+    return np.mean(weights[:, None] * grad_log_probs, axis=0)
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>策略梯度定理与 REINFORCE 的推导：Sutton &amp; Barto,
+        <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 第 13.1–13.3 节，
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a>；
+        更正式的推导可对照
+        <a class="cite" href="https://web.stanford.edu/class/cs234/">Stanford CS234</a> 的策略梯度讲义。</p>
+      <p>工程约定（优势估计、回报标准化、与 actor-critic 的关系）以
+        <a class="cite" href="https://spinningup.openai.com/en/latest/">Spinning Up in Deep RL（reinforcement learning，强化学习） · Vanilla Policy Gradient</a>
+        为准；本课记号与"何时选它 / 主要坑"的速查见
+        <a href="../reference/algorithms.html#alg-reinforce">算法速查表 · REINFORCE</a>，
+        符号定义见 <a href="../reference/notation.html">符号表</a>。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，把它当私教用。比如可以问：
+      "把这个回归任务换成一个连续动作的高斯策略，帮我把 log π 和它的梯度写出来。"
+      或者 "我的 REINFORCE 训练方差很大，帮我按本课的顺序逐条试降方差手段。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

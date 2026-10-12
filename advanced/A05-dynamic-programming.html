@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A05 · 动态规划：策略迭代与价值迭代 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A05" data-slug="dynamic-programming" data-part="进阶篇 · 第一部分 · 基础概念">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第一部分 · 基础概念</p>
+    <h1>动态规划：策略迭代与价值迭代</h1>
+    <p class="lede">这一节的产出很具体：你能在一个模型已知的马尔可夫决策过程（Markov decision process，简写 MDP）上
+      算出最优策略（一套"看到什么状态就选什么动作"的规则）。
+      你还能说清 DP 卡在哪里，那条边界就是后面所有无模型方法的起点。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出策略评估的迭代式，并解释它为什么是"备份"而不是"解方程"</li>
+        <li>能说清策略迭代与价值迭代的差别，以及各自什么时候更合适</li>
+        <li>能指出 DP 的两个硬前提，以及它们如何逼出蒙特卡洛与时序差分</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>当模型已知时，问题就变成了计算</h2>
+    <p>第 <a href="A04-value-bellman.html">0004 课</a>留下了一组贝尔曼最优（Bellman optimality equation）：
+      动作层直接取最大，不再按策略加权。只要解出 <span class="math">v<sub>*</sub></span>，
+      对它贪心（只挑眼前最好的那个）就得到最优策略。问题在于方程里有 max，
+      它不是线性的，解不出来；不过可以迭代着逼近。</p>
+    <p><span class="term">动态规划（dynamic programming, DP）</span>就是这套迭代解法。
+      它的入场券是一张完整的模型表：对任意 (s, a)，转移概率
+      （这个跳转不一定百分之百确定，而是一组可能性，各带着自己的概率）
+      <span class="math">p(s′,r|s,a)</span> 会告诉你"接下来会发生什么，概率各是多少"。
+      在业务里这意味着你先有了一版可信的仿真器，或者一张统计出来的转移表。</p>
+  </section>
+
+  <section>
+    <h2>策略评估：反复套用贝尔曼期望方程</h2>
+    <p>给定 π（策略），先要算出它每个状态值多少分。这一步叫策略评估（给定一套策略，算出它到底值多少分），
+      算出来的东西叫状态价值（只看状态、不管具体选哪个动作的那个价值），记作 <span class="math">v<sub>π</sub></span>。
+      把贝尔曼期望方程当成更新规则而不是方程来用，就得到下面这个迭代式：</p>
+    <div class="eq">
+      <span class="eq-body">V<sub>k+1</sub>(s) ← Σ<sub>a</sub> π(a|s) Σ<sub>s′,r</sub> p(s′, r | s, a) [ r + γ V<sub>k</sub>(s′) ]</span>
+      <span class="eq-num">(5.1)</span>
+    </div>
+    <p>式子里的 <code>←</code> 读作"更新为"：把右边算出来的值写回左边这个 V。每扫一遍所有状态，
+      价值就更接近 <span class="math">v<sub>π</sub></span> 一步。为什么一定收敛（一轮轮算下去，数值不再明显变化，稳定下来了）？
+      因为右边对 V 是一个压缩映射（每迭代一次，两个估计之间的差距就缩小一点，所以最终必然稳定）。
+      式中 γ 是折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折），缩小的系数就是它：
+      两轮之间的最大误差每轮至少缩小 γ 倍。γ = 0.9 时误差每轮乘以 0.9，大约 200 轮后就能精确到小数点后 9 位；
+      γ = 0.99 时要慢一个数量级。这是"γ 接近 1 训得慢"最朴素的原因。</p>
+    <p>算到某个价值不再变化就停，这种"再迭代一次也不变"的解叫不动点（再迭代一次也不变的那种解）。</p>
+    <p>实践中不会真的解线性方程组（<var>n</var> 个状态就要解 <var>n</var> 元方程组，
+      代价是 <span class="math">O(n³)</span>），而是迭代到相邻两轮的最大变化小于 <var>θ</var>（停止阈值）就停。
+      <em>θ 就是你的精度预算</em>：θ 太大，你会把"没算准的价值"当成收敛结果，后面的改进自然跟着错。</p>
+  </section>
+
+  <section>
+    <h2>策略改进：贪心一步就够</h2>
+    <p>有了 <span class="math">v<sub>π</sub></span>，就能算出每个动作的价值
+      <span class="math">q<sub>π</sub>(s,a)</span>，然后每个状态挑最大的那个。这一步叫策略改进
+      （根据算出的分数，把策略里明显吃亏的选择换掉）：</p>
+    <div class="eq">
+      <span class="eq-body">π′(s) ← arg max<sub>a</sub> Σ<sub>s′,r</sub> p(s′, r | s, a) [ r + γ v<sub>π</sub>(s′) ]</span>
+      <span class="eq-num">(5.2)</span>
+    </div>
+    <p>式子里的 arg max 读作 arg-max，意思是"挑出让后面那个式子最大的那个选择"。
+      策略改进定理（policy improvement theorem，把打得差的招换成更好的，结果一定不会更差）保证：
+      这样得到的 π′ 在每个状态上都不差于 π，要么等价，要么严格更好。
+      于是"评估 → 改进 → 再评估"交替进行，价值单调上升且有上界，
+      必然停在某个点；在这一点上策略对自己的价值已经贪心，它就是最优策略。</p>
+    <p>这样得到的 π′ 是确定性策略（每个状态固定选一个动作，不靠抽签）。
+      反过来，按概率随机挑动作的那类策略叫随机策略（同一个状态下按概率随机挑，不固定某一个）。</p>
+    <p>这就是<span class="term">策略迭代（policy iteration，反复"打分 → 改招"，直到改不动为止）</span>。它的每一轮都很贵
+      （评估要迭代到收敛），但需要的轮数通常很少。</p>
+  </section>
+
+  <section>
+    <h2>价值迭代：把评估截断成一步</h2>
+    <p>一个观察：评估根本不必做到收敛，做一步就接着改进，效果往往更好。
+      把两者合并，得到<span class="term">价值迭代（value iteration，不显式维护策略，直接把价值反复往最优方向推）</span>：</p>
+    <div class="eq">
+      <span class="eq-body">V<sub>k+1</sub>(s) ← max<sub>a</sub> Σ<sub>s′,r</sub> p(s′, r | s, a) [ r + γ V<sub>k</sub>(s′) ]</span>
+      <span class="eq-num">(5.3)</span>
+    </div>
+    <p>它就是贝尔曼最优（Bellman optimality equation，动作层直接取最大）的直接迭代。
+      收敛后从 <span class="math">V</span> 里提取一次贪心策略即可。
+      注意它没有跳过价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）：
+      它算的仍然是价值，只是不再为每套策略单独评估到收敛。</p>
+    <table>
+      <thead><tr><th>维度</th><th>策略迭代</th><th>价值迭代</th></tr></thead>
+      <tbody>
+        <tr><td>每轮做什么</td><td>评估到收敛 + 改进一次</td><td>一步最优备份</td></tr>
+        <tr><td>轮数 / 每轮代价</td><td>轮数少，每轮贵</td><td>轮数多，每轮便宜</td></tr>
+        <tr><td>实现要点</td><td>需要内层循环与策略表</td><td>一个循环，代码极短</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <figure class="sim" data-sim="gridworld" data-rows="4" data-cols="4" data-gamma="0.9" data-mode="policy"></figure>
+
+  <section>
+    <h2>异步 DP，以及 DP 卡在哪里</h2>
+    <p><span class="term">异步 DP（asynchronous DP，不要求每轮扫遍所有状态，只更新其中一部分也行）</span>放松了"每轮必须扫遍所有状态"的要求：
+      你可以只更新一部分状态，甚至就地更新（Gauss-Seidel 风格），只要每个状态都被访问到足够多次，
+      收敛性依然成立。这带来两个实际好处：状态里只有一小部分会被频繁访问时省算力；
+      也能把宝贵的算力集中到"策略真正会走到"的区域。</p>
+    <p>但 DP 有两个绕不过去的前提，它们合起来决定了这门课后面的走向：</p>
+    <ul>
+      <li><em>需要完整模型</em>。真实业务里 <span class="math">p(s′,r|s,a)</span> 通常拿不到，
+        或者仿真器与真实世界有偏差。这就是 <a href="A07-monte-carlo.html">0007 课</a>蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）与
+        <a href="A08-td-learning.html">0008 课</a>时序差分（不用等到一局结束，用"走一步之后的新估计"来更新"走这一步之前的估计"）的动机：用采样代替模型。</li>
+      <li><em>要遍历整个状态空间（所有可能局面的集合）</em>。状态数一大（哪怕只是几十维连续特征离散化），
+        每轮扫一遍就不可行。这是 <a href="A12-function-approximation.html">0012 课</a>函数逼近
+        （状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值）的动机。</li>
+    </ul>
+    <div class="note">
+      <p>诊断视角：DP 的结果不对，先查三件事：终止状态有没有被当成普通状态参与备份
+        （它应当保持零价值，且不再向外传播）、θ 是否过大、γ 是否接近 1 导致看起来"没收敛"。
+        这三条在后面的 DQN（deep Q-network，深度 Q 网络）里会以几乎相同的形式再出现一次。</p>
+    </div>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 使用动态规划求解 MDP，最关键的适用前提是什么？</p>
+      <ol class="mcq-options">
+        <li>需要有足够多的历史交互轨迹，用来估计状态价值函数</li>
+        <li>需要状态空间是连续取值的，否则迭代过程不会收敛</li>
+        <li>需要已知环境的转移概率分布 p(s′, r | s, a)</li>
+        <li>需要能够在线与环境交互，并持续采集新的样本数据</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (5.1) 与 (5.3) 的右边都要对
+          <span class="math">p(s′,r|s,a)</span> 求期望，因此必须能枚举所有可能的下一次结果。
+          有模型是 DP 的入场券（S&amp;B 第 4.1 节）。</p>
+        <p>A 与 D 描述的是无模型方法（蒙特卡洛、时序差分）的路线。
+          B 恰好说反了：连续状态空间反而是表格型 DP 的痛点。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 策略评估与策略改进之间的关系，正确的描述是哪一项？</p>
+      <ol class="mcq-options">
+        <li>先评估把当前策略的价值算准，再对它贪心换掉不够好的动作</li>
+        <li>先改进把所有动作换到最好，再评估这些动作各自值多少分</li>
+        <li>两者必须同时执行，单独跑任何一步都不可能得到收敛结果</li>
+        <li>评估只对确定性策略有效，改进只对随机策略才有效果</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：改进要用到 <span class="math">q<sub>π</sub>(s,a)</span>，
+          而它由 <span class="math">v<sub>π</sub></span> 与模型算出，所以顺序必然是"先评估、后改进"，
+          这也构成策略迭代的一个外层轮次。</p>
+        <p>B 把顺序颠倒了。C 错：策略迭代就是先把内层评估跑完再改进，
+          两者不必同时进行。D 错：两者对确定性与随机策略都成立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 价值迭代与策略迭代最核心的差别是什么？</p>
+      <ol class="mcq-options">
+        <li>价值迭代需要完整模型，而策略迭代完全不需要环境模型</li>
+        <li>价值迭代只能用于分幕任务，策略迭代对两类任务都支持</li>
+        <li>价值迭代直接优化策略参数，跳过了价值函数的计算过程</li>
+        <li>价值迭代每轮只做一次备份，省掉了评估到收敛的内层循环</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (5.3) 把"评估到收敛"截断成一步，再立刻取 max，
+          等价于评估与改进在每次扫描中同时发生，因此只需要一层循环。</p>
+        <p>A 错：两者都需要完整模型。B 错：两者都适用于分幕与持续任务。
+          C 错：价值迭代算的依然是价值函数，策略是最后从 q 里提取出来的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 异步 DP（asynchronous DP）指的是什么？</p>
+      <ol class="mcq-options">
+        <li>在多台机器上各自维护一份独立的价值表，最后把结果汇总</li>
+        <li>不要求每轮扫遍所有状态，可以只更新其中一部分状态的价值</li>
+        <li>把更新顺序写成随机排列，因此保证收敛速度一定快于同步版</li>
+        <li>只在采样访问到的状态上做备份，所以不再需要环境模型支持</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：异步 DP 只要求每个状态被访问足够多次，不要求每轮完整扫描，
+          更新顺序可以任意，甚至就地更新（S&amp;B 第 4.5 节）。它的价值在于把算力投到重要的区域。</p>
+        <p>A 说的是分布式实现，不是异步 DP 的定义。
+          C 错在"保证更快"：顺序会影响收敛速度，但异步 DP 本身不做这种承诺。
+          D 错：异步 DP 仍然需要模型，只是更新粒度更灵活。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 在策略评估里把停止阈值 <var>θ</var> 设得过大，会有什么后果？</p>
+      <ol class="mcq-options">
+        <li>价值还没算准就提前停止，最终得到的策略可能并不是最优</li>
+        <li>迭代所需的轮数会明显增加，但最终结果仍然保持完全一致</li>
+        <li>折扣因子会被自动调小，从而让整个迭代重新变得可以收敛</li>
+        <li>价值函数会一路发散到无穷大，必须重新从零初始化价值表</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：θ 是精度预算。提前停止意味着 <span class="math">V</span> 与
+          <span class="math">v<sub>π</sub></span> 的差还没被压下去，基于它算出的
+          <span class="math">q<sub>π</sub></span> 和贪心策略就可能选错动作。</p>
+        <p>B 说反了：θ 越大，停止越早、轮数越少。C 错：θ 与 γ 是两个独立的量。
+          D 错：备份是 γ-压缩映射，在 γ &lt; 1 时不会发散，θ 只影响停得多早。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0005-code-1">
+      <h3>代码题 1 · 用迭代备份估计随机策略的价值</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>模型已知的 MDP 里，转移概率与奖励表都摆在手边，求解退化成迭代计算。<code>policy_evaluation</code> 是策略迭代中"评估"那一步，被策略改进与策略迭代的主循环调用：给定一个策略 π，先把它的价值函数 <var>v</var><sub>π</sub> 迭代出来。传进来的 <code>P</code>、<code>R</code>、<code>policy</code> 相当于业务里那版可信仿真器或统计出来的转移表，返回的 <code>V</code> 就是"从每个状态出发按 π 一直走，长期平均能拿多少分"的估计。</p>
+        <p>请实现 <code>policy_evaluation(P, R, policy, gamma, theta=1e-8)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>P</code>：形状 <code>(S, A, S)</code> 的 float 数组。形状说的是每个维度各有多少个位置，下标从 0 开始；<code>P[s, a, s′]</code> 是状态 <code>s</code> 执行动作 <code>a</code> 后转到 <code>s′</code> 的概率，固定 <code>(s, a)</code> 时对 <code>s′</code> 求和为 1；</li>
+          <li><code>R</code>：形状 <code>(S, A)</code> 的 float 数组，<code>R[s, a]</code> 是在 <code>s</code> 执行 <code>a</code> 能拿到的期望即时奖励；期望就是同一件事重复很多次之后的平均结果；</li>
+          <li><code>policy</code>：形状 <code>(S, A)</code> 的 float 数组，<code>policy[s, a]</code> 是 π 在 <code>s</code> 选 <code>a</code> 的概率，对 <code>a</code> 求和为 1；</li>
+          <li><code>gamma</code>：float，折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折）；<code>theta</code>：float，收敛阈值，默认 <code>1e-8</code>。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状 <code>(S,)</code>，float：第 <code>s</code> 个元素是策略 π 下状态 <code>s</code> 的估计价值 <var>v</var><sub>π</sub>(s)，对应"这个状态值多少分"。终止状态的动作为自环、奖励恒为 0，它的价值应当保持 0。</li>
+        </ul>
+        <div class="eq">
+          <span class="eq-body">V<sub>k+1</sub>(s) ← Σ<sub>a</sub> policy[s, a] Σ<sub>s′</sub> P[s, a, s′] ( R[s, a] + γ V<sub>k</sub>(s′) )</span>
+          <span class="eq-num">(5.4)</span>
+        </div>
+        <p class="cp-note"><span class="cp-label">会被检验</span>返回值是 numpy 数组且形状为 <code>(S,)</code>；全等待策略下 <code>V[0] = 10.0</code>、<code>V[1] = 9.0</code>、<code>V[2] = 0</code>（容差 <code>1e-5</code>）；全前进策略下 <code>V</code> 约为 <code>[9, 10, 0]</code>；<code>V</code> 是贝尔曼期望算子的不动点，残差小于 <code>1e-4</code>；<code>theta</code> 收紧到 <code>1e-12</code> 后结果更接近 10.0；调用后 <code>P</code>、<code>R</code>、<code>policy</code> 逐元素不变，返回的是新数组；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先取 <code>S, A = policy.shape</code>，再建 <code>V = np.zeros(S)</code>。<code>np.zeros(S)</code> 返回长度 S、全是 0 的数组，下标从 0 开始。</li>
+          <li>外层写 <code>while True</code>。每轮开始先设 <code>delta = 0.0</code>，用它记录这一轮里单个状态变化的最大值。</li>
+          <li>内层对每个状态 <code>s</code>：先设 <code>total = 0.0</code>，再对每个动作 <code>a</code> 累加
+              <code>policy[s, a] * (R[s, a] + gamma * (P[s, a] @ V))</code>。算完先更新
+              <code>delta = max(delta, abs(total - V[s]))</code>，再写回 <code>V[s] = total</code>。</li>
+          <li>一轮跑完，如果 <code>delta &lt; theta</code> 就 <code>break</code>，最后 <code>return V</code>。
+              就地更新（刚算出来的值马上给后面的状态用）是标准做法，收敛更快，也不需要额外数组。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def policy_evaluation(P, R, policy, gamma, theta=1e-8):
+    # TODO: 反复用贝尔曼期望备份扫过所有状态，直到最大变化小于 theta
+    return np.zeros(R.shape[0])
+</script>
+
+      <script type="text/x-python" data-role="tests">
+P = np.zeros((3, 2, 3))
+P[0, 0, 1] = 1.0   # 状态 0 选动作 0 去状态 1
+P[0, 1, 0] = 1.0   # 状态 0 选动作 1 留在状态 0
+P[1, 0, 2] = 1.0   # 状态 1 选动作 0 去终止状态 2
+P[1, 1, 0] = 1.0   # 状态 1 选动作 1 回到状态 0
+P[2, 0, 2] = 1.0
+P[2, 1, 2] = 1.0
+R = np.array([[0.0, 1.0], [10.0, 0.0], [0.0, 0.0]])
+gamma = 0.9
+
+wait = np.array([[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]])
+V = policy_evaluation(P, R, wait, gamma)
+check(isinstance(V, np.ndarray), f"返回值应当是 numpy 数组，实际 {type(V).__name__}")
+check(V.shape == (3,), f"输出形状应当是 (3,)，实际 {V.shape}")
+check(abs(V[0] - 10.0) < 1e-5,
+      f"一直等待时 v(状态0) 应满足 v = 1 + 0.9v，即 10.0，实际 {V[0]:.6f}")
+check(abs(V[1] - 9.0) < 1e-5, f"v(状态1) = 0.9 * v(状态0) = 9.0，实际 {V[1]:.6f}")
+check(abs(V[2]) < 1e-9, f"终止状态的价值应当保持为 0，实际 {V[2]:.6f}")
+
+go = np.array([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
+Vg = policy_evaluation(P, R, go, gamma)
+check(np.allclose(Vg, [9.0, 10.0, 0.0], atol=1e-5),
+      f"一直前进时应当是 [9, 10, 0]，实际 {Vg}")
+
+# 收敛判据：V 应当是贝尔曼期望算子的不动点
+res = 0.0
+for s in range(3):
+    tv = sum(float(wait[s, a]) * (float(R[s, a]) + gamma * float(P[s, a] @ V))
+             for a in range(2))
+    res = max(res, abs(tv - V[s]))
+check(res < 1e-4, f"V 应当满足贝尔曼期望方程（不动点残差 < 1e-4），实际残差 {res:.6f}")
+
+V0 = V.copy()
+P0 = P.copy()
+R0 = R.copy()
+pol0 = wait.copy()
+policy_evaluation(P, R, wait, gamma, 1e-10)
+check(np.array_equal(V, V0) and np.array_equal(P, P0) and np.array_equal(R, R0)
+      and np.array_equal(wait, pol0), "不应当修改传入的 P、R、policy，V 是新返回的数组")
+
+Vtight = policy_evaluation(P, R, wait, gamma, 1e-12)
+check(abs(Vtight[0] - 10.0) < 1e-6,
+      f"阈值收紧到 1e-12 时结果应当更接近 10.0，实际 {Vtight[0]:.8f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def policy_evaluation(P, R, policy, gamma, theta=1e-8):
+    S, A = policy.shape
+    V = np.zeros(S, dtype=float)
+    while True:
+        delta = 0.0
+        for s in range(S):
+            total = 0.0
+            for a in range(A):
+                w = float(policy[s, a])
+                if w != 0.0:
+                    total += w * (float(R[s, a]) + gamma * float(P[s, a] @ V))
+            delta = max(delta, abs(total - V[s]))
+            V[s] = total
+        if delta < theta:
+            break
+    return V
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0005-code-2">
+      <h3>代码题 2 · 价值迭代求最优策略</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>同一套已知模型，<span class="term">价值迭代</span>把"评估到收敛"截断成一步最优备份，评估与改进合进一个循环，轮数多但每轮便宜。<code>value_iteration</code> 在规划阶段被调用：先把最优价值迭代出来，再从它提取一次贪心策略交给部署。这里的 <code>P</code>、<code>R</code> 是模型表，<code>V</code> 回答"每个状态在最优策略下值多少分"，<code>policy</code> 回答"到了这个状态该按哪个动作"。</p>
+        <p>请实现 <code>value_iteration(P, R, gamma, theta=1e-8)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>P</code>：形状 <code>(S, A, S)</code> 的 float 数组，<code>P[s, a, s′]</code> 是状态 <code>s</code> 执行动作 <code>a</code> 后转到 <code>s′</code> 的概率；</li>
+          <li><code>R</code>：形状 <code>(S, A)</code> 的 float 数组，<code>R[s, a]</code> 是期望即时奖励；</li>
+          <li><code>gamma</code>：float，折扣因子；<code>theta</code>：float，收敛阈值，默认 <code>1e-8</code>。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回二元组 <code>(V, policy)</code>，两项都是 <code>np.ndarray</code>；</li>
+          <li><code>V</code>：形状 <code>(S,)</code> 的 float 数组，<code>V[s]</code> 是最优价值 <var>v</var><sub>*</sub>(s)，终止状态保持 0；</li>
+          <li><code>policy</code>：形状 <code>(S,)</code> 的整数下标数组，<code>policy[s]</code> 是最终 <code>V</code> 的贪心动作下标，平局取下标小的动作。</li>
+        </ul>
+        <div class="eq">
+          <span class="eq-body">V<sub>k+1</sub>(s) ← max<sub>a</sub> [ R[s, a] + γ Σ<sub>s′</sub> P[s, a, s′] V<sub>k</sub>(s′) ]</span>
+          <span class="eq-num">(5.5)</span>
+        </div>
+        <p class="cp-note"><span class="cp-label">会被检验</span>收敛后的 <code>V</code> 约为 <code>[10, 10, 0]</code>（容差 <code>1e-4</code>）且 <code>V[2] = 0</code>；<code>V</code> 满足贝尔曼最优方程，残差小于 <code>1e-4</code>；<code>policy</code> 的 dtype 是整数，每一项都是合法动作下标，状态 0 选等待（下标 1）、状态 1 选前进（下标 0）；状态 1 的最优价值高于一直等待的价值；<code>gamma</code> 从 0.9 改成 0.5 后状态 0 的最优动作随之改变；调用不修改 <code>P</code>、<code>R</code>，两次调用返回的 <code>V</code> 互不影响；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>主体和策略评估很像，区别只有一个：内层不再对动作按 <code>policy</code> 加权，而是直接取最大值。
+              对每个状态算 <code>best = max(R[s, a] + gamma * (P[s, a] @ V) for a in range(A))</code>。</li>
+          <li>同样用 <code>V = np.zeros(S)</code>、<code>while True</code> 和 <code>delta = 0.0</code>：
+              每轮把 <code>abs(best - V[s])</code> 的最大值记进 <code>delta</code>，小于 <code>theta</code> 就跳出循环。</li>
+          <li>收敛之后再算一次 <code>Q = R + gamma * (P @ V)</code>，形状 <code>(S, A)</code>；
+              用 <code>np.argmax(Q, axis=1)</code> 在每个状态那一行里挑最大的动作，得到长度 <code>S</code> 的整数下标数组。</li>
+          <li>返回 <code>(V, policy)</code> 二元组。<code>V</code> 要是新数组，不要修改传入的 <code>P</code>、<code>R</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def value_iteration(P, R, gamma, theta=1e-8):
+    # TODO: 反复做最优备份直到收敛，再从最终 V 提取贪心策略
+    S = R.shape[0]
+    return np.zeros(S), np.zeros(S, dtype=int)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+P = np.zeros((3, 2, 3))
+P[0, 0, 1] = 1.0
+P[0, 1, 0] = 1.0
+P[1, 0, 2] = 1.0
+P[1, 1, 0] = 1.0
+P[2, 0, 2] = 1.0
+P[2, 1, 2] = 1.0
+R = np.array([[0.0, 1.0], [10.0, 0.0], [0.0, 0.0]])
+gamma = 0.9
+
+out = value_iteration(P, R, gamma)
+check(isinstance(out, tuple) and len(out) == 2,
+      f"应当返回 (V, policy) 二元组，实际 {type(out).__name__}")
+V, policy = out
+check(isinstance(V, np.ndarray) and V.shape == (3,), f"V 应当是长度 3 的数组，实际 {V.shape}")
+check(isinstance(policy, np.ndarray) and policy.shape == (3,),
+      f"policy 应当是长度 3 的数组，实际 {getattr(policy, 'shape', None)}")
+check(policy.dtype.kind in "iu", f"policy 应当是整数下标数组，实际 dtype={policy.dtype}")
+
+check(np.allclose(V, [10.0, 10.0, 0.0], atol=1e-4),
+      f"最优价值应当是 [10, 10, 0]，实际 {V}")
+check(abs(V[2]) < 1e-9, f"终止状态的价值应当保持为 0，实际 {V[2]:.8f}")
+
+check(policy[0] == 1,
+      f"状态 0 的最优动作是等待（下标 1），实际选了 {policy[0]}")
+check(policy[1] == 0,
+      f"状态 1 的最优动作是前进（下标 0），实际选了 {policy[1]}")
+check(int(policy[0]) in (0, 1) and int(policy[1]) in (0, 1),
+      f"策略必须是合法的动作下标，实际 {policy.tolist()}")
+
+res = 0.0
+for s in range(3):
+    best = max(float(R[s, a]) + gamma * float(P[s, a] @ V) for a in range(2))
+    res = max(res, abs(best - V[s]))
+check(res < 1e-4,
+      f"收敛后的 V 必须满足贝尔曼最优方程（残差 < 1e-4），实际残差 {res:.6f}")
+
+V_wait = np.zeros(3)
+for _ in range(2000):
+    for s in range(3):
+        V_wait[s] = R[s, 1] + gamma * float(P[s, 1] @ V_wait)
+check(V[1] > V_wait[1] + 0.5,
+      f"最优价值在状态 1 上应当高于一直等待的 {V_wait[1]:.4f}，实际 {V[1]:.4f}")
+check(abs(V[0] - V_wait[0]) < 1e-4,
+      f"状态 0 上最优策略与一直等待的价值应当一致（约 10），实际 {V[0]:.4f} 对 {V_wait[0]:.4f}")
+
+V0 = V.copy()
+P0 = P.copy()
+R0 = R.copy()
+value_iteration(P, R, gamma, 1e-6)
+check(np.array_equal(P, P0) and np.array_equal(R, R0), "不应当修改传入的 P 与 R")
+check(np.array_equal(V, V0), "调用方拿到的 V 不应当被后续调用改掉")
+
+V2, policy2 = value_iteration(P, R, 0.5)
+check(abs(V2[0] - 5.0) < 1e-4,
+      f"gamma=0.5 时状态 0 应当直接前进拿到 0.5*10 = 5.0（一直等待只值 "
+      f"1/(1-0.5) = 2.0），实际 {V2[0]:.6f}")
+check(V2[1] > 9.0, f"gamma=0.5 时状态 1 应当拿到接近 10 分，实际 {V2[1]:.6f}")
+check(policy2[0] == 0 and policy2[1] == 0,
+      f"gamma=0.5 时两个状态都应当选择前进（下标 0），实际 {policy2.tolist()}")
+check(policy[0] != policy2[0],
+      "折扣因子从 0.9 改成 0.5 后状态 0 的最优动作应当改变，否则说明 V 没有真正收敛")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def value_iteration(P, R, gamma, theta=1e-8):
+    S, A = R.shape
+    V = np.zeros(S, dtype=float)
+    while True:
+        delta = 0.0
+        for s in range(S):
+            best = max(float(R[s, a]) + gamma * float(P[s, a] @ V) for a in range(A))
+            delta = max(delta, abs(best - V[s]))
+            V[s] = best
+        if delta < theta:
+            break
+    Q = np.asarray(R, dtype=float) + gamma * (P @ V)
+    policy = np.argmax(Q, axis=1).astype(int)
+    return V, policy
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 4 章。
+        策略评估、策略改进、策略迭代、价值迭代与异步 DP 的定义与收敛性讨论都在这里；
+        4.1 节末尾关于"DP 需要完整模型"的说明也是后面无模型方法的出发点。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>如果你想先看一个更小的手算例子，Berkeley CS188 的
+        <a class="cite" href="https://inst.eecs.berkeley.edu/~cs188/">MDP 讲义</a>
+        用 4×3 网格把价值迭代一步步算了出来。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把我这张转移表代进价值迭代，帮我逐轮打印" 或者
+      "我的仿真器和真实环境有偏差，DP 的结果还能用吗？"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

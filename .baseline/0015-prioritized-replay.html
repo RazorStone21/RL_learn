@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0015 · 优先经验回放 PER — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="0015" data-slug="prioritized-replay" data-part="第三部分 · 深度价值方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第 15 课 · 第三部分 · 深度价值方法</p>
+    <h1>优先经验回放 PER</h1>
+    <p class="lede">这一节把<a href="0013-dqn.html">0013 课</a>的均匀回放换成按 <strong>TD 误差</strong>
+      排序的采样。你会写出采样概率与重要性采样权重，并知道 β（重要性采样退火指数）为什么不能省。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能由 TD 误差算出采样概率，并写出对应的重要性采样权重</li>
+        <li>能说清"优先"为什么带来偏差，以及权重与 β 退火如何把它修回来</li>
+        <li>能用 sum-tree 的思路解释"采样和更新都是 O(log N)"是怎么做到的</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>均匀回放浪费在哪</h2>
+    <p>DQN（deep Q-network，深度 Q 网络）从十万到百万条的缓冲区里均匀随机抽 mini-batch，等于假设每条转移一样有用。
+      但真实情况几乎从不如此：稀疏奖励的任务里，绝大多数样本的 TD 误差接近 0，
+      对着它们反复回归只是在确认"这里没什么可学"；而少数几条关键转移
+      （第一次拿到奖励、第一次掉进坑里）被抽到的概率和其他样本完全一样，
+      平均要等 <var>N</var> 次更新才轮到它一遍。</p>
+    <p>换个抽样分布就能把这些样本的权重提上去，核心只有一句：让"还学不会的样本"更常出现。
+      这就是 <span class="term">优先经验回放（prioritized experience replay, PER）</span> 的出发点。</p>
+  </section>
+
+  <section>
+    <h2>用 TD 误差当尺子</h2>
+    <p>一条样本有多值得学，最直接的度量就是它的
+      <span class="term">时序差分误差（TD error, δ）</span>：
+      <span class="math">δ = y − Q(s,a)</span>，即目标与当前估计的差。误差大说明这条转移还没被拟合好。
+      于是定义优先级与采样概率：</p>
+    <div class="eq">
+      <span class="eq-body">p<sub>i</sub> = |δ<sub>i</sub>| + ε<sub>p</sub>，&nbsp;&nbsp; P(i) = p<sub>i</sub><sup>ω</sup> / Σ<sub>k</sub> p<sub>k</sub><sup>ω</sup></span>
+      <span class="eq-num">(15.1)</span>
+    </div>
+    <p>两个超参各有分工。<var>ω</var>（优先级指数）控制"优先"的强度：<var>ω</var>=0 时退回均匀采样，
+      <var>ω</var>=1 时完全按误差比例（原论文默认 0.6，实践起点也是 0.6）。
+      正常数 <span class="math">ε<sub>p</sub></span>（ε 是优先级下限）保证每条样本
+      都有非零概率被抽到，实现里常取 10<sup>−5</sup> 量级。没有它，误差恰好为 0 的样本就永远不再出现，
+      而"当前误差为 0"绝不等于"永远没错"。</p>
+    <p>另一条路是 <span class="term">rank 优先（rank-based prioritization）</span>：
+      只按 <span class="math">|δ|</span> 的排名给概率，<span class="math">P(i) ∝ 1 / rank(i)</span>。
+      它对极端误差不敏感，尺度也更稳，适合奖励分布重尾的任务。
+      注意本课程沿用<a href="../reference/algorithms.html#alg-per">算法速查表</a>的记号：
+      优先级指数写作 <var>ω</var>，因为 <var>α</var>（学习率）已经用掉了。</p>
+    <p>这套做法出自 Schaul 等人的
+      <a class="cite" href="https://arxiv.org/abs/1511.05952">Prioritized Experience Replay（arXiv 1511.05952）</a>。</p>
+  </section>
+
+  <section>
+    <h2>改了分布，就得把偏差修回来</h2>
+    <p>按优先级采样时，参数更新的期望不再等于原始目标函数的梯度，这是一个<strong>有偏</strong>估计。
+      修正办法是重要性采样（importance sampling）：给每条样本乘一个权重 ρ（重要性采样权重），抵消它被多抽或少抽的部分。</p>
+    <div class="eq">
+      <span class="eq-body">ρ<sub>i</sub> = ( 1 / (N · P(i)) )<sup>β</sup>，再整体除以 max<sub>j</sub> ρ<sub>j</sub></span>
+      <span class="eq-num">(15.2)</span>
+    </div>
+    <p><var>N</var> 是缓冲区当前条数。<var>β</var>=0 时所有权重都是 1，等于不管偏差、只图快；
+      <var>β</var>=1 时是完全修正、无偏但方差大。原论文的做法是让 <var>β</var> 从 0.4 线性退火到 1：
+      训练早期参数离最优解远，偏差相对可容忍，优先采样带来的加速更值钱；
+      后期需要收敛到准确的价值，就把修正补满。除以最大权重只是把梯度尺度归一化，
+      不改变相对比例，避免整批的损失被一个大权重放大。</p>
+    <div class="eq">
+      <span class="eq-body">L(φ) = (1 / B) Σ<sub>i</sub> ρ<sub>i</sub> ( y<sub>i</sub> − Q(s<sub>i</sub>, a<sub>i</sub>; φ) )²</span>
+      <span class="eq-num">(15.3)</span>
+    </div>
+    <p>式中 φ（网络参数）就是要训练的那组权重。</p>
+  </section>
+
+  <section>
+    <h2>sum-tree：让采样也是 O(log N)</h2>
+    <p>式 (15.1) 的概率由全体优先级决定，而优先级每次更新都会变。如果每次采样都重新算一遍前缀和，
+      复杂度是 <var>O</var>(<var>N</var>)，缓冲区一大就成了瓶颈。</p>
+    <p><span class="term">sum-tree（求和树）</span>解决这个问题：把优先级放在二叉树的叶子上，
+      每个内部节点存两个孩子的和，根节点就是总优先级。采样时先在
+      <span class="math">[0, total)</span> 里均匀取一个数，再从根往下比较左右子树的累加和决定走哪边，
+      走到叶子就得到一个样本，一次采样 <var>O</var>(log <var>N</var>)；
+      更新某条样本的优先级也只要沿它到根的路径改 <var>O</var>(log <var>N</var>) 个节点。</p>
+    <p>工程上还有一个约定俗成的细节：<strong>新入队的样本一律给当前最大优先级</strong>。
+      否则一条误差很小的新样本可能很久都抽不到，而它来自当前策略，是最不该被浪费的数据。</p>
+  </section>
+
+  <section>
+    <h2>最容易踩的坑</h2>
+    <table>
+      <thead><tr><th>症状</th><th>最可能的原因</th></tr></thead>
+      <tbody>
+        <tr><td>训练早期还行，后期开始震荡</td><td><var>β</var> 没有退火，一直停在 0.4</td></tr>
+        <tr><td>少数样本被反复抽、其他样本饿死</td><td>去掉了 <span class="math">ε<sub>p</sub></span>，或 <var>ω</var> 设得过大</td></tr>
+        <tr><td>优先级与真实误差脱节、越训越差</td><td>更新优先级时用了过期的 TD 误差</td></tr>
+        <tr><td>loss 尺度随 batch 剧烈跳动</td><td>权重没有按最大值归一化</td></tr>
+      </tbody>
+    </table>
+    <p>PER 与 <a href="0014-double-dueling-dqn.html">0014 课</a>的两个改进互不冲突，
+      可以一起打开；它也是 <a href="0016-rainbow-distributional.html">0016 课</a> Rainbow
+      六个组件里公认贡献最大的一个。想先看工程默认值，可以对照
+      <a class="cite" href="https://stable-baselines3.readthedocs.io/en/master/">Stable-Baselines3 文档</a>
+      里 <var>β</var> 的退火区间与 <var>ω</var> 的默认取值。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 为什么按优先级采样时必须再乘一个重要性采样权重？</p>
+      <ol class="mcq-options">
+        <li>因为高误差样本会被反复更新，权重是为了防止参数数值爆炸</li>
+        <li>因为 sum-tree 的采样带有浮点误差，权重是用来校正这些误差</li>
+        <li>因为按优先级采样改变了样本分布，权重的作用是把期望修正回来</li>
+        <li>因为缓冲区里旧策略产生的数据已经过期，权重是用来重新加权的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：梯度的期望是对采样分布求的。一旦把均匀分布换成
+          <span class="math">P(i)</span>，得到的就是另一个量的梯度；乘上
+          <span class="math">ρ<sub>i</sub> ∝ 1/P(i)</span> 才把它拉回原目标。
+          式 (15.2) 的 <var>β</var> 就是在这件事上留了一个可以调的档位。</p>
+        <p>A 混淆了偏差修正与数值稳定性，权重确实会缩放梯度，但那是<em>副作用</em>而不是目的。
+          B 不对：浮点误差不需要重要性采样来校正。D 也不对：数据过期是所有
+          off-policy 方法共有的问题，与是否用优先级无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 式 (15.1) 里那个小的正常数 ε<sub>p</sub> 有什么作用？</p>
+      <ol class="mcq-options">
+        <li>保证每条样本都有非零的抽样概率，避免零误差样本饿死</li>
+        <li>把 TD 误差的尺度归一化，让不同任务的优先级能互相比较</li>
+        <li>让优先级指数可以取到 0，从而在训练早期退化成均匀采样</li>
+        <li>防止在线网络与目标网络的参数差过大，避免自举过程发散</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：若严格按 <span class="math">|δ|</span> 定优先级，
+          误差恰为 0 的样本概率为 0，永不再被抽到；而它可能只是当前恰好拟合对了，
+          换个状态分布就会重新出错。加上 <span class="math">ε<sub>p</sub></span>
+          给所有样本留一条底，同时也让优先级对噪声不那么敏感。</p>
+        <p>B 是误传，<span class="math">ε<sub>p</sub></span> 不做归一化。
+          C 混淆了两个超参：能否退化成均匀采样由 <var>ω</var>=0 决定，不由
+          <span class="math">ε<sub>p</sub></span> 决定。D 与目标网络的同步策略无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 把 β 从 0.4 线性退火到 1，这样做的理由是？</p>
+      <ol class="mcq-options">
+        <li>它让优先级指数从 0.4 升到 1，采样会逐渐退回均匀分布</li>
+        <li>它让重要性采样权重整体变大，从而在训练后期放大梯度</li>
+        <li>它让缓冲区容量从 0.4 倍逐步扩到 1 倍，后期能装更多数据</li>
+        <li>它让偏差修正由弱到强：早期容忍偏差换速度，后期趋于无偏</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：<var>β</var> 是修正强度的档位，不改变采哪些样本。
+          早期参数离最优解远、主要矛盾是学得快，偏差可以容忍；后期要收敛到准确价值，
+          就把重要度修正补满，让更新期望回到无偏。</p>
+        <p>A 把 <var>β</var> 与 <var>ω</var> 搞混了：决定采样分布的是 <var>ω</var>，
+          而且 <var>β</var> 变大是修正更强，不是退回均匀。B 只看到权重的尺度，
+          忽略了它是在纠正分布偏差。C 与缓冲区容量毫无关系。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. sum-tree 在 PER 里解决的问题是什么？</p>
+      <ol class="mcq-options">
+        <li>它把缓冲区按 TD 误差排序，采样时直接取误差最大的若干条</li>
+        <li>它用 O(log N) 支持按优先级采样与更新，不必每次重算前缀和</li>
+        <li>它把状态特征组织成一棵树，让网络能处理可变长度的输入</li>
+        <li>它保证抽出的样本两两独立，从而满足随机梯度下降的假设</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：优先级只在叶子上存一份，内部节点存子树的和，
+          于是"根节点即总优先级"、"按累积概率定位一条样本"和"改一条样本的优先级"
+          都能沿树走一条路径完成，代价都是 <var>O</var>(log <var>N</var>)。</p>
+        <p>A 描述的是"每次都取最大的几条"，那会让样本高度重复、缓冲区其余部分被浪费；
+          按概率抽样既照顾高误差样本又保留探索。C 是特征工程的另一回事。
+          D 做不到：PER 改变的是抽样分布，样本之间的相关性仍然存在。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 关于 PER 的实践，下列哪一种做法会伤害训练？</p>
+      <ol class="mcq-options">
+        <li>去掉常数 ε<sub>p</sub> 只按 |δ| 排序，让高噪声样本被反复抽中</li>
+        <li>每算完一次 TD 误差，就把新的 |δ| 写回该样本的优先级</li>
+        <li>新样本一律以当前最大优先级入队，避免它长期抽不到</li>
+        <li>用 TD 误差算权重时按最大值归一化，稳定梯度的尺度</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：纯粹按 <span class="math">|δ|</span> 排序时，
+          一个因为目标网络噪声而暂时误差很大的样本会被反复抽到，越抽越强化这个假信号；
+          加 <span class="math">ε<sub>p</sub></span> 或改用 rank 优先就是为了压住这类尖峰。</p>
+        <p>B、C、D 都是正确做法：优先级要用最新算出的 TD 误差刷新；新样本给最大优先级
+          才不会还没被看过就被埋住；按最大权重归一化只是缩放梯度尺度，不改变相对比例。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0015-code-1">
+            <h3>代码题 1 · 把 TD 误差换算成采样概率与权重</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>优先回放按 TD 误差决定回放哪条转移：误差越大，采样概率越高，值得重看的样本被抽中的机会就大。概率一改，梯度期望就有偏，所以还要给每条样本配一个重要性采样权重把它拉回来。这两个函数各做一件事：<code>priority_probs</code> 在算完一批 TD 误差之后调用，输出交给采样器；<code>importance_weights</code> 在抽出一批之后调用，权重乘到损失上。两个函数都不修改输入，只许用 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>td_errors</code>：形状 <code>(N,)</code> 的 float 数组，每条转移最近一次的 TD 误差 δ，可正可负。</li>
+          <li><code>eps</code>：float，默认 <code>1e-5</code>，式 (15.1) 里的 ε<sub>p</sub>，加在 |δ| 上防止零概率。</li>
+          <li><code>omega</code>：float，默认 <code>0.6</code>，优先级指数 ω，取 0 时退化成均匀采样。</li>
+          <li><code>probs</code>：形状 <code>(N,)</code> 的 float 数组，和为 1 的采样概率，通常就是 <code>priority_probs</code> 的输出。</li>
+          <li><code>beta</code>：float，式 (15.2) 里的 β，控制偏差修正的强度，0 表示不修正。</li>
+          <li><code>normalize</code>：bool，默认 <code>True</code>，为真时把权重整体除以最大值。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>priority_probs</code> 返回 <code>np.ndarray</code>，形状 <code>(N,)</code> 的 float，元素非负、和为 1：第 <code>i</code> 个元素是 <span class="math">P(i) = p<sub>i</sub><sup>ω</sup> / Σ<sub>k</sub> p<sub>k</sub><sup>ω</sup></span>，其中 <span class="math">p<sub>i</sub> = |δ<sub>i</sub>| + eps</span>。</li>
+          <li><code>importance_weights</code> 返回 <code>np.ndarray</code>，形状 <code>(N,)</code> 的 float：第 <code>i</code> 个元素是 <span class="math">ρ<sub>i</sub> = (1 / (N · P(i)))<sup>β</sup></span>；<code>normalize=True</code> 时再整体除以最大权重。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>eps=0</code>、<code>omega=1</code> 时严格按 |δ| 比例（[0, 1, 3, −2] 得到 [0, 1, 3, 2]/6）；<code>omega=0</code> 时退化成均匀分布；<code>eps&gt;0</code> 时零误差样本也拿到非零概率；<code>beta=0</code> 时权重全为 1；归一化后最大值为 1，且各元素是未归一化结果的等比缩放；概率越大的样本权重越小；未归一化时每个 ρ<sub>i</sub>·P(i) 都相等。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>eps</code> 要在取幂之前加进去，否则误差为 0 的样本概率就是 0。</li>
+          <li>幂运算直接用 <code>p ** omega</code>，整型输入先转成 <code>float</code>。</li>
+          <li>权重里的 <code>N</code> 是 <code>len(probs)</code>；
+            <code>normalize</code> 时除以 <code>w.max()</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def priority_probs(td_errors, eps=1e-5, omega=0.6):
+    # TODO: p = |delta| + eps，再做 p**omega 的归一化
+    n = len(np.asarray(td_errors, dtype=float))
+    return np.full(n, 1.0 / n)
+
+
+def importance_weights(probs, beta, normalize=True):
+    # TODO: rho = (1 / (N * P))**beta；normalize=True 时除以最大值
+    return np.ones(len(np.asarray(probs, dtype=float)))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+td = np.array([0.0, 1.0, 3.0, -2.0])
+p = np.asarray(priority_probs(td, eps=0.0, omega=1.0), dtype=float)
+check(p.shape == (4,), f"应返回长度 4 的数组，实际形状 {p.shape}")
+check(abs(p.sum() - 1.0) < 1e-12, f"采样概率之和必须为 1，实际 {p.sum():.6f}")
+check(np.allclose(p, np.array([0.0, 1.0, 3.0, 2.0]) / 6.0),
+      f"omega=1、eps=0 时应严格按 |delta| 比例，实际 {p}")
+
+p2 = np.asarray(priority_probs(td, eps=0.0, omega=0.0), dtype=float)
+check(np.allclose(p2, np.full(4, 0.25)),
+      f"omega=0 时应退化成均匀采样，实际 {p2}")
+
+p3 = np.asarray(priority_probs(td, eps=1.0, omega=1.0), dtype=float)
+check(np.all(p3 > 0), f"加了 eps 之后概率必须全为正，实际 {p3}")
+check(np.allclose(p3, np.array([1.0, 2.0, 4.0, 3.0]) / 10.0),
+      f"eps=1 时 p = |delta| + 1，实际 {p3}")
+check(p3[0] > 0.0 and np.isclose(priority_probs(td, eps=1e-5)[0],
+                                 (1e-5) ** 0.6 / ((1e-5) ** 0.6 + 1.0 ** 0.6 + 3.0 ** 0.6 + 2.0 ** 0.6)),
+      "误差为 0 的样本在 eps>0 时也要拿到非零概率")
+
+w = np.asarray(importance_weights(np.array([0.25, 0.75]), beta=1.0, normalize=False), dtype=float)
+check(np.allclose(w, np.array([2.0, 2.0 / 3.0])),
+      f"beta=1 时 rho_i = 1/(N*P_i)：2.0 与 0.6667，实际 {w}")
+wn = np.asarray(importance_weights(np.array([0.25, 0.75]), beta=1.0, normalize=True), dtype=float)
+check(abs(wn.max() - 1.0) < 1e-12, f"归一化后最大权重应为 1，实际 {wn.max():.6f}")
+check(np.allclose(wn, w / w.max()), f"归一化只是整体缩放，实际 {wn}")
+
+w0 = np.asarray(importance_weights(np.array([0.9, 0.1]), beta=0.0), dtype=float)
+check(np.allclose(w0, 1.0), f"beta=0 时所有重要性采样权重都应为 1，实际 {w0}")
+
+big = np.asarray(priority_probs(np.array([5.0, 0.1]), eps=0.0, omega=1.0), dtype=float)
+wb = np.asarray(importance_weights(big, beta=1.0, normalize=False), dtype=float)
+check(wb[0] < wb[1],
+      f"概率越大的样本权重应当越小，实际 {wb}（对应概率 {big}）")
+check(np.allclose(wb * big, wb[1] * big[1]),
+      "未归一化时 rho_i * P_i 应为常数（重要性采样就是这么定义的）")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def priority_probs(td_errors, eps=1e-5, omega=0.6):
+    td_errors = np.asarray(td_errors, dtype=float)
+    p = np.abs(td_errors) + float(eps)
+    powered = p ** float(omega)
+    return powered / powered.sum()
+
+
+def importance_weights(probs, beta, normalize=True):
+    probs = np.asarray(probs, dtype=float)
+    n = probs.shape[0]
+    w = (1.0 / (n * probs)) ** float(beta)
+    if normalize:
+        w = w / w.max()
+    return w
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0015-code-2">
+            <h3>代码题 2 · 用 sum-tree 按优先级采样</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>按优先级采样要从 <code>N</code> 个概率里反复取下标，每抽一次都重算前缀和是 <code>O(N)</code>，一批几万条时这笔开销比一次前向传播还大。sum-tree 把优先级放在完全二叉树的叶子上，父节点存子树之和，抽样时从根往下每层比一次就知道该走哪边。这四个方法就是它的接口：<code>__init__</code> 建空树，<code>update</code> 在 TD 误差更新后写回优先级，<code>total</code> 与 <code>sample</code> 供采样器调用。只许用 numpy，每个方法都要 O(log N)。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>capacity</code>：<code>__init__</code> 的整数容量，能放多少条优先级，测试用到 4 和 5，不必是 2 的幂。</li>
+          <li><code>idx</code>：<code>update</code> 的 0 基整数下标，范围 0 ≤ idx &lt; capacity。</li>
+          <li><code>priority</code>：<code>update</code> 的非负 float，覆盖该条原来的优先级。</li>
+          <li><code>value</code>：<code>sample</code> 的 float，取自 [0, total()) 的均匀随机数。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>__init__</code>：无返回值，建出一棵优先级全为 0 的空树。</li>
+          <li><code>update</code>：原地修改，无返回值。</li>
+          <li><code>total</code>：返回 Python <code>float</code>，所有优先级之和，空树为 0。</li>
+          <li><code>sample</code>：返回 0 基 <code>int</code> 下标，指向累积区间包含 <code>value</code> 的那一条；第 <code>i</code> 条的区间是 <span class="math">[Σ<sub>k&lt;i</sub> p<sub>k</sub>, Σ<sub>k≤i</sub> p<sub>k</sub>)</span>，左闭右开。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>空树的 <code>total</code> 为 0；容量 4 写入 [1, 0, 0, 3] 后 <code>total</code> 为 4，<code>sample(0.0)</code> 与 <code>sample(0.99)</code> 落在第 0 条，<code>sample(1.0)</code> 与 <code>sample(3.99)</code> 落在第 3 条；<code>update(0, 100)</code> 后 <code>total</code> 是 103 而不是 101（覆盖而非累加），改回 1 后回到 4；容量 5 时 [1, 2, 3, 4, 0] 的 <code>total</code> 为 10，<code>sample(2.5)</code> 落在第 1 条；4000 个均匀 <code>value</code> 的下标频率与 <span class="math">p<sub>i</sub> / Σp</span> 相差在 0.05 以内。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>取 <code>self.size</code> 为不小于 <code>capacity</code> 的最小 2 的幂，
+            树数组长 <code>2 * self.size</code>；第 <code>idx</code> 条放在
+            <code>self.size + idx</code>，根在 <code>1</code> 号位置。</li>
+          <li><code>update</code> 后令 <code>i = (self.size + idx) // 2</code>，
+            循环往上令 <code>tree[i] = tree[2i] + tree[2i+1]</code>，直到 <code>i == 0</code>。</li>
+          <li><code>sample</code> 从 <code>i = 1</code> 开始：若 <code>value &lt; tree[2i]</code>
+            就往左走，否则 <code>value -= tree[2i]</code> 再往右走；到叶子时返回
+            <code>i - self.size</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+class SumTree:
+    def __init__(self, capacity):
+        self.capacity = int(capacity)
+        self.size = int(capacity)
+        self.tree = np.zeros(2 * self.size)
+
+    def update(self, idx, priority):
+        # TODO: 写入优先级并更新到根节点
+        pass
+
+    def total(self):
+        # TODO: 返回所有优先级之和
+        return 0.0
+
+    def sample(self, value):
+        # TODO: 按累积优先级定位一条样本，返回其下标
+        return 0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+st = SumTree(4)
+check(abs(st.total() - 0.0) < 1e-12, f"初始总优先级应为 0，实际 {st.total()}")
+priorities = [1.0, 0.0, 0.0, 3.0]
+for i, pr in enumerate(priorities):
+    st.update(i, pr)
+check(abs(st.total() - 4.0) < 1e-12, f"总优先级应为 1+0+0+3 = 4，实际 {st.total()}")
+
+check(st.sample(0.0) == 0, f"value=0 落在第 0 条的区间，实际 {st.sample(0.0)}")
+check(st.sample(0.99) == 0, f"value=0.99 仍落在第 0 条的区间，实际 {st.sample(0.99)}")
+check(st.sample(1.0) == 3, f"value=1.0 已进入第 3 条的区间 [1,4)，实际 {st.sample(1.0)}")
+check(st.sample(3.99) == 3, f"value=3.99 仍在第 3 条的区间，实际 {st.sample(3.99)}")
+
+st.update(0, 100.0)
+check(abs(st.total() - 103.0) < 1e-12,
+      f"update 是覆盖而非累加：1 换成 100 后总和应为 100+0+0+3 = 103，实际 {st.total()}")
+check(st.sample(50.0) == 0, f"现在前 100 的区间都属于第 0 条，实际 {st.sample(50.0)}")
+check(st.sample(101.0) == 3, f"value=101 落在第 3 条的区间 [100,103)，实际 {st.sample(101.0)}")
+
+st.update(0, 1.0)
+check(abs(st.total() - 4.0) < 1e-12, f"改回 1 之后总和应回到 4，实际 {st.total()}")
+
+st5 = SumTree(5)
+for i, pr in enumerate([1.0, 2.0, 3.0, 4.0, 0.0]):
+    st5.update(i, pr)
+check(abs(st5.total() - 10.0) < 1e-12,
+      f"容量不是 2 的幂时也要正确：总和应为 10，实际 {st5.total()}")
+check(st5.sample(0.5) == 0, f"value=0.5 属于第 0 条，实际 {st5.sample(0.5)}")
+check(st5.sample(2.5) == 1, f"value=2.5 属于第 1 条 [1,3)，实际 {st5.sample(2.5)}")
+check(st5.sample(9.5) == 3, f"value=9.5 属于第 3 条 [6,10)，实际 {st5.sample(9.5)}")
+
+rng = np.random.default_rng(3)
+pr = np.array([1.0, 2.0, 3.0, 4.0, 0.0])
+counts = np.zeros(5)
+for v in rng.uniform(0.0, 10.0, size=4000):
+    counts[st5.sample(float(v))] += 1
+freq = counts / counts.sum()
+check(np.allclose(freq, pr / pr.sum(), atol=0.05),
+      f"按优先级抽样的频率应接近 0.1/0.2/0.3/0.4/0.0，实际 {np.round(freq, 3)}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+class SumTree:
+    def __init__(self, capacity):
+        self.capacity = int(capacity)
+        size = 1
+        while size < self.capacity:
+            size *= 2
+        self.size = size
+        self.tree = np.zeros(2 * self.size)
+
+    def update(self, idx, priority):
+        i = self.size + int(idx)
+        self.tree[i] = float(priority)
+        i //= 2
+        while i >= 1:
+            self.tree[i] = self.tree[2 * i] + self.tree[2 * i + 1]
+            i //= 2
+
+    def total(self):
+        return float(self.tree[1])
+
+    def sample(self, value):
+        i = 1
+        while i < self.size:
+            left = 2 * i
+            if value < self.tree[left]:
+                i = left
+            else:
+                value -= self.tree[left]
+                i = left + 1
+        return int(i - self.size)
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>优先级、比例优先与 rank 优先、重要性采样权重与 <var>β</var> 退火、sum-tree 的实现细节，
+        全部出自 Schaul et al.,
+        <em>Prioritized Experience Replay</em>（ICLR 2016），
+        <a class="cite" href="https://arxiv.org/abs/1511.05952">arXiv 1511.05952</a>。
+        其中 Algorithm 1 就是本课式 (15.1)–(15.3) 的完整伪代码。</p>
+      <p>想把它放回 DQN 变体族的全景里看，读
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">Lilian Weng 的 DQN 综述</a>；
+        本课的记号与"何时选它 / 主要坑"的速查见
+        <a href="../reference/algorithms.html#alg-per">算法速查表 · PER</a>。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把我的缓冲区大小、ω 和 β 退火区间代入，帮我估一下采样频率会倾斜成什么样。"
+      或者 "我的 PER 训练后期开始震荡，按这课的症状表帮我定位。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

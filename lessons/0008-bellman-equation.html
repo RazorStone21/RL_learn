@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0008 · 贝尔曼方程：推导与实例 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0008" data-slug="bellman-equation" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 · 基础工具 4／15</p>
+    <h1>贝尔曼方程：推导与实例</h1>
+    <p class="lede">状态价值（只看状态、不管具体选哪个动作的那个价值）原本是一个
+      含无穷多项的期望定义式，记作 $v_\pi(s)$。本课把它压成一条方程：这一步的价值等于这一步的即时奖励，
+      加上打了折的下一步价值。这条方程叫贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）。
+      下面从定义式一步步推出它，再用一个能手算的网格世界把方程真正解出来。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出状态价值 $v_\pi(s)$ 与动作价值 $q_\pi(s,a)$ 的定义式，并说清两者差在哪</li>
+        <li>能从定义式完整推出贝尔曼方程，并说出每一步的依据</li>
+        <li>能说明贝尔曼方程为什么是"自洽方程"而不是一种算法</li>
+        <li>能在一个 2×2 网格世界上逐状态列出方程、手算求解、并代回验证</li>
+        <li>能判断方程的解存在且唯一的条件，并说出 $\gamma$ 取 1 时会出什么问题</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 本课要解决的那一个问题</h2>
+    <p>做决策的那一方叫智能体（做决策的那一方，就是你写的程序），
+      它之外的一切叫环境（智能体之外的一切，会对你的动作做出反应）。
+      每走一步，智能体先看状态（此刻你能看到的信息，是你做决定的依据），
+      再选一个动作（你这一步能做的选择），环境回给它一个奖励（环境对你刚做的动作打的分数，一个数），
+      然后跳到下一个状态（你做完动作之后，环境从当前状态跳到下一个状态）。
+      每跳一步只看当前状态，与更早的历史无关，这条假设叫马尔可夫性
+      （下一个状态只取决于当前状态和动作，与更早的历史无关）。
+      描述这个跳转的转移概率（这个跳转有可能跳到好几个地方，每个地方各带一个概率），
+      后面写成 $p(s'\mid s,a)$。
+      一整套"看到什么状态就选什么动作"的规则叫策略（一套"看到什么状态就选什么动作"的规则）。
+      折扣因子（越往后的奖励，算进总分时权重越小）是一个 $[0,1)$ 里的数，记作 $\gamma$。</p>
+    <p>从第 $t$ 步往后把每一步奖励按折扣加起来，得到的总分叫回报（从现在起一直到结束，把每一步奖励加起来的总分）：
+      $$G_t=R_{t+1}+\gamma R_{t+2}+\gamma^2R_{t+3}+\cdots$$
+      每一步奖励都可能不同，所以回报是一个随机变量。对回报求平均，就是给状态打分。
+      状态价值（只看状态、不管具体选哪个动作的那个价值）与动作价值
+      （在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）分别定义为</p>
+    <div class="eq">
+      <span class="eq-body">$$v_\pi(s)=\E[G_t\mid S_t=s],\qquad q_\pi(s,a)=\E[G_t\mid S_t=s,\,A_t=a].$$</span>
+      <span class="eq-num">(8.1)</span>
+    </div>
+    <p>两个定义式里都含一整条轨迹，直接拿去算是做不到的。本课要解决的问题是：
+      能不能把 $v_\pi(s)$ 写成只涉及它自己的方程？</p>
+    <div class="def">
+      <span class="label">定义 1.1（奖励的期望与转移概率）</span>
+      <p>记
+        $$r(s,a)=\E\big[R_{t+1}\mid S_t=s,\,A_t=a\big],\qquad
+          p(s'\mid s,a)=P\big(S_{t+1}=s'\mid S_t=s,\,A_t=a\big).$$
+        式中 $\E$ 是期望（同一件事重复很多次之后的平均结果），$P$ 表示概率，
+        $s$ 是状态，$a$ 是动作，$R_{t+1}$ 是第 $t+1$ 步拿到的奖励。两个量都只跟状态动作对有关，
+        与时间 $t$ 无关，这是马尔可夫决策过程（满足马尔可夫性的那类标准问题设定，简写 MDP）的平稳性假设。
+        $p(s'\mid s,a)$ 读作"在状态 $s$ 做动作 $a$ 之后，环境跳到 $s'$ 的概率"，
+        满足 $\sum_{s'}p(s'\mid s,a)=1$。奖励本身可以是随机的，本课只用到它的平均值。</p>
+    </div>
+    <p>符号表：$s$ 是状态，$a$ 是动作，$S_t$ 与 $A_t$ 是第 $t$ 步的状态与动作，
+      $\pi(a\mid s)$ 是策略在状态 $s$ 下选动作 $a$ 的概率，$\gamma$ 是折扣因子，
+      $v_\pi$ 与 $q_\pi$ 是策略 $\pi$ 下的状态值与动作值。</p>
+    <div class="rem">
+      <span class="label">注记 1.2（把问题缩到一格）</span>
+      <p>只看一个格子：给定当前状态 $s$，动作由 $\pi(\cdot\mid s)$ 决定，
+        奖励的平均由 $r(s,a)$ 决定，跳到哪个 $s'$ 由 $p(\cdot\mid s,a)$ 决定。
+        一旦跳到 $s'$，问题又变成同样的形状，只是起点换了。这种"只看当前格"的做法
+        原文叫马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关）；
+        满足它的那类标准问题设定叫马尔可夫决策过程（简写 MDP）。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 从定义式推出贝尔曼方程</h2>
+    <p>推导要用到一条关于回报的递推，它常被直接写进回报的定义（原书 2.2 节）：</p>
+    <div class="eq">
+      <span class="eq-body">$$G_t=R_{t+1}+\gamma G_{t+1}.$$</span>
+      <span class="eq-num">(8.2)</span>
+    </div>
+    <p>见式 (8.2)：从这一步往后的总分，等于这一步拿到的奖励，
+      加上"从下一步往后总分"的打折版，右边出现的 $G_{t+1}$ 只是把起点往后挪了一格。</p>
+
+    <div class="thm">
+      <span class="label">定理 2.1（贝尔曼方程）</span>
+      <p>设折扣因子 $\gamma\in[0,1)$，奖励的期望与转移概率都有定义。则对每个状态 $s$ 成立：</p>
+      <div class="eq">
+        <span class="eq-body">$$v_\pi(s)=\sum_a\pi(a\mid s)\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)\,v_\pi(s')\Big].$$</span>
+        <span class="eq-num">(8.3)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：用式 (8.2) 把无穷级数截成"一步 + 剩余部分"，再把对"这一局怎么走"的平均
+        逐层剥开，最后把条件期望换成两个已知的分布。</p>
+      <p>第一步是定义：$v_\pi(s)=\E[G_t\mid S_t=s]$。</p>
+      <p>第二步，在条件 $S_t=s$ 下用式 (8.2) 把 $G_t$ 换成 $R_{t+1}+\gamma G_{t+1}$：
+        $$v_\pi(s)=\E\big[R_{t+1}+\gamma G_{t+1}\mid S_t=s\big].$$
+        式 (8.2) 对每一条轨迹逐项成立，所以在条件期望里也成立。</p>
+      <p>第三步，用条件期望的线性性拆成两项（第 0002 课），这一步不需要两个变量独立：
+        $$v_\pi(s)=\E\big[R_{t+1}\mid S_t=s\big]+\gamma\,\E\big[G_{t+1}\mid S_t=s\big].$$</p>
+      <p>第四步，用全期望公式。它说的是：要算一个期望，先把"决定这件事的那个随机变量"
+        取遍所有取值，按它自己的概率加权再平均。把动作 $A_t$ 与下一个状态 $S_{t+1}$ 依次取遍：
+        $$v_\pi(s)=\sum_a P(A_t=a\mid S_t=s)\,\E\big[R_{t+1}\mid S_t=s,A_t=a\big]
+          +\gamma\sum_{s'}P\big(S_{t+1}=s'\mid S_t=s\big)\,\E\big[G_{t+1}\mid S_t=s,S_{t+1}=s'\big].$$
+        在状态 $s$ 下动作由策略给出，所以 $P(A_t=a\mid S_t=s)=\pi(a\mid s)$，
+        第一个条件期望就是 $r(s,a)$ 的定义。</p>
+      <p>第五步，认出 $v_\pi$。最后一个条件期望里已经给了 $S_{t+1}=s'$，
+        从第 $t+1$ 步往后的走法与"从 $s'$ 出发按 $\pi$ 走"完全一样，与更早的状态无关，
+        这是马尔可夫性，因此它等于 $v_\pi(s')$。代回去并交换求和次序：
+        $$v_\pi(s)=\sum_a\pi(a\mid s)\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)\,v_\pi(s')\Big].$$
+        这就是式 (8.3)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>推导的每一步都在做同一件事：把"不知道会走到哪"按概率摊开。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 250" role="img" aria-label="贝尔曼方程推导的四层结构：条件期望、全期望公式、两个分布、紧凑写法">
+        <rect x="24" y="20" width="512" height="44" rx="4" class="box"/>
+        <text x="38" y="48" class="val-b">① 定义：vπ(s) = 𝔼[ Gt | St = s ]</text>
+        <path d="M280 64 V82" class="arrow-a"/>
+        <path d="M274 78 l6 10 l6 -10" class="arrow-a"/>
+        <rect x="24" y="88" width="512" height="44" rx="4" class="box"/>
+        <text x="38" y="116" class="val-b">② 递推：Gt = Rt+1 + γ·Gt+1，拆成两项</text>
+        <path d="M280 132 V150" class="arrow-a"/>
+        <path d="M274 146 l6 10 l6 -10" class="arrow-a"/>
+        <rect x="24" y="156" width="512" height="44" rx="4" class="box-a"/>
+        <text x="38" y="184" class="val-b">③ 全期望：对动作 a 取遍 π(a|s)，对下一状态 s′ 取遍 p(s′|s,a)</text>
+        <path d="M280 200 V218" class="arrow-a"/>
+        <path d="M274 214 l6 10 l6 -10" class="arrow-a"/>
+        <rect x="24" y="224" width="512" height="22" rx="4" class="box-a"/>
+        <text x="38" y="240" class="val">④ 认出 vπ(s′) = 𝔼[ Gt+1 | St+1 = s′ ]，得到自洽方程</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 8.1</span>
+        四层结构：定义、用递推截断无穷级数、用全期望公式摊开动作与下一状态、
+        认出剩下的期望就是下一格的价值。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 2.2（把式 (8.3) 读一遍）</span>
+      <p>括号里面的前一半是"现在这一步拿到多少"，后一半是"下一步哪些格子各值多少，
+        按跳过去的概率加权再打折"。括号外面对动作 $a$ 加权求和，
+        因为这一步的动作由策略随机决定。若 $\pi$ 是确定性的，
+        某个 $a$ 的概率为 1、其余为 0，求和只剩一项。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 它是自洽方程，不是算法</h2>
+    <p>拿到式 (8.3) 之后容易犯一个错：把它当成可以从前往后算的公式。
+      它不能。等号右边也出现 $v_\pi(s')$，要求 $v_\pi(s)$ 得先知道 $v_\pi(s')$，
+      而 $s'$ 又可能跳回 $s$。这不是循环论证，这是方程组的本来面目。</p>
+    <div class="rem">
+      <span class="label">注记 3.1（自洽方程是什么意思）</span>
+      <p>自洽方程是"对未知量的一个约束"：它不告诉你未知量等于什么，只说未知量必须满足什么关系。
+        一个函数 $v$ 是策略 $\pi$ 的状态值，当且仅当它对每一个状态都满足式 (8.3)。
+        未知量的个数等于状态个数，解这组方程要用线性代数（下一课）或者迭代法。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 3.2（解的存在唯一性）</span>
+      <p>设状态数有限，$\gamma\in[0,1)$。则式 (8.3) 有唯一解，并且这个解就是策略 $\pi$ 的状态值 $v_\pi$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：把式 (8.3) 写成线性方程组，证明系数矩阵可逆，唯一性就有了；
+        真解满足方程，存在性就有了。</p>
+      <p>把 $v_\pi$ 看成一个列向量，第 $s$ 个分量是 $v_\pi(s)$。定义矩阵 $P_\pi$ 与向量 $r_\pi$：
+        $$[P_\pi]_{s,s'}=\sum_a\pi(a\mid s)\,p(s'\mid s,a),\qquad
+          [r_\pi]_s=\sum_a\pi(a\mid s)\,r(s,a).$$
+        于是式 (8.3) 逐分量成立等价于向量方程 $v_\pi=r_\pi+\gamma P_\pi v_\pi$。</p>
+      <p>先看 $P_\pi$ 的每一行绝对值之和。由 $\sum_{s'}p(s'\mid s,a)=1$ 得
+        $$\sum_{s'}\big|[P_\pi]_{s,s'}\big|\le\sum_{s'}\sum_a\pi(a\mid s)\,p(s'\mid s,a)
+          =\sum_a\pi(a\mid s)\sum_{s'}p(s'\mid s,a)=1,$$
+        这给出 $P_\pi$ 的无穷范数不超过 1，其中 $\|\cdot\|_\infty$ 是无穷范数
+        （矩阵每一行绝对值之和的最大值），于是 $\|\gamma P_\pi\|_\infty\le\gamma<1$。</p>
+      <p>若 $(I-\gamma P_\pi)x=0$，则 $x=\gamma P_\pi x$，两边取无穷范数得
+        $\|x\|_\infty\le\|\gamma P_\pi\|_\infty\|x\|_\infty<\|x\|_\infty$，
+        除非 $x=0$。所以 $I-\gamma P_\pi$ 可逆，两边左乘它的逆得到唯一候选解
+        $v=(I-\gamma P_\pi)^{-1}r_\pi$，解至多一个。反过来，真状态值 $v_\pi$ 满足式 (8.3)，
+        而可逆性说明这个方程只有一个解，所以 $v_\pi=(I-\gamma P_\pi)^{-1}r_\pi$ 既存在又唯一。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>把一步的算术结构画出来：从状态 $s$ 出发，价值的来路只有两条。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 260" role="img" aria-label="一步备份的算术结构：求期望之后再分解成即时奖励与折后下一步价值">
+        <rect x="30" y="24" width="500" height="40" rx="4" class="box"/>
+        <text x="44" y="50" class="val-b">vπ(s) = 对"这一步"求期望</text>
+        <path d="M280 64 V92" class="arrow-a"/>
+        <path d="M272 84 l8 12 l8 -12" class="arrow-a"/>
+        <rect x="30" y="96" width="236" height="44" rx="4" class="box-a"/>
+        <text x="46" y="123" class="val-b">即时奖励：r(s,a)</text>
+        <rect x="294" y="96" width="236" height="44" rx="4" class="box-a"/>
+        <text x="310" y="123" class="val-b">折后下一步：γ · Σ p(s′|s,a) vπ(s′)</text>
+        <path d="M148 140 V168" class="arrow"/>
+        <path d="M412 140 V168" class="arrow"/>
+        <path d="M140 160 l8 12 l8 -12" class="arrow"/>
+        <path d="M404 160 l8 12 l8 -12" class="arrow"/>
+        <rect x="30" y="172" width="500" height="34" rx="4" class="box"/>
+        <text x="46" y="194" class="lbl">两条来路都要先按 π(a|s) 对动作 a 加权平均</text>
+        <rect x="30" y="214" width="500" height="34" rx="4" class="box"/>
+        <text x="46" y="236" class="lbl">再按 p(s′|s,a) 对下一状态 s′ 加权平均，得到 vπ(s)</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 8.2</span>
+        式 (8.3) 的算术结构：上面是"求期望"，下面是被平均的两块内容。</figcaption>
+    </figure>
+    <p>下面这张图把动作层面拆开：策略决定两个动作值按什么比例混进 $v_\pi(s)$。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 250" role="img" aria-label="一个状态两个动作：动作值不同，策略给出混合权重">
+        <rect x="30" y="96" width="96" height="52" rx="4" class="box-a"/>
+        <text x="64" y="128" class="val-b">状态 s</text>
+        <rect x="250" y="30" width="140" height="52" rx="4" class="box"/>
+        <text x="262" y="52" class="lbl">动作 a1，概率 π(a1|s)</text>
+        <text x="262" y="72" class="val-b">动作值 qπ(s, a1)</text>
+        <rect x="250" y="162" width="140" height="52" rx="4" class="box"/>
+        <text x="262" y="184" class="lbl">动作 a2，概率 π(a2|s)</text>
+        <text x="262" y="204" class="val-b">动作值 qπ(s, a2)</text>
+        <path d="M126 116 C 190 96 200 66 240 58" class="arrow-a"/>
+        <path d="M232 52 l12 4 l-8 10" class="arrow-a"/>
+        <path d="M126 130 C 190 152 200 184 240 190" class="arrow-a"/>
+        <path d="M232 184 l12 6 l-8 10" class="arrow-a"/>
+        <rect x="436" y="96" width="96" height="52" rx="4" class="box-a"/>
+        <text x="448" y="118" class="lbl">按概率</text>
+        <text x="448" y="138" class="val-b">加权平均</text>
+        <path d="M390 58 C 424 66 430 96 434 112" class="arrow"/>
+        <path d="M428 104 l6 12 l8 -8" class="arrow"/>
+        <path d="M390 190 C 424 182 430 152 434 136" class="arrow"/>
+        <path d="M428 144 l8 -8 l6 12" class="arrow"/>
+        <text x="34" y="222" class="lbl">vπ(s) 是两个动作值的加权平均，不取较大的那个</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 8.3</span>
+        给定策略，状态值 vπ(s) 是动作值按 π(·|s) 加权平均的结果，
+        与第 0010 课的"取最大"是两件不同的事。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4. 一个能手算的网格世界</h2>
+    <p>空谈方程没用，找一块能被手算验证的地，先把规则钉死。</p>
+    <div class="def">
+      <span class="label">定义 4.1（本课程共用的 2×2 网格世界示例）</span>
+      <p>这块地是一个 2×2 的方格，四个格子编号如下。</p>
+      <figure class="fig">
+        <svg viewBox="0 0 520 210" role="img" aria-label="2x2 网格：左上s1右上s2左下s3右下s4，动作只有向右与向下">
+          <rect x="170" y="40" width="110" height="70" class="box-a"/>
+          <rect x="280" y="40" width="110" height="70" class="box"/>
+          <rect x="170" y="110" width="110" height="70" class="box"/>
+          <rect x="280" y="110" width="110" height="70" class="box"/>
+          <text x="205" y="82" class="val-b">s1</text>
+          <text x="315" y="82" class="val-b">s2</text>
+          <text x="205" y="152" class="val-b">s3</text>
+          <text x="315" y="152" class="val-b">s4 终点</text>
+          <path d="M215 95 V112" class="arrow-a"/>
+          <path d="M209 105 l6 10 l6 -10" class="arrow-a"/>
+          <path d="M325 95 V112" class="arrow-a"/>
+          <path d="M319 105 l6 10 l6 -10" class="arrow-a"/>
+          <path d="M228 75 H292" class="arrow-a"/>
+          <path d="M284 69 l10 6 l-10 6" class="arrow-a"/>
+          <path d="M228 145 H292" class="arrow-a"/>
+          <path d="M284 139 l10 6 l-10 6" class="arrow-a"/>
+          <text x="56" y="82" class="lbl">动作 a：</text>
+          <text x="56" y="104" class="lbl">向右 → 右格</text>
+          <text x="56" y="126" class="lbl">向下 ↓ 下格</text>
+          <text x="56" y="158" class="lbl">越界拿</text>
+          <text x="56" y="178" class="lbl">−1 分</text>
+          <circle cx="330" cy="152" r="4" class="dot-a"/>
+        </svg>
+        <figcaption class="fig-cap"><span class="fig-num">图 8.4</span>
+          四个状态排成 2×2，每个状态只有向右与向下两个动作。
+          在右边界再向右、在下边界再向下都算越界，环境不移动并给 −1 分。
+          s4 是终点，一到 s4 回合就结束（第 0006 课）。</figcaption>
+      </figure>
+      <p>从 $s_1$ 或 $s_2$ 向右走到同一行的右格，从 $s_1$ 或 $s_3$ 向下走到同一列的下格；
+        在 $s_2,s_4$ 向右越界，在 $s_4$ 向下越界，越界时留在原地。
+        奖励期望定为没有越界时 $+1$、越界时 $-1$，转移是确定的，
+        所以 $p(s'\mid s,a)$ 不是 1 就是 0。从 $s_4$ 出发的后续奖励全为 0。</p>
+    </div>
+    <p>奖励规则一句话概括：走成一步得 1 分，撞墙扣 1 分。这套数值是本文档自己定的，
+      读者可以照着改，结论会变但方法不变。</p>
+    <div class="rem">
+      <span class="label">注记 4.1.1（数值来源）</span>
+      <p>后面几课都沿用这个网格世界与这套奖励。</p>
+    </div>
+
+    <div class="eg">
+      <span class="label">例 4.2（策略 $\pi_1$：永远向右）</span>
+      <p>取 $\pi_1$：在 $s_1,s_3$ 都选向右，在 $s_2,s_4$ 向右越界。
+        把四个状态的价值设为 $v_1,v_2,v_3,v_4$，逐个代入式 (8.3)。
+        $s_4$ 已经结束，$v_4=0$。$s_2$ 向右越界，停在 $s_2$ 得 $-1$ 分，
+        下一格还是 $s_2$，所以 $v_2=-1+\gamma v_2$。$s_3$ 向右走到 $s_4$ 得 $+1$ 分，
+        所以 $v_3=1+\gamma v_4=1$。$s_1$ 向右走到 $s_2$ 得 $+1$ 分，所以 $v_1=1+\gamma v_2$。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 4.3（取 $\gamma=0.9$ 解出来）</span>
+      <p>由 $v_2=-1+0.9v_2$ 得 $0.1v_2=-1$，即 $v_2=-10$；
+        代回得 $v_1=1+0.9\times(-10)=-8$；再加上 $v_3=1$、$v_4=0$，所以四个分量依次是
+        $-8$、$-10$、$1$、$0$。$s_1$ 和 $s_2$ 在 $\pi_1$ 下最终被弹进自环，每步撞墙扣 1 分，
+        价值是负的；$s_3$ 一步到终点，拿到 $+1$ 分。
+        把这四个数代回式 (8.3)，四个方程的右边分别得 $-8$、$-10$、$1$、$0$，与原值一致，
+        所以这组数就是解（定理 3.2 说解只有一个）。</p>
+    </div>
+
+    <div class="eg">
+      <span class="label">例 4.4（换成策略 $\pi_2$：永远向下）</span>
+      <p>取 $\pi_2$：在 $s_1,s_2$ 向下，在 $s_3,s_4$ 向下越界。列方程得 $v_4=0$、
+        $v_2=1+\gamma v_4=1$、$v_3=-1+\gamma v_3$、$v_1=1+\gamma v_3$。
+        取 $\gamma=0.9$ 得 $v_3=-10$、$v_1=-8$，四个分量依次是 $-8$、$1$、$-10$、$0$。
+        两个策略都有一条撞墙自环，只是带自环的状态不同。</p>
+    </div>
+
+    <div class="eg">
+      <span class="label">例 4.5（用 $\pi_1$ 算动作值）</span>
+      <p>在 $s_1$ 换一个动作试试。强行选向下会走到 $s_3$ 拿 $+1$ 分，之后按 $\pi_1$ 走，所以
+        $q_{\pi_1}(s_1,\text{向下})=1+0.9\times v_{\pi_1}(s_3)=1.9$，
+        而 $q_{\pi_1}(s_1,\text{向右})=1+0.9\times(-10)=-8$。同一个状态下差了将近 10 分，
+        说明 $\pi_1$ 在 $s_1$ 这一步选得不好，第 0010 课会沿着这条线索去找最优策略。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.6（自己动手才算数）</span>
+      <p>把 $\gamma$ 换成 $0.5$ 再算一遍：$v_2=-1+0.5v_2$ 给出 $v_2=-2$，
+        $v_1=1+0.5\times(-2)=0$，$v_3=1$，$v_4=0$。数值变了，方法没变。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 关于这条方程的三件事</h2>
+    <div class="rem">
+      <span class="label">注记 5.1（每个状态各写一条）</span>
+      <p>式 (8.3) 并不是某一条轨迹上的等式，它对每个状态各写一条，四个状态就是四条互相耦合的方程。
+        把 $\pi_1$ 的四条方程排成一个向量方程就是 $v=r_\pi+\gamma P_\pi v$，
+        其中 $r_\pi=(1,-1,1,0)^\top$，$P_\pi$ 的第 $s$ 行只有一个 1，
+        位置在"$\pi_1$ 从 $s$ 出发走到的那个状态"。这个形状是下一课的主角。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.2（$\gamma$ 的作用）</span>
+      <p>$\gamma$ 是"下一步价值"前面的折价系数，它让远处奖励的分量指数式变小。
+        $\gamma$ 取 0 时式 (8.3) 退化成 $v_\pi(s)=\sum_a\pi(a\mid s)r(s,a)$，
+        状态值就等于这一步奖励的平均。原书第 2 章还给出一个约定：
+        从 $s$ 出发的轨迹一旦进入吸收状态就停住，之后的奖励记 0。
+        有了这个终止约定，$\gamma=1$ 时方程在有限状态上仍有唯一解；而定理 3.2 的证明只用到 $\gamma<1$。</p>
+    </div>
+    <p>下面这张图把"信息从后面往前传"画出来，它是理解下一课迭代解法的关键。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 230" role="img" aria-label="在策略π1下价值沿轨迹倒着传回：s3的1分传给s1，s2的自环把价值压在负十">
+        <rect x="80" y="90" width="90" height="52" rx="4" class="box-a"/>
+        <text x="112" y="122" class="val-b">s1</text>
+        <rect x="250" y="90" width="90" height="52" rx="4" class="box"/>
+        <text x="282" y="122" class="val-b">s2</text>
+        <rect x="420" y="90" width="90" height="52" rx="4" class="box"/>
+        <text x="452" y="122" class="val-b">s4 终点</text>
+        <rect x="250" y="166" width="90" height="52" rx="4" class="box"/>
+        <text x="282" y="198" class="val-b">s3</text>
+        <path d="M170 116 H242" class="arrow-a"/>
+        <path d="M234 110 l10 6 l-10 6" class="arrow-a"/>
+        <path d="M295 142 V162" class="arrow-a"/>
+        <path d="M289 154 l6 10 l6 -10" class="arrow-a"/>
+        <path d="M340 142 V162" class="arrow-a"/>
+        <path d="M334 154 l6 10 l6 -10" class="arrow-a"/>
+        <path d="M428 142 V176 H348" class="arrow-a"/>
+        <path d="M356 170 l-10 6 l10 6" class="arrow-a"/>
+        <path d="M258 190 C 210 190 190 160 190 148" class="arrow-a"/>
+        <path d="M184 156 l-4 12 l12 -4" class="arrow-a"/>
+        <text x="34" y="66" class="lbl">π1 的走法：</text>
+        <text x="34" y="86" class="lbl">s1 → s2 → 撞墙</text>
+        <text x="34" y="106" class="lbl">s3 → s4 结束</text>
+        <text x="352" y="66" class="lbl">s2 是自环：每步 −1 分</text>
+        <text x="352" y="84" class="lbl">所以 v2 = −1 + 0.9 v2 = −10</text>
+        <text x="352" y="212" class="lbl">v4 = 0 → v3 = 1 → v1 = −8</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 8.5</span>
+        后面的价值沿箭头传回前面。s4 是终点，价值 0 是起点，它把 +1 分传给 s3，
+        s3 的 1 分再传给 s1。s2 撞墙自环，每绕一圈扣 1 分，价值被拉到 −10。</figcaption>
+    </figure>
+    <p>把同一个策略下的方程组按耦合关系重排，会看到它自然分成几块。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 250" role="img" aria-label="四个方程按耦合关系分成两块：s1与s2互相依赖，s3与s4各自独立成块">
+        <rect x="60" y="60" width="200" height="120" rx="4" class="box-a"/>
+        <text x="76" y="84" class="val-b">块一：v1 与 v2</text>
+        <text x="76" y="108" class="lbl">v1 = 1 + 0.9 v2</text>
+        <text x="76" y="130" class="lbl">v2 = −1 + 0.9 v2</text>
+        <text x="76" y="156" class="lbl">解出 v2 = −10，再回代得 v1</text>
+        <rect x="300" y="60" width="200" height="120" rx="4" class="box"/>
+        <text x="316" y="84" class="val-b">块二：v3 与 v4</text>
+        <text x="316" y="108" class="lbl">v3 = 1 + 0.9 v4</text>
+        <text x="316" y="130" class="lbl">v4 = 0</text>
+        <text x="316" y="156" class="lbl">解出 v4 = 0，再回代得 v3</text>
+        <path d="M120 200 C 140 230 220 230 250 210" class="arrow"/>
+        <path d="M242 214 l10 -4 l0 12" class="arrow"/>
+        <path d="M340 200 C 320 230 240 230 210 210" class="arrow"/>
+        <path d="M218 214 l0 12 l10 -4" class="arrow"/>
+        <text x="150" y="244" class="lbl">块内互相依赖，块与块之间没有箭头</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 8.6</span>
+        在 π1 下方程组分成两块：s1 与 s2 互相依赖，s3 与 s4 各自独立。
+        一般情形所有状态会连成一张有环的图，手算就不够了。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>贝尔曼方程把含一整条轨迹的定义式截成"一步奖励 + 折后下一步价值"。</li>
+      <li>推导只用了三件工具：回报递推、条件期望线性性、全期望公式。</li>
+      <li>贝尔曼方程是自洽方程：它约束未知函数，不给出算法。</li>
+      <li>有限状态、$\gamma<1$ 时解存在且唯一，且等于 $(I-\gamma P_\pi)^{-1}r_\pi$。</li>
+      <li>越界扣分的网格世界里，自环会不断扣分，挂在自环上的状态价值可以是负数。</li>
+    </ul>
+    <p>下一课把式 (8.3) 写成矩阵与向量的形式，给出闭式解与迭代解，
+      并把动作值 $q_\pi(s,a)$ 也做成矩阵运算。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 关于贝尔曼方程的地位，下面哪一种说法最准确？</p>
+      <ol class="mcq-options">
+        <li>它是一种可以从前向后逐状态算出价值的算法</li>
+        <li>它只对能被手算的小网格世界成立，大问题上不成立</li>
+        <li>它是一组约束未知函数的自洽方程，解它另需方法</li>
+        <li>它是状态价值的一个近似写法，状态越多误差越大</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：方程右边也出现 $v_\pi(s')$，还可能绕回 $v_\pi(s)$ 自己，
+          所以它不能被当成单向的递推公式。它给出的是未知量必须满足的关系，
+          对状态数没有任何限制。</p>
+        <p>A 错在把方程当算法：方程不指定求解顺序，求解是下一课的主题。
+          B 错在方程对任意有限或可数的状态空间（所有可能状态的集合）都成立，规模不影响等式本身。
+          D 错在它是精确恒等式，不存在"状态越多越不准"的说法。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 推导中从 $\E[R_{t+1}+\gamma G_{t+1}\mid S_t=s]$ 走到
+        $\E[R_{t+1}\mid S_t=s]+\gamma\E[G_{t+1}\mid S_t=s]$，用到了哪一条性质？</p>
+      <ol class="mcq-options">
+        <li>马尔可夫性，它保证式中的两个期望可以分开算</li>
+        <li>条件期望的线性性，它对任意随机变量都成立</li>
+        <li>$R_{t+1}$ 与 $G_{t+1}$ 相互独立，所以期望可以拆开</li>
+        <li>$\gamma<1$，所以第二项可以直接提到期望外面</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：拆开一整个期望里的加法，靠的是条件期望的线性性，
+          不需要独立，也不需要 $\gamma<1$。$\gamma$ 是常数，提出来是线性的一个特例。</p>
+        <p>A 错在马尔可夫性是下一步"把 $s'$ 当成新起点"的依据，与拆加法无关。
+          C 错在这两个量一般不独立：下一步的总分里本来就包含这一步之后的奖励路径。
+          D 错在 $\gamma$ 是常数，提出来不需要任何让数值稳定下来的条件。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 在式 (8.3) 里，$\sum_{s'}p(s'\mid s,a)v_\pi(s')$ 这一项代表什么？</p>
+      <ol class="mcq-options">
+        <li>这一步拿到奖励的长期平均值，与下一状态没有关系</li>
+        <li>策略在状态 $s$ 下选动作 $a$ 的概率，用来对动作求平均</li>
+        <li>从 $s$ 出发一直走到结束，一路奖励的折扣总和</li>
+        <li>下一步那些格子的价值按跳过去的概率加权后的平均</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：这一项先看下一个状态可能落在哪，再按概率把各处的价值平均起来。</p>
+        <p>A 错在它描述的是未来价值，即时奖励是另一项 $r(s,a)$。
+          B 错在动作概率出现在最外层的 $\pi(a\mid s)$。
+          C 错在整条轨迹的总和是 $v_\pi(s)$ 或 $q_\pi(s,a)$ 本身，不是其中一项。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 在定义 4.1 的网格世界里取策略 $\pi_1$（永远向右）与 $\gamma=0.9$，
+        $v_{\pi_1}(s_2)$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$-10$，由方程 $v_2=-1+0.9v_2$ 解出</li>
+        <li>$-1$，因为每走一步只扣 1 分</li>
+        <li>$0$，因为 $s_2$ 一直停在原地没有终点的奖励</li>
+        <li>发散到负无穷，因为自环可以绕无穷多圈</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$s_2$ 在 $\pi_1$ 下向右越界，停在原地并扣 1 分，
+          于是 $v_2=-1+0.9v_2$，解得 $v_2=-1/0.1=-10$。</p>
+        <p>B 错在漏掉了后续每一圈的折扣累加，把无穷次扣分当成一次。
+          C 错在 $s_2$ 不是终点，自环上每圈都拿 $-1$ 分。
+          D 错在折扣让无穷多个 $-1$ 的和稳定在 $-10$，不是发散。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 承上题，同一策略下 $q_{\pi_1}(s_1,\text{向下})$ 与
+        $q_{\pi_1}(s_1,\text{向右})$ 分别是多少？</p>
+      <ol class="mcq-options">
+        <li>都是 $-8$，因为在 $s_1$ 的动作不影响后面怎么走</li>
+        <li>都是 $1.9$，因为两种走法都拿 $+1$ 分</li>
+        <li>$1.9$ 与 $-8$，因为向右会落进扣分的自环</li>
+        <li>$-8$ 与 $1.9$，因为向下会落进扣分的自环</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：向下从 $s_1$ 走到 $s_3$ 拿 $+1$ 分，之后按 $\pi_1$ 走，
+          $v_{\pi_1}(s_3)=1$，所以 $1+0.9\times1=1.9$。
+          向右从 $s_1$ 走到 $s_2$，$v_{\pi_1}(s_2)=-10$，所以 $1+0.9\times(-10)=-8$。</p>
+        <p>A 错在动作决定了落在哪个后继状态，后继价值差很多。
+          B 错在只看了即时奖励，忽略了后续。D 错在把两个动作的价值对调了：
+          落进自环的是向右。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 如果把定义 4.1 里的越界惩罚从 $-1$ 改成 $0$，在 $\pi_1$ 与 $\gamma=0.9$ 下，
+        $v_{\pi_1}(s_2)$ 会变成多少？</p>
+      <ol class="mcq-options">
+        <li>仍然是 $-10$，惩罚不影响自环上的价值</li>
+        <li>$0$，因为自环上每圈都拿 $0$ 分</li>
+        <li>$-1$，因为累计的折扣和是 $-1/(1-0.9)$</li>
+        <li>无法确定，需要知道后续每一步的具体奖励</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：改成 $0$ 之后 $v_2=0+0.9v_2$，解得 $v_2=0$。
+          自环不再扣分，价值就归零。</p>
+        <p>A 错在价值本来就由自环上每圈的奖励累加出来。
+          C 错在把每圈奖励当成 $-0.1$，而题目给的是 $0$。
+          D 错在奖励的期望已经由 $r(s,a)$ 给出，不需要逐条轨迹的具体奖励。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 假设把折扣因子取成 $\gamma=1$，并且允许自环无限地绕下去。
+        在定义 4.1 的网格世界里，$\pi_1$ 的状态值会怎样？</p>
+      <ol class="mcq-options">
+        <li>仍然唯一，只是数值变大了</li>
+        <li>仍然唯一，等于即时奖励的算术平均</li>
+        <li>变成零，因为没有折扣累计就为零</li>
+        <li>不存在，因为自环上无穷多个 $-1$ 加起来发散</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\gamma=1$ 时 $v_2=-1+v_2$ 无解，回报在自环上变成
+          $-1-1-1-\cdots$，级数发散。折价系数一旦等于 1，就失去了让无穷和稳定下来的机制。</p>
+        <p>A、B、C 都假定解还存在。原书处理 $\gamma=1$ 的办法是给轨迹加一个终止约定
+          （进入吸收状态就停），有了终止，无穷和变成了有限和；本课的定理 3.2 用的是 $\gamma<1$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 推导第五步里，$\E[G_{t+1}\mid S_t=s,S_{t+1}=s']$ 为什么可以写成 $v_\pi(s')$？</p>
+      <ol class="mcq-options">
+        <li>因为 $G_{t+1}$ 与 $S_t$ 相互独立，多余的条件可以删掉</li>
+        <li>因为 $s'$ 与 $s$ 之间一定有一步转移概率等于 $1$ 的关系</li>
+        <li>因为从 $s'$ 往后的走法只由当前状态决定，与更早的历史无关</li>
+        <li>因为 $\gamma<1$，条件里多一个 $S_t$ 不影响期望值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：这条替换就是马尔可夫性的用法。一旦给定 $S_{t+1}=s'$，
+          从第 $t+1$ 步往后的过程与"从 $s'$ 出发按 $\pi$ 走"分布相同，
+          所以条件期望等于 $v_\pi(s')$。</p>
+        <p>A 错在 $G_{t+1}$ 明显依赖 $S_t$ 之后的路径，不独立。
+          B 错在转移概率取 1 是确定性转移的特例，一般情形是分布。
+          D 错在 $\gamma$ 的取值与条件能否删掉没有关系。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">9. 把式 (8.3) 写成向量方程后，$r_\pi$ 的第 $s$ 个分量是哪一个？</p>
+      <ol class="mcq-options">
+        <li>$\sum_a\pi(a\mid s)r(s,a)$，即在状态 $s$ 按策略平均的即时奖励</li>
+        <li>$r(s,a)$，即某个固定动作 $a$ 下的即时奖励</li>
+        <li>$\sum_{s'}p(s'\mid s,a)v_\pi(s')$，即后继状态的加权价值</li>
+        <li>$\E[G_t\mid S_t=s]$，即从 $s$ 出发的总回报</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$r_\pi$ 是"只带一步奖励"的向量，动作还没选，要按 $\pi(a\mid s)$ 对动作求平均。</p>
+        <p>B 错在没有对动作求平均，那是动作值里的 $r(s,a)$。
+          C 错在那是 $\gamma P_\pi v_\pi$ 那一部分。
+          D 错在那是状态值本身，不是方程里的常数项。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. 为什么式 (8.3) 要让 $v_\pi(s')$ 出现在右边，而不把它展开成更长的式子？</p>
+      <ol class="mcq-options">
+        <li>因为展开会用到不成立的假设，展开后的式子在数学上是错的</li>
+        <li>因为这样就把无穷项求和的期望变成有限个未知量的方程，可以求解</li>
+        <li>因为不展开时方程对 $\gamma=1$ 也成立，展开以后就只对 $\gamma<1$ 成立</li>
+        <li>因为展开以后状态数会变多，计算量按状态数的平方增长</li>
+      </ol>
+      <div class="mcq-explain">
+        
+        <p>A 错在展开本身是合法的，只是会把方程变成无穷多条。
+          C 错在 $\gamma=1$ 的困难来自级数是否有限，与写不写成递归无关。
+          D 错在展开不会改变状态数，只会让式子变长。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 2 章 2.4–2.5 节。本课的状态值定义、$r(s,a)$ 与 $p(s'\mid s,a)$ 的口径、
+        以及回报的递推关系均取自该书。</p>
+      <p>R. S. Sutton and A. G. Barto, <em>Reinforcement Learning: An Introduction</em>, 2nd ed.,
+        麻省理工学院出版社 2018 年版，第 3.5–3.8 节给出了同一条方程的行为视角表述，可对照阅读。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 $s_2$ 自环那条方程用无穷级数再算一遍"，
+      或者 "为什么全期望公式在这里要对动作和下一状态各用一次？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

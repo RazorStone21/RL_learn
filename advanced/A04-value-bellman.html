@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A04 · 价值函数与贝尔曼方程 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A04" data-slug="value-bellman" data-part="进阶篇 · 第一部分 · 基础概念">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第一部分 · 基础概念</p>
+    <h1>价值函数与贝尔曼方程</h1>
+    <p class="lede">这组方程是后面每个算法的公共骨架。你要能写出一套策略（一套"看到什么状态就选什么动作"的规则），
+      以及它的价值函数（从某个状态出发，按这套策略走下去，平均能拿多少总分）
+      <span class="math">v<sub>π</sub></span>、<span class="math">q<sub>π</sub></span>（π 是策略）
+      和两个贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式），并看懂后面每一个算法的更新式都只是它的一种解法。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能说清 <span class="math">v<sub>π</sub>(s)</span> 与 <span class="math">q<sub>π</sub>(s,a)</span> 的定义和相互关系</li>
+        <li>能写出贝尔曼期望方程与贝尔曼最优方程，并指出它们差在哪里</li>
+        <li>能解释"最优策略就是对 <span class="math">q<sub>*</sub></span> 贪心"为什么足够</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>为什么不能只看回报</h2>
+    <p>第 <a href="A03-mdp.html">0003 课</a>定义了回报（从现在起一直到结束，把每一步奖励加起来的总分）
+      <span class="math">G<sub>t</sub></span>，但它是随机变量：同一套策略跑两次，得到的 <span class="math">G<sub>t</sub></span> 不一样。
+      要比较两套策略，你需要的是一个平均值："从一个状态出发，按这套策略走下去，平均能拿多少"。</p>
+    <p>这就是价值函数存在的理由：把随机的回报压缩成一个可以排序、可以比较的数。
+      它评的对象是策略，而策略由智能体（做决策的那一方，就是你写的程序）掌握。</p>
+    <p>价值函数还是所有 RL（reinforcement learning，强化学习）算法的中间语言。
+      策略梯度（不绕道估价值，直接调整策略参数的那类方法）即使不拿它当更新目标，也要拿它当基线
+      （从回报里减掉的一个参照值，只用来降波动，不改变平均方向）。</p>
+  </section>
+
+  <section>
+    <h2>两个价值函数</h2>
+    <p>在策略 π 下，状态 <var>s</var> 的价值叫<span class="term">状态价值（只看状态、不管具体选哪个动作的那个价值）</span>，
+      写成期望回报：</p>
+    <div class="eq">
+      <span class="eq-body">v<sub>π</sub>(s) = 𝔼<sub>π</sub>[ G<sub>t</sub> | S<sub>t</sub> = s ]</span>
+      <span class="eq-num">(4.1)</span>
+    </div>
+    <p>式子里的 𝔼 是期望号（期望，同一件事重复很多次之后的平均结果）：同一套策略从 s 出发跑很多次，
+      把每次的总分平均起来，就是这个状态值多少分。</p>
+    <p>在状态 <var>s</var> 下先强制选动作 a、之后再按 π 走的价值，叫<span class="term">动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）</span>：</p>
+    <div class="eq">
+      <span class="eq-body">q<sub>π</sub>(s, a) = 𝔼<sub>π</sub>[ G<sub>t</sub> | S<sub>t</sub> = s, A<sub>t</sub> = a ]</span>
+      <span class="eq-num">(4.2)</span>
+    </div>
+    <p>两者关系很直接：状态价值就是按策略概率对动作价值加权平均：</p>
+    <div class="eq">
+      <span class="eq-body">v<sub>π</sub>(s) = Σ<sub>a</sub> π(a|s) · q<sub>π</sub>(s, a)</span>
+      <span class="eq-num">(4.3)</span>
+    </div>
+    <p>工程上记住一条：<em>有模型时可以只学 <span class="math">v<sub>π</sub></span>；没有模型时，必须学
+      <span class="math">q<sub>π</sub></span></em>。因为挑动作要比较"哪个 a 更好"，
+      而 <span class="math">v(s′)</span> 里没有 a 的信息。你只能靠 <span class="math">p(s′|s,a)</span> 去推，
+      这个量叫转移概率（这个跳转不一定百分之百确定，而是一组可能性，各带着自己的概率），
+      描述的是状态转移（你做完动作之后，环境从当前状态跳到下一个状态）。
+      第 <a href="A08-td-learning.html">0008 课</a>之后所有无模型方法都在学 Q，原因就在这里。</p>
+  </section>
+
+  <section>
+    <h2>贝尔曼期望方程</h2>
+    <p>把 <span class="math">G<sub>t</sub></span> 按定义拆成"这一步的奖励 + 折扣后的下一步回报"，
+      再对环境的随机性取平均，就得到<span class="term">贝尔曼期望方程（Bellman expectation equation，动作层按策略概率加权的那组方程）</span>：</p>
+    <div class="eq">
+      <span class="eq-body">v<sub>π</sub>(s) = Σ<sub>a</sub> π(a|s) Σ<sub>s′,r</sub> p(s′, r | s, a) [ r + γ v<sub>π</sub>(s′) ]</span>
+      <span class="eq-num">(4.4)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body">q<sub>π</sub>(s, a) = Σ<sub>s′,r</sub> p(s′, r | s, a) [ r + γ Σ<sub>a′</sub> π(a′|s′) q<sub>π</sub>(s′, a′) ]</span>
+      <span class="eq-num">(4.5)</span>
+    </div>
+    <p>式中 γ 是折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折）。
+      γ 这类需要你自己设定、而不是从数据里学出来的参数，叫超参（需要你自己设定、而不是训练学出来的参数）。</p>
+    <p>这两个式子的结构叫<span class="term">备份图（backup diagram，一次更新从哪里取值、又怎么合并的那张图）</span>：根节点是 <var>s</var>，
+      往下一层是策略分出的各动作（期望），再往下一层是环境分出的各 <span class="math">(s′, r)</span>（期望），
+      叶子才是 <span class="math">v<sub>π</sub>(s′)</span>。所有更新式都是在描述"这次更新从哪些叶子取值、怎么合并"。</p>
+    <p>注意它在数学上是一个线性方程组：状态空间（所有可能局面的集合）有 <var>n</var> 个状态，
+      就有 <var>n</var> 个未知数、<var>n</var> 个方程。所以理论上你可以直接解出 <span class="math">v<sub>π</sub></span>。
+      前提是知道 <span class="math">p(s′,r|s,a)</span>，并且 <var>n</var> 小到能解方程。</p>
+    <p>状态一多就解不动了，只能一轮轮迭代着逼近，最后停在某个价值上不再变化。
+      这种"再迭代一次也不变"的解叫不动点（再迭代一次也不变的那种解）。</p>
+  </section>
+
+  <section>
+    <h2>贝尔曼最优方程</h2>
+    <p>把"对策略取期望"换成"对动作取最大"，得到的就是<span class="term">贝尔曼最优（Bellman optimality equation）</span>：动作层直接取最大，不再按策略加权。</p>
+    <div class="eq">
+      <span class="eq-body">v<sub>*</sub>(s) = max<sub>a</sub> Σ<sub>s′,r</sub> p(s′, r | s, a) [ r + γ v<sub>*</sub>(s′) ]</span>
+      <span class="eq-num">(4.6)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body">q<sub>*</sub>(s, a) = Σ<sub>s′,r</sub> p(s′, r | s, a) [ r + γ max<sub>a′</sub> q<sub>*</sub>(s′, a′) ]</span>
+      <span class="eq-num">(4.7)</span>
+    </div>
+    <p>两个方程的关键差别只有一个字：对动作的期望变成了 <code>max</code>。代价是它不再是线性方程
+      （max 是非线性的），所以不能一步解出来，只能一轮轮迭代逼近。这直接引出第
+      <a href="A05-dynamic-programming.html">0005 课</a>的 DP（dynamic programming，动态规划）。</p>
+    <p>它的结论很有用：只要拿到 <span class="math">q<sub>*</sub></span>，
+      每个状态下挑让 <span class="math">q<sub>*</sub>(s,a)</span> 最大的那个动作，就得到最优策略。
+      这里的 arg max 读作 arg-max，意思是"挑出让后面那个式子最大的那个选择"。
+      于是"在所有策略构成的巨大空间里搜索"就退化成"每个状态各自取最大"。</p>
+    <p>这样挑出来的做法叫贪心（只挑眼前最好的那个）。按它得到的策略是确定性策略
+      （每个状态固定选一个动作，不靠抽签）。反过来，按概率随机挑动作的那类策略叫随机策略
+      （同一个状态下按概率随机挑，不固定某一个）。</p>
+    <div class="note">
+      <p><em>别读过头：</em>存在性定理说的是"至少有一个最优策略，而且它可以用贪心方式取得"，
+        不是说"最优策略唯一"。同一个 <span class="math">q<sub>*</sub></span> 下，多个动作并列最优很常见，
+        实现时 <code>argmax</code> 的平局规则会决定你最终拿到哪一个。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>为什么说它是公共骨架</h2>
+    <p>回头看，整个课程后面的东西都是这一组方程的不同解法：</p>
+    <table>
+      <thead><tr><th>方法</th><th>对贝尔曼方程做了什么</th></tr></thead>
+      <tbody>
+        <tr><td>动态规划（0005）</td><td>已知模型，反复做期望备份，直到收敛（一轮轮算下去，数值不再明显变化，稳定下来了）</td></tr>
+        <tr><td>蒙特卡洛（0007，把一整局走完，用真实拿到的总分来估计价值）</td><td>用整条轨迹的回报 <span class="math">G<sub>t</sub></span> 代替方程右边</td></tr>
+        <tr><td>时序差分（0008，不用等到一局结束，用"走一步之后的新估计"来更新"走这一步之前的估计"）</td><td>用 <span class="math">r + γV(s′)</span> 这个单步样本代替整条轨迹</td></tr>
+        <tr><td>DQN（0013）</td><td>用神经网络逼近 <span class="math">q<sub>*</sub></span>，在采样的转移上做回归</td></tr>
+      </tbody>
+    </table>
+    <p>第 <a href="A05-dynamic-programming.html">0005 课</a>会把第一行展开：先把一套策略的价值反复算准，
+      这一步叫策略评估（给定一套策略，算出它到底值多少分）；再根据算出来的分数，把策略里明显吃亏的选择换掉，
+      这一步叫策略改进（根据算出的分数，把策略里明显吃亏的选择换掉）。两者交替进行，就是策略迭代（反复"打分 → 改招"，直到改不动为止）。</p>
+    <p>所以训练不收敛的时候，先回到这一步问两个问题：我到底在逼近哪一个方程？我的目标值里有没有漏掉 γ 或终止条件？
+      绝大多数实现 bug 都落在两个地方：终止状态的备份（不该有下一状态）和 γ 的幂次。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">1. 关于 <span class="math">v<sub>π</sub>(s)</span> 与 <span class="math">q<sub>π</sub>(s,a)</span> 的关系，哪一项是对的？</p>
+      <ol class="mcq-options">
+        <li>q<sub>π</sub>(s,a) 等于对全部动作取最大值之后的结果</li>
+        <li>两者之间没有确定关系，必须用两套完全不同的数据估计</li>
+        <li>v<sub>π</sub>(s) 等于 q<sub>π</sub>(s,a) 在全部状态上的平均值</li>
+        <li>v<sub>π</sub>(s) 是各动作价值 q<sub>π</sub>(s,a) 的策略加权平均</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (4.3)：在状态 <var>s</var> 下，策略以 π(a|s) 的概率选不同动作，
+          状态价值自然就是这些动作价值的加权平均。</p>
+        <p>A 把期望换成了 max，那是 <span class="math">v<sub>*</sub></span> 与
+          <span class="math">q<sub>*</sub></span> 之间的关系，不是 π 下的关系。
+          B 错：有确定性关系，知道其中一套就能推出另一套。
+          C 混淆了"对动作加权"与"对状态取平均"。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 贝尔曼期望方程与贝尔曼最优方程最关键的差别是什么？</p>
+      <ol class="mcq-options">
+        <li>最优方程只在分幕任务里成立，期望方程对两类任务都成立</li>
+        <li>期望方程对动作按策略概率加权，最优方程对动作取最大值</li>
+        <li>最优方程里不出现折扣因子，期望方程必须显式写出折扣项</li>
+        <li>期望方程描述环境的动态，最优方程描述的是智能体的策略</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两式的备份结构完全一样，唯一区别是动作层用
+          <span class="math">Σ<sub>a</sub> π(a|s)</span> 还是 <span class="math">max<sub>a</sub></span>。
+          前者对固定策略成立，后者对最优价值成立。</p>
+        <p>A 错：两式对分幕与持续任务都成立（持续任务要求 γ &lt; 1）。
+          C 错：两式都含 γ。D 错：两式都从环境动态 <span class="math">p(s′,r|s,a)</span> 出发。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. "对 <span class="math">q<sub>*</sub></span> 贪心的策略就是最优策略"，这条结论的价值在哪里？</p>
+      <ol class="mcq-options">
+        <li>它把"在全部策略里搜索"变成了"每个状态各自取最大动作"</li>
+        <li>它证明了最优策略必须是随机策略，否则无法覆盖所有动作</li>
+        <li>它说明只要状态空间有限，最优策略就一定只有唯一的一个</li>
+        <li>它要求环境模型必须已知，否则贪心策略根本没办法被定义</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：策略空间随状态数指数增长，穷举不可行；
+          但贪心性告诉我们只要拿到 <span class="math">q<sub>*</sub></span>，
+          逐状态取 argmax 就够，而且得到的是确定性策略。</p>
+        <p>B 说反了：确定性贪心策略通常就是最优策略，随机性不是必需品。
+          C 错：最优策略可以不止一个，并列最优时 argmax 的平局规则决定选哪个。
+          D 混淆了两件事：这条结论本身是关于"最优性"的结构性定理，
+          而"怎么算出 q<sub>*</sub>"才是需要模型的算法问题。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 说贝尔曼方程是"后面所有算法的公共骨架"，是什么意思？</p>
+      <ol class="mcq-options">
+        <li>所有算法都必须先把贝尔曼方程精确求解出来，才能开始学习</li>
+        <li>所有算法都使用同一个步长设置和同一个折扣因子取值</li>
+        <li>各个算法都是对同一组方程的估计方式与求解方式的不同组合</li>
+        <li>所有算法都不需要环境模型，因此都直接在线上采样贝尔曼方程</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：动态规划是迭代求解它，蒙特卡洛用时序回报替换方程右边，
+          TD（temporal difference，时序差分）用单步样本替换，DQN 用网络逼近它的解。骨头是同一副，差别只在"怎么算右边"。</p>
+        <p>A 错：无模型方法从不精确求解它，只是用样本近似。
+          B 错：步长与 γ 是各算法自己选的超参。
+          D 错：动态规划必须要有完整模型，"都不需要模型"是错的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 备份图（backup diagram）描述的是什么？</p>
+      <ol class="mcq-options">
+        <li>把价值函数随迭代次数的取值画成曲线，用来判断有没有收敛</li>
+        <li>一次价值更新从哪些后续状态取叶子值、又怎样把它们合并起来</li>
+        <li>把环境的转移概率画成矩阵图，用来检查状态转移是否合法有效</li>
+        <li>策略在状态空间中的访问频率分布，用来诊断探索是否足够充分</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：备份图是更新的依赖结构：根是当前状态，
+          经动作层与环境分支到达叶子 <span class="math">v(s′)</span>，
+          再把叶子值加权（或取最大）合并成新的根值。看见一张备份图就能写出对应的更新式。</p>
+        <p>A 说的是学习曲线，C 说的是转移矩阵可视化，D 说的是状态访问分布。
+          三者都是有用的工具，但都不是备份图。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0004-code-1">
+      <h3>代码题 1 · 实现贝尔曼期望备份</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>贝尔曼期望备份把当前的价值估计按一步转移推进一步，是策略评估里反复执行的那一步操作，后续动态规划与值迭代都拿它当内层循环。已知模型时才能这样算：每个动作的期望由转移概率加权得到。输入是价值、模型与策略，输出是策略评估一轮之后的新价值。</p>
+        <p>请实现 <code>bellman_backup(V, P, R, policy, gamma)</code>。</p>
+                <div class="eq">
+                  <span class="eq-body">V<sub>new</sub>[s] = Σ<sub>a</sub> policy[s, a] Σ<sub>s′</sub> P[s, a, s′] ( R[s, a] + γ V[s′] )</span>
+                  <span class="eq-num">(4.8)</span>
+                </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>V</code>：长度 <code>S</code> 的 float numpy 数组，也就是"一排数字的容器"，形状记作 <code>(S,)</code>，存当前的状态价值估计；</li>
+          <li><code>P</code>：形状 <code>(S, A, S)</code> 的转移概率数组。<code>P[s, a, s′]</code> 是状态 <var>s</var> 采取动作 <var>a</var> 后转到 <var>s′</var> 的概率；形状说的是每个维度各有多少个位置，下标都从 0 开始；</li>
+          <li><code>R</code>：形状 <code>(S, A)</code> 的期望即时奖励数组；</li>
+          <li><code>policy</code>：形状 <code>(S, A)</code> 的随机策略，每行加起来为 1；</li>
+          <li><code>gamma</code>：float 折扣因子。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回长度 <code>S</code> 的 float numpy 数组，第 <var>s</var> 个元素是状态 <var>s</var> 备份一次之后的价值。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>gamma=0</code> 时结果退化为按策略加权的期望即时奖励；输入恰好取到不动点时输出与输入逐项相同；确定性策略和动作各半的随机策略都各有一组数值要对上。不要修改传入的 <code>V</code>、<code>P</code>、<code>R</code>；只用标准库与 numpy，本题不需要随机数。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>Σ</code> 是求和号，意思是把后面那串全加起来。内层 <code>Σ<sub>s′</sub> P[s, a, s′] · V[s′]</code> 就是 <code>P[s, a] @ V</code>，
+              一个下标一次取出 <code>(S,)</code> 的一行，矩阵乘之后返回一个数。<code>@</code> 是 numpy 的矩阵乘法运算符。</li>
+          <li>外层对动作求和时，每一项都要乘上权重 <code>policy[s, a]</code>，不要漏掉它。</li>
+          <li>先建 <code>out = np.zeros(S)</code>。<code>np.zeros(S)</code> 返回长度 S、全是 0 的数组。对每个状态 <code>s</code>：设 <code>total = 0.0</code>，
+              再对每个动作 <code>a</code> 把 <code>policy[s, a] * (R[s, a] + gamma * (P[s, a] @ V))</code> 累加进 <code>total</code>，最后写进 <code>out[s]</code>。</li>
+          <li>不要改传入的 <code>V</code>、<code>P</code>、<code>R</code>；返回新数组 <code>out</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def bellman_backup(V, P, R, policy, gamma):
+    # TODO: 对每个状态，按策略加权各动作的一步期望
+    return np.zeros(len(V))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+P = np.zeros((3, 2, 3))
+P[0, 0, 1] = 1.0
+P[0, 1, 2] = 1.0
+P[1, 0, 1] = 1.0
+P[1, 1, 0] = 1.0
+P[2, 0, 2] = 1.0
+P[2, 1, 2] = 1.0
+R = np.array([[1.0, 5.0], [0.0, 2.0], [3.0, 3.0]])
+det = np.array([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]])
+V0 = np.zeros(3)
+out = bellman_backup(V0, P, R, det, 0.9)
+check(isinstance(out, np.ndarray), f"返回值应当是 numpy 数组，实际 {type(out).__name__}")
+check(out.shape == (3,), f"输出形状应当是 (3,)，实际 {out.shape}")
+check(np.allclose(out, [1.0, 0.0, 3.0]),
+      f"V 全为 0 且 gamma=0.9 时应当只剩即时奖励 [1, 0, 3]，实际 {out}")
+
+V = np.array([10.0, 20.0, 30.0])
+out = bellman_backup(V, P, R, det, 0.9)
+check(np.allclose(out, [19.0, 18.0, 30.0]),
+      f"确定性策略下应当是 [1+0.9*20, 0+0.9*20, 3+0.9*30] = [19, 18, 30]，实际 {out}")
+
+out0 = bellman_backup(V, P, R, det, 0.0)
+check(np.allclose(out0, [1.0, 0.0, 3.0]),
+      f"gamma=0 时备份应当退化为期望即时奖励 [1, 0, 3]，实际 {out0}")
+
+stoch = np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]])
+out = bellman_backup(V, P, R, stoch, 0.9)
+check(np.allclose(out, [25.5, 14.5, 30.0]),
+      f"动作各半的随机策略下应当是 [25.5, 14.5, 30.0]，实际 {out}")
+
+V_pi = np.array([1.0, 0.0, 30.0])
+fixed = bellman_backup(V_pi, P, R, det, 0.9)
+check(np.allclose(fixed, V_pi, atol=1e-9),
+      f"v_pi 必须是贝尔曼期望方程的不动点，备份后应当不变，实际 {fixed}")
+
+V_before = V.copy()
+P_before = P.copy()
+R_before = R.copy()
+bellman_backup(V, P, R, det, 0.9)
+check(np.allclose(V, V_before), "不应当修改传入的 V")
+check(np.allclose(P, P_before), "不应当修改传入的 P")
+check(np.allclose(R, R_before), "不应当修改传入的 R")
+
+Vs = bellman_backup(V, P, R, det, 0.5)
+check(np.allclose(Vs, [11.0, 10.0, 18.0]),
+      f"同上，但 gamma=0.5 时应当是 [1+0.5*20, 0+0.5*20, 3+0.5*30] = [11, 10, 18]，实际 {Vs}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def bellman_backup(V, P, R, policy, gamma):
+    V = np.asarray(V, dtype=float)
+    S, A = policy.shape
+    out = np.zeros(S, dtype=float)
+    for s in range(S):
+        total = 0.0
+        for a in range(A):
+            w = float(policy[s, a])
+            if w == 0.0:
+                continue
+            total += w * (float(R[s, a]) + gamma * float(P[s, a] @ V))
+        out[s] = total
+    return out
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0004-code-2">
+      <h3>代码题 2 · 由 v 得到 q，再提取贪心策略</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>策略改进是策略迭代的第二步：先算出当前策略的动作价值，再对每个状态取其中最大的动作，得到一个新策略。这两个函数就构成这一步的计算，被策略迭代的主循环反复调用。输入是价值与模型，输出是新策略。按策略改进定理，这个新策略不会比原策略差。</p>
+        <p>请实现 <code>q_from_v(V, P, R, gamma)</code> 和 <code>greedy_from_q(Q)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>q_from_v</code> 的 <code>V</code>：长度 <code>S</code> 的 float 数组，某个策略的状态价值；</li>
+          <li><code>q_from_v</code> 的 <code>P</code>：形状 <code>(S, A, S)</code> 的转移概率数组；</li>
+          <li><code>q_from_v</code> 的 <code>R</code>：形状 <code>(S, A)</code> 的期望即时奖励数组；</li>
+          <li><code>q_from_v</code> 的 <code>gamma</code>：float 折扣因子；</li>
+          <li><code>greedy_from_q</code> 的 <code>Q</code>：形状 <code>(S, A)</code> 的动作价值数组。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>q_from_v</code> 返回形状 <code>(S, A)</code> 的 numpy 数组，<code>Q[s, a]</code> 是状态 <var>s</var> 强制选动作 <var>a</var>、之后按原策略走的动作价值；</li>
+          <li><code>greedy_from_q</code> 返回长度 <code>S</code> 的整数数组，第 <var>s</var> 个元素是状态 <var>s</var> 的动作下标，平局取下标最小的动作。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试检查两个返回值的形状与元素：<code>q_from_v</code> 在 <code>V</code> 全为 0 时结果等于 <code>R</code>，且不修改传入的 <code>V</code>、<code>P</code>、<code>R</code>；<code>greedy_from_q</code> 返回整数下标的数组，平局时取小下标；还会用真实 <span class="math">v<sub>π</sub></span> 算一遍再贪心，验证新策略的动作价值不低于 <span class="math">v<sub>π</sub></span>。只用标准库与 numpy，本题不需要随机数。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>q_from_v</code> 不需要 policy 参数：它算的是"先强制选 a、之后按原策略走"的价值，形状要从 <code>(S,)</code> 变成 <code>(S, A)</code>。</li>
+          <li>一行就能算完：<code>Q = R + gamma * (P @ V)</code>。<code>P</code> 的形状是 <code>(S, A, S)</code>，
+              <code>P @ V</code> 会把最后那一维和 <code>V</code> 逐项相乘再求和，得到形状 <code>(S, A)</code>，正好和 <code>R</code> 对上。</li>
+          <li><code>greedy_from_q</code> 用 <code>np.argmax(Q, axis=1)</code>：<code>axis=1</code> 表示"在每个状态那一行里挑动作"，
+              返回长度 <code>S</code> 的下标数组。平局时它取最小下标，正好满足要求。</li>
+          <li>不要修改传入的 <code>V</code>、<code>P</code>、<code>R</code>；返回的 <code>Q</code> 是新数组，<code>policy</code> 要用整数类型。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def q_from_v(V, P, R, gamma):
+    # TODO: Q[s, a] = R[s, a] + gamma * P[s, a] @ V
+    return np.zeros((len(V), P.shape[1]))
+
+def greedy_from_q(Q):
+    # TODO: 每个状态取动作价值最大的动作下标
+    return np.zeros(Q.shape[0], dtype=int)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+P = np.zeros((3, 2, 3))
+P[0, 0, 0] = 1.0
+P[0, 1, 1] = 1.0
+P[1, 0, 0] = 1.0
+P[1, 1, 1] = 1.0
+P[2, 0, 2] = 1.0
+P[2, 1, 2] = 1.0
+R = np.array([[1.0, 0.0], [0.0, 2.0], [0.0, 0.0]])
+gamma = 0.9
+
+V = np.array([10.0, 9.0, 0.0])
+Q = q_from_v(V, P, R, gamma)
+check(isinstance(Q, np.ndarray) and Q.shape == (3, 2),
+      f"Q 应当是形状 (3, 2) 的 numpy 数组，实际 {type(Q).__name__} / {getattr(Q, 'shape', None)}")
+check(np.allclose(Q, [[10.0, 8.1], [9.0, 10.1], [0.0, 0.0]]),
+      f"Q 应为 [[10, 8.1], [9, 10.1], [0, 0]]，实际 {Q}")
+
+Q_zero = q_from_v(np.zeros(3), P, R, gamma)
+check(np.allclose(Q_zero, [[1.0, 0.0], [0.0, 2.0], [0.0, 0.0]]),
+      f"V 全为 0 时 Q 应当等于即时奖励 R，实际 {Q_zero}")
+
+V0 = V.copy()
+P0 = P.copy()
+R0 = R.copy()
+q_from_v(V, P, R, gamma)
+check(np.allclose(V, V0) and np.allclose(P, P0) and np.allclose(R, R0),
+      "q_from_v 不应当修改传入的 V、P、R")
+
+pi = greedy_from_q(Q)
+check(isinstance(pi, np.ndarray) and pi.shape == (3,),
+      f"策略应当是长度 3 的 numpy 数组，实际 {getattr(pi, 'shape', None)}")
+check(pi.dtype.kind in "iu", f"策略应当是整数下标数组，实际 dtype={pi.dtype}")
+check(pi.tolist() == [0, 1, 0], f"贪心策略应当选 [0, 1, 0]，实际 {pi.tolist()}")
+
+tie = np.array([[1.0, 1.0, 1.0], [0.0, 2.0, 2.0]])
+check(greedy_from_q(tie).tolist() == [0, 1],
+      "平局时应当取下标最小的动作，即 [0, 1]")
+
+# 策略改进定理：用真实 v_pi 算 q_pi，再贪心，验证 q(s, pi_new(s)) >= v(s)
+S, A = 3, 2
+pi_old = np.zeros(S, dtype=int)
+P_pi = P[np.arange(S), pi_old]
+r_pi = R[np.arange(S), pi_old]
+v_pi = np.linalg.solve(np.eye(S) - gamma * P_pi, r_pi)
+Q_pi = q_from_v(v_pi, P, R, gamma)
+pi_new = greedy_from_q(Q_pi)
+
+for s in range(S):
+    check(Q_pi[s, pi_new[s]] >= v_pi[s] - 1e-9,
+          f"策略改进定理要求 q(s, pi_new(s)) >= v_pi(s)，但状态 {s} 上是 "
+          f"{Q_pi[s, pi_new[s]]:.4f} < {v_pi[s]:.4f}")
+check(pi_new[1] == 1 and Q_pi[1, 1] > v_pi[1] + 0.5,
+      f"状态 1 上新策略应当严格更好：{Q_pi[1, 1]:.4f} 应当明显大于 {v_pi[1]:.4f}")
+check(pi_old.tolist() == [0, 0, 0], "旧策略在本测试里应当是全部选动作 0")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def q_from_v(V, P, R, gamma):
+    V = np.asarray(V, dtype=float)
+    return np.asarray(R, dtype=float) + gamma * (P @ V)
+
+def greedy_from_q(Q):
+    return np.argmax(np.asarray(Q, dtype=float), axis=1).astype(int)
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 3.5–3.6 节。
+        状态价值与动作价值的定义、两个贝尔曼期望方程、贝尔曼最优方程与最优策略的贪心性，
+        原文都给了完整推导；3.6 节末尾关于"为什么这组方程是 RL 的核心"的讨论尤其值得读。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把我的业务 MDP 代进式 (4.4)，逐项解释每个符号" 或者
+      "为什么 DQN 的目标里 q<sub>*</sub> 的 max 会带来过估计（总是取最大值，估计出来的分数就会系统性偏高）？"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

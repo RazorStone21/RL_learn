@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A27 · 综合实战：为你的工作问题选算法 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A27" data-slug="capstone" data-part="进阶篇 · 第六部分 · 模型基、离线与对齐">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第六部分 · 模型基、离线与对齐</p>
+    <h1>综合实战：为你的工作问题选算法</h1>
+    <p class="lede">收尾这一节不再介绍新算法，只做一件事：把手头的真实问题过一遍。
+      三个问题定出算法族，五条检查表把关上线，训练出错时知道先看哪里。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能用「能不能交互 / 动作是什么 / 采样多贵」三步定位算法族</li>
+        <li>能用 5 条检查表与 4 层评估方案替项目把关</li>
+        <li>能从学习曲线的形状反推病因，不再盲目调学习率</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>选型只有三个问题</h2>
+        <p>前二十六课讲了十几个算法，落到你自己的问题上，分岔只有三处。
+      按顺序问，每一步都能砍掉一大半选项。</p>
+    <p>先把后面反复出现的词一口气交代掉。监督学习（拿"题目 + 标准答案"来学的机器学习方式）。
+      策略（一套"看到什么状态就选什么动作"的规则）。回报（从现在起一直到结束，
+      把每一步奖励加起来的总分）。价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）。
+      函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去"猜"值）。
+      基线（打分时先减掉的一个参照值，只用来压住波动，不改变平均方向）。
+      优势（在某个状态下，选这个动作比"平均水平"好多少）。
+      过估计（因为总是取最大值，估计出来的分数会偏高）。
+      学习率（每次更新时往新信息的方向挪多远）。超参（需要你自己设定、而不是训练学出来的参数）。
+      泛化（在没见过的状态上也能给出靠谱的估计）。收敛（一轮轮算下去，数值不再明显变化）。
+      样本效率（拿到同样多的经验能学多好，高就是更省数据）。
+      目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑）。
+            对数概率（把概率取对数，概率很小的时候也不会变成 0，方便计算）。
+            熵（衡量选择有多随机、多分散，也用来衡量两套概率分布差多远）。
+      人类偏好（只告诉你"这两个里我更喜欢哪一个"，不给绝对分数），
+      这样叫是为了和 0002 课"每个臂一个打分"的偏好区分开。
+      奖励模型（用一个学出来的模型给回答打分，代替人去打分）。</p>
+    <ul>
+      <li><em>能不能交互？</em>你能不能安全地拿真实反馈试错。
+        不能，就只剩历史日志可用。这种设定叫离线（不能与环境交互，只能用已经攒下来的数据学），
+        走 <a href="A25-offline-imitation.html">0025 课</a>的离线路线；能，才谈得上在线学习。</li>
+      <li><em>动作是什么？</em>离散的少数选项、连续的控制量，
+        还是「直接输出一整段决策」的策略输出，各自对应不同的算法族。</li>
+      <li><em>采样多贵？</em>每次交互要花钱、要人等，还是不可回滚。
+        贵就得提高单次交互的价值：模型基规划、离线预热、用演示数据做基线。</li>
+    </ul>
+    <p>问这三个问题之前还有一道更基础的关卡：这件事要不要用 RL（reinforcement learning，强化学习）？
+      <a href="A06-modeling-your-problem.html">0006 课</a>的检查表，
+      <a href="A02-bandits.html">0002 课</a>那种「没有状态转移（做完动作之后局面不会变）、只做反复选择」的问题，
+      答案常常是不需要，一条规则或一次 A/B 实验就够。</p>
+  </section>
+
+  <section>
+    <h2>三个问题，换一张选型表</h2>
+    <table>
+      <thead><tr><th>你的情形</th><th>首选</th><th>备选与代价</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>离散动作，且能开仿真 / 大量并行交互</td>
+          <td>DQN（deep Q-network，深度 Q 网络）一族（<a href="A13-dqn.html">0013</a>–<a href="A16-rainbow-distributional.html">0016</a>）</td>
+          <td>动作很少、状态也很少时，先退回表格法（<a href="A10-q-learning.html">0010</a>），别上神经网络</td>
+        </tr>
+        <tr>
+                    <td>动作空间（能选的动作合起来有多大）很大（上万）或需要策略直接输出动作</td>
+          <td>PPO（<a href="A20-ppo.html">0020</a>）</td>
+          <td>比 DQN 对奖励尺度宽容、公开实现多，代价是样本效率低</td>
+        </tr>
+        <tr>
+          <td>连续动作，交互相对便宜</td>
+          <td>SAC（<a href="A23-sac.html">0023</a>）</td>
+                    <td>要确定性策略（同样状态永远输出同一个动作）、推理便宜就换 TD3（<a href="A22-td3.html">0022</a>）</td>
+        </tr>
+        <tr>
+          <td>只有历史日志，不能探索</td>
+          <td>先做行为克隆基线（<a href="A25-offline-imitation.html">0025</a>）</td>
+          <td>再上 CQL（conservative Q-learning，保守 Q 学习）/ IQL（implicit Q-learning，隐式 Q 学习）；离线指标不可信，评估只能靠离线评估加 shadow 模式（新策略只做决策、不真执行）</td>
+        </tr>
+        <tr>
+          <td>样本极贵（花钱、要人等、不可回滚）</td>
+          <td>模型基：Dyna / MCTS（<a href="A24-model-based-planning.html">0024</a>）</td>
+          <td>没有可靠仿真就先用离线 RL 预热、再用在线微调</td>
+        </tr>
+        <tr>
+                    <td>在线微调大模型（对齐 / 人类偏好，也就是只告诉你"这两个里我更喜欢哪一个"、不给绝对分数的那类数据）</td>
+          <td>PPO + 奖励模型（用一个学出来的模型给回答打分，代替人去打分）
+            + KL（Kullback-Leibler divergence，相对熵）惩罚（<a href="A26-rlhf-dpo.html">0026</a>）</td>
+          <td>只有偏好数据、不想维护采样管线就用 DPO（direct preference optimization，直接偏好优化）</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>表里没有的情形，先查 <a href="../reference/algorithms.html">算法速查表</a>。</p>
+  </section>
+
+  <section>
+    <h2>上线前检查表</h2>
+    <p>五条里任何一条答不上来，先回去补，不要开始调参。</p>
+    <ol>
+      <li>真的需要 RL 吗？规则、A/B 实验或监督学习能不能先拿到大部分收益。</li>
+                  <li>状态满足马尔可夫性（下一个状态只看当前状态和动作，与更早的历史无关）吗？
+        也就是两个看起来一样的状态，未来会不会不同（<a href="A03-mdp.html">0003 课</a>）。</li>
+      <li>奖励能逐步计算，并且和真实目标一致吗？能钻空子的地方就是
+        <a href="../reference/glossary.html">奖励黑客</a>的入口（<a href="A06-modeling-your-problem.html">0006 课</a>）。</li>
+      <li>能安全试错吗？真实试错有不可逆代价时，先做仿真或离线评估（<a href="A25-offline-imitation.html">0025 课</a>）。</li>
+      <li>评估方案定了吗？主指标、护栏指标（用来兜底的安全线，比如"下单成功率不能掉"）、shadow 与 A/B 的判定阈值要在训练前写下来；
+        事后补的评估总是偏向已完成的模型。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>评估与上线：四层</h2>
+    <ol>
+      <li><em>离线评估</em>：只用日志估计新策略，受分布偏移影响而偏乐观，
+        只能筛掉明显更差的候选（<a href="A25-offline-imitation.html">0025 课</a>）。</li>
+      <li><em>Shadow 模式</em>：新策略只做决策、不真执行，动作与现网动作并排记录。</li>
+      <li><em>A/B 实验</em>：小流量（只让一小部分用户看到）真上线，主指标要有判定阈值与实验周期。</li>
+      <li><em>护栏指标</em>：与主指标同时监控、一旦恶化就必须叫停的指标。</li>
+    </ol>
+    <p>每层拦不同的失败：离线拦明显更差的，shadow 拦会误操作的，
+      A/B 回答有没有变好，护栏在你答错时止损。</p>
+  </section>
+
+  <section>
+    <h2>故障速查：先看曲线，再动手</h2>
+    <p>训练不顺时，先按症状定位，再决定改什么。下表是常见的五种。</p>
+    <table>
+      <thead><tr><th>症状</th><th>最可能的病因</th><th>先查什么</th></tr></thead>
+      <tbody>
+        <tr><td>Q 值单调膨胀、损失发散</td><td>过估计或缺少约束</td><td>目标网络与 Double 机制（<a href="A14-double-dueling-dqn.html">0014</a>）、折扣与奖励尺度</td></tr>
+        <tr><td>训练奖励涨、业务指标反而跌</td><td>奖励黑客</td><td>奖励定义与护栏指标，先人工抽查一批决策（<a href="A06-modeling-your-problem.html">0006</a>）</td></tr>
+        <tr><td>曲线方差极大、无法解读</td><td>batch 太小或学习率太大</td><td>先扩大 batch 与回放缓冲区，再看曲线</td></tr>
+        <tr><td>奖励长期不涨、策略近乎单一</td><td>探索不足</td><td>探索机制与熵项（<a href="A23-sac.html">0023</a>）、动作空间归一化</td></tr>
+        <tr><td>时好时坏、来回震荡</td><td>更新步长过大或目标移动太快</td><td>学习率、目标网络同步周期、PPO 的裁剪范围</td></tr>
+      </tbody>
+    </table>
+    <p>与 <a href="A13-dqn.html">0013 课</a>、<a href="A19-gae-trpo.html">0019 课</a>的同类表格合起来看，
+      入门阶段的常见症状基本都在内。</p>
+  </section>
+
+  <section>
+    <h2>什么情况下答案是「不要用 RL」</h2>
+    <p>收尾这句提醒放在这里：先证明 RL 值得用，再决定用不用它。以下情形通常应当放弃：</p>
+    <ul>
+      <li>规则系统、阈值策略或一次 A/B 实验就能拿到八成收益，工程成本差一个量级。</li>
+      <li>奖励无法度量，或者要等三个月才拿到。没有及时的学习信号，算法学不动。</li>
+      <li>试错有不可逆的代价（不可回滚的资损、人身安全、合规风险），又没有可靠仿真器。</li>
+      <li>      问题里根本没有「状态转移」，只是反复选择，那属于多臂老虎机
+      （一排老虎机摆在面前，不知道哪台吐钱多，只能一台台试），甚至只是一组实验设计。</li>
+    </ul>
+    <p>反过来，当决策是持续的、结果要隔一段时间才显现、而且你确实能安全试错时，
+      RL 才开始有优势。回到 <a href="A01-what-is-rl.html">0001 课</a>的五要素，
+      把这四条对照自己的问题过一遍，再挑算法。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 按本课的选型顺序，挑算法之前第一个该问什么？</p>
+      <ol class="mcq-options">
+        <li>动作空间有多大、是离散还是连续，它决定算法族</li>
+        <li>能不能与真实系统安全交互，它决定在线还是离线</li>
+        <li>每次采样成本有多高，它决定样本效率要求</li>
+        <li>状态维度有多高，它决定能否用表格型方法</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：三问的顺序有依赖。不能交互时，动作空间的精细选择没有意义，
+          只能在固定日志上做离线的文章，所以「能不能交互」先落地。</p>
+        <p>A、C、D 是另外几问，放在第一问会让选型建立在一个还不成立的假设上，
+          D 更是把数据来源放到了最后。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 某推荐场景动作是上万件商品，训练系统能大量并行交互。首选哪一族？</p>
+      <ol class="mcq-options">
+        <li>DQN，它对离散动作的处理最直接，样本效率最高</li>
+        <li>SAC，最大熵框架能处理上万维的离散动作</li>
+        <li>PPO，不要求逐动作取最大值，能直接输出动作概率</li>
+        <li>表格型 Q-learning，状态与动作明确，不需要函数逼近</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：DQN 要对下一状态的全部动作取 max 与 argmax，动作上万时既昂贵又容易过估计；
+          PPO 只需要动作的对数概率，不受动作维度限制，并行仿真又便宜。</p>
+        <p>A 的问题在 max 的开销与过估计。B 用错了场景：SAC 为连续动作设计。
+          D 忽略了上万动作的表格规模与泛化需求。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 你只有历史日志、不能上线探索。最合理的第一步是什么？</p>
+      <ol class="mcq-options">
+        <li>直接上 PPO，在日志上反复更新策略，直到离线指标变好</li>
+                <li>先做随机策略（每个动作都按概率随机试，不挑最好的）的离线评估，估出所有候选动作的价值</li>
+        <li>先训一个奖励模型，用它给日志里的动作重新打标签</li>
+        <li>先把行为克隆做成基线，再考虑 CQL / IQL 一类离线算法</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：行为克隆便宜、稳定，很多业务问题到这一步就够交付；
+          离线 RL 的价值必须相对它来证明，先有基线才有参照。</p>
+        <p>A 忽略了 PPO 需要在线采样。B 说的是离线评估做不到的事：日志只覆盖旧策略的动作分布，
+          其他动作的价值无从估计。C 混淆了离线 RL 与 RLHF（reinforcement learning from human feedback，基于人类反馈的强化学习）的奖励模型。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 上线前的评估方案，哪一项组合最符合本课建议？</p>
+      <ol class="mcq-options">
+        <li>离线评估筛候选，shadow 并排观察，再做 A/B 与护栏指标</li>
+        <li>只做 A/B 实验，离线评估的结果从来不值得参考</li>
+        <li>只做离线评估，不需要真实流量，成本最低也最安全</li>
+        <li>直接全量上线，靠人工回滚兜底，最快拿到收益</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：四层各拦一种失败：离线便宜但偏乐观，用来筛候选；shadow 不真执行，
+          能发现会误操作的决策；A/B 回答有没有变好；护栏兜住意外恶化。</p>
+        <p>B 忽略了离线评估在筛选阶段的价值。C 把最不可信的一层当成唯一依据。
+          D 跳过全部防线，奖励设计一有漏洞，代价就落在业务上。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 训练奖励一路上涨，但业务指标同时下滑。最可能是什么问题？</p>
+      <ol class="mcq-options">
+        <li>探索不足，策略过早收敛到奖励较低的局部最优</li>
+        <li>奖励黑客，代理指标与真实目标不一致，被策略钻空子</li>
+        <li>过估计，Q 值被一路抬高，学到的策略并不可用</li>
+        <li>样本效率不足，训练还没看到足够多样本</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：「训练奖励涨、业务指标跌」说明奖励与真实目标脱钩：策略在优化你写下的
+          代理指标，而它不等于你想要的东西。该做的是回头查奖励定义与护栏指标，再人工抽查决策。</p>
+        <p>A 的症状是奖励长期不涨且策略单一。C 表现为 Q 值单调膨胀，业务指标未必立刻下滑。
+          D 是学习还没到位，方向没错。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0027-code-1">
+      <h3>代码题 1 · 写一个算法推荐器</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>本课是收尾实战课：拿到一个新业务问题时，先按选型表定算法族，
+          再决定训练方案。<code>recommend_algorithm</code> 就是这一步的代码化，
+          在选题评审阶段由做方案的人调用一次，把口径统一下来，
+          输出直接写进设计文档给团队与主管看，让「先问能不能交互」这件事不靠记忆。</p>
+        <p>请实现 <code>recommend_algorithm(problem, action_space, interactive, samples, needs_policy_output=False)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>problem</code>：问题名，字符串，只作标识，不参与判断。</li>
+          <li><code>action_space</code>：<code>"discrete"</code> 或 <code>"continuous"</code>，表示动作空间是离散还是连续。</li>
+          <li><code>interactive</code>：布尔，<code>False</code> 表示不能与真实系统安全交互，只能拿固定日志。</li>
+          <li><code>samples</code>：布尔，<code>True</code> 表示采样极贵，要花钱、要等人或不可回滚。</li>
+          <li><code>needs_policy_output</code>：布尔，默认 <code>False</code>，表示是否需要策略直接输出动作。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>{"family": 算法族, "reason": 中文理由}</code> 这一个 <code>dict</code>。</li>
+          <li><code>family</code> 是字符串，取值只有四个：<code>"offline-RL"</code>、<code>"model-based"</code>、<code>"SAC-TD3"</code>、<code>"DQN-family"</code>。</li>
+          <li><code>reason</code> 是字符串，给出这条推荐的理由，直接展示给读者，不需要复述问题名。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>family</code> 只能是上面四个字符串之一；
+          不能交互时优先于采样成本与动作空间，即使采样极贵也返回 <code>"offline-RL"</code>；
+          采样极贵返回 <code>"model-based"</code>；连续动作或要求策略直接输出动作返回 <code>"SAC-TD3"</code>；
+          其余离散动作返回 <code>"DQN-family"</code>。<code>reason</code> 至少要 8 个字，
+          且不能把 <code>problem</code> 抄回去。只用标准库与 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>五个分支写成一条 <code>if / elif</code> 链即可，不要嵌套。</li>
+          <li>顺序重要：能不能交互必须排在最前面，否则会推荐出无法落地的方案。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def recommend_algorithm(problem, action_space, interactive,
+                        samples, needs_policy_output=False):
+    # TODO: 按本课选型图返回 {"family": ..., "reason": ...}
+    return {"family": "DQN-family", "reason": ""}
+</script>
+
+      <script type="text/x-python" data-role="tests">
+r = recommend_algorithm("推荐系统", "discrete", True, False)
+check(r["family"] == "DQN-family", f"离散动作 + 可交互，应给 DQN-family，实际 {r['family']}")
+
+r = recommend_algorithm("广告排序", "discrete", True, True)
+check(r["family"] == "model-based", f"采样极贵应优先模型基，实际 {r['family']}")
+
+r = recommend_algorithm("机器人控制", "continuous", True, False)
+check(r["family"] == "SAC-TD3", f"连续动作 + 可交互应给 SAC-TD3，实际 {r['family']}")
+
+r = recommend_algorithm("客服回复生成", "continuous", True, False, needs_policy_output=True)
+check(r["family"] == "SAC-TD3", f"需要策略直接输出动作应给 SAC-TD3，实际 {r['family']}")
+
+r = recommend_algorithm("历史日志调价", "discrete", False, False)
+check(r["family"] == "offline-RL", f"不能交互只能走离线路线，实际 {r['family']}")
+
+r = recommend_algorithm("库存补货", "continuous", False, True)
+check(r["family"] == "offline-RL",
+      f"不能交互时优先于采样成本，仍应给 offline-RL，实际 {r['family']}")
+
+r = recommend_algorithm("推荐系统", "discrete", True, False)
+check(isinstance(r["reason"], str) and len(r["reason"]) >= 8,
+      f"reason 应当是至少 8 个字的中文理由，实际 {r['reason']!r}")
+check("推荐系统" not in r["reason"], "理由应当是通用的选型依据，不需要把问题名抄回去")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def recommend_algorithm(problem, action_space, interactive,
+                        samples, needs_policy_output=False):
+    if not interactive:
+        return {"family": "offline-RL",
+                "reason": "拿不到新交互，只能用固定日志，先做行为克隆基线再考虑离线 RL"}
+    if samples:
+        return {"family": "model-based",
+                "reason": "每次采样都很贵，应优先用模型或规划提高单次交互的价值"}
+    if action_space == "continuous" or needs_policy_output:
+        return {"family": "SAC-TD3",
+                "reason": "连续动作或要求策略直接输出动作，用最大熵或确定性策略梯度"}
+    return {"family": "DQN-family",
+            "reason": "动作离散且可反复交互，价值方法一族最省样本也最好调"}
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0027-code-2">
+      <h3>代码题 2 · 由学习曲线判断病因</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>训练不顺时先看曲线，再动手改超参，顺序反了会白调很久。
+          本课的故障速查表给了五种症状与对应的病因。
+          <code>diagnose_training</code> 把这张表写成可调用的函数，
+          在训练监控脚本里定期跑一次，把指标曲线转成一个病因标签。
+          输出进告警与实验记录，让值班的人一眼知道该查奖励定义、该扩 batch，还是该补探索。</p>
+        <p>请实现 <code>diagnose_training(curve)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+                    <li><code>curve</code>：<code>dict</code>，键是训练曲线指标名，值是 <code>float</code>。可能含 <code>q_max</code>（Q 值绝对值的峰值）、<code>train_reward_change</code>（训练奖励变化量）、<code>eval_metric_change</code>（业务指标同期变化量）、<code>return_std</code>（回报的标准差，回报指从现在起一直到结束、把每一步奖励加起来的总分）、<code>policy_entropy</code>（策略的熵，熵衡量选择有多随机、多分散，越大说明越敢试）。缺的键按 <code>0.0</code> 处理，<code>policy_entropy</code> 缺省为 <code>1.0</code>。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回一个字符串，取值只有五个：<code>"value-divergence"</code>、<code>"reward-hacking"</code>、<code>"high-variance"</code>、<code>"exploration-collapse"</code>、<code>"not-converged"</code>。</li>
+          <li>按这个优先级取第一个命中的：<code>q_max &gt; 1e4</code> → <code>"value-divergence"</code>；<code>train_reward_change &gt; 0</code> 且 <code>eval_metric_change &lt; 0</code> → <code>"reward-hacking"</code>；<code>return_std &gt; 100</code> → <code>"high-variance"</code>；<code>train_reward_change &lt;= 0</code> 且 <code>policy_entropy &lt; 0.3</code> → <code>"exploration-collapse"</code>；其余 → <code>"not-converged"</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>四条曲线各命中对应标签；
+          同时命中多条时返回优先级最靠前的那条，例如 Q 值峰值超过 <code>1e4</code> 而回报标准差也超过 <code>100</code> 时给 <code>"value-divergence"</code>；
+          奖励不涨但策略仍有熵要判 <code>"not-converged"</code>，不能误判成 <code>"exploration-collapse"</code>；
+          缺失的键要用默认值补上，空字典或只剩一个键也不能抛异常。
+          只用标准库与 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>用 <code>curve.get("q_max", 0.0)</code> 一类写法取缺失的键。</li>
+          <li>五个分支写成一条 <code>if / elif</code> 链，顺序照题干即可。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def diagnose_training(curve):
+    # TODO: 按优先级依次判断，返回第一个命中的病因标签
+    return "looks-fine"
+</script>
+
+      <script type="text/x-python" data-role="tests">
+check(diagnose_training({"q_max": 5e4, "train_reward_change": 30.0,
+                        "eval_metric_change": -2.0, "return_std": 500.0})
+      == "value-divergence",
+      "Q 值峰值超过 1e4 应优先判定为 value-divergence")
+
+check(diagnose_training({"q_max": 200.0, "train_reward_change": 45.0,
+                        "eval_metric_change": -3.0, "return_std": 20.0})
+      == "reward-hacking",
+      "训练奖励涨而业务指标跌，应为 reward-hacking")
+
+check(diagnose_training({"q_max": 80.0, "train_reward_change": 5.0,
+                        "eval_metric_change": 1.0, "return_std": 250.0})
+      == "high-variance",
+      "回报标准差超过 100 应为 high-variance")
+
+check(diagnose_training({"q_max": 10.0, "train_reward_change": 0.0,
+                        "eval_metric_change": 0.0, "return_std": 5.0,
+                        "policy_entropy": 0.1})
+      == "exploration-collapse",
+      "奖励不涨且策略熵极低，应为 exploration-collapse")
+
+check(diagnose_training({"q_max": 10.0, "train_reward_change": 0.0,
+                        "eval_metric_change": 0.0, "return_std": 5.0,
+                        "policy_entropy": 1.5})
+      == "not-converged",
+      "奖励不涨但策略仍有熵，应为 not-converged 而不是 exploration-collapse")
+
+label = diagnose_training({"return_std": 1.0})
+check(label in ("not-converged", "exploration-collapse"),
+      f"缺失的键要用默认值补上，不应报错，实际返回 {label!r}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def diagnose_training(curve):
+    q_max = float(curve.get("q_max", 0.0))
+    train_change = float(curve.get("train_reward_change", 0.0))
+    eval_change = float(curve.get("eval_metric_change", 0.0))
+    ret_std = float(curve.get("return_std", 0.0))
+    entropy = float(curve.get("policy_entropy", 1.0))
+
+    if q_max > 1e4:
+        return "value-divergence"
+    if train_change > 0.0 and eval_change < 0.0:
+        return "reward-hacking"
+    if ret_std > 100.0:
+        return "high-variance"
+    if train_change <= 0.0 and entropy < 0.3:
+        return "exploration-collapse"
+    return "not-converged"
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 第 1 章。
+        第 1.1–1.3 节给出「什么时候适合用 RL」的原始表述：目标导向、持续交互、结果延迟，
+        本课「什么情况下不要用 RL」那一段以它为依据。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>OpenAI, <em>Spinning Up in Deep RL</em> 的 Key Concepts 与算法总览，
+        把「问题特征 → 算法族」对应起来，本课选型表的备选列与它一致。
+        <a class="cite" href="https://spinningup.openai.com/en/latest/">[Spinning Up]</a></p>
+      <p>把这一节和 <a href="A06-modeling-your-problem.html">0006 课</a>的建模检查表钉在一起，
+        就是你的项目立项文档；术语与符号见
+        <a href="../reference/glossary.html">术语表</a>与<a href="../reference/notation.html">符号表</a>。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。
+      最有用的问法是把真实问题丢给它：「我的场景是 XX，状态是 YY，动作是 ZZ，
+      采样成本是 WW，照第 27 课的三个问题走一遍，你会推荐哪一族，理由是什么，
+      最先该做的实验是什么？」再让它把你的答案与它的推荐逐条对照。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

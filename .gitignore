@@ -1,0 +1,12 @@
+# exFAT 卷会自动生成 AppleDouble 旁车文件
+._*
+.DS_Store
+# 临时与缓存
+.tmp-skills/
+__pycache__/
+*.pyc
+
+# 课程重构前的备份，只在开发时用，不该进仓库（16MB）
+.snapshots/
+# .baseline/ 是闸门 6（红线不变量）的对照基线，只有 1.1MB，
+# 保留它，别人 clone 之后才能直接跑 tools/check-invariants.py

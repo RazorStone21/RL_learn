@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0014 · 策略迭代与截断策略迭代 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0014" data-slug="policy-iteration" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">基础工具 14</p>
+    <h1>策略迭代与截断策略迭代</h1>
+    <p class="lede">本课的主角是策略（一套"看到什么状态就选什么动作"的规则）。给它打分、再按分数改它，两件事交替做下去就是策略迭代（反复"打分 → 改招"，直到改不动为止）。本课要证明这样改每一步都不会变差，还要说明值迭代（不显式维护策略，直接把价值反复往最优方向推）与它是一条连续谱的两端。</p>
+    <div class="objectives">
+      <h2>学完本课你会</h2>
+      <ul>
+        <li>能说清策略评估与策略改进各自在算什么，并写出两步的公式</li>
+        <li>能完整证明策略改进定理，指出"加权平均不超过最大值"这一步为什么关键</li>
+        <li>能证明策略迭代在有限轮内停下，且停下时的策略最优</li>
+        <li>能在 2×2 网格世界上手算一轮策略迭代，并核对价值确实不降</li>
+        <li>能写出截断策略迭代的算法，并解释它怎样把值迭代与策略迭代连起来</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 两个动作：先打分，再改招</h2>
+    <p>要评价一套策略好不好，看的是它能拿到多少总分。分数带随机性，比较的是平均总分，也就是价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）。只看状态的那个价值叫状态价值（只看状态、不管具体选哪个动作的那个价值）；先定住一个动作的那个叫动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）。</p>
+    <p>策略迭代只用两个动作，来回做：</p>
+    <p>策略评估（给定一套策略，算出它到底值多少分）把当前策略的价值算准；策略改进（根据算出的分数，把策略里明显吃亏的选择换掉）在每个状态挑动作值最大的动作。</p>
+    <p>两个动作交替执行，得到一串策略 $\pi_0,\pi_1,\pi_2,\dots$。换过之后会不会反而变差？本课的核心定理说不会。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 200" role="img" aria-label="策略迭代在策略评估与策略改进之间循环，直到策略不再改变">
+        <rect x="24" y="34" width="168" height="66" rx="6" class="box"/>
+        <text x="52" y="60" class="val-b">策略评估</text>
+        <text x="34" y="84" class="lbl">算准策略的价值</text>
+        <rect x="330" y="34" width="186" height="66" rx="6" class="box-a"/>
+        <text x="360" y="60" class="val-b">策略改进</text>
+        <text x="340" y="84" class="lbl">挑最大的动作值</text>
+        <path d="M192 58 H318" class="arrow-a"/>
+        <path d="M311 53 l9 5 l-9 5" class="arrow-a"/>
+                <path d="M420 104 V150 H106 V104" class="arrow"/>
+        <path d="M101 112 l5 -10 l5 10" class="arrow"/>
+        <text x="188" y="170" class="lbl">新策略再打分，不再变就停</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 14.1</span>
+        左边给当前策略打分，右边按分数换掉吃亏的动作，换完回到左边重新打分；策略不再改变就停。</figcaption>
+    </figure>
+
+    <p>本课后面用一个小网格世界当算例，后面两课也用它。四个状态排成两行两列：s1 左上，s2 右上，s3 左下，s4 右下。四个动作：上、下、左、右。走出格子留在原地，奖励 0；一步转移进入 s4 得奖励 +1，进入后回合结束，所以把 s4 的价值固定成 0。折扣因子（越往后的奖励，算进总分时权重越小）取 0.9。并列最大时按"上、下、左、右"的顺序取靠前的动作。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="2x2 网格世界的布局与奖励规则">
+        <rect x="40" y="46" width="76" height="72" class="box"/>
+        <rect x="116" y="46" width="76" height="72" class="box"/>
+        <rect x="40" y="118" width="76" height="72" class="box"/>
+        <rect x="116" y="118" width="76" height="72" class="box-a"/>
+        <text x="70" y="88" class="val-b">s1</text>
+        <text x="146" y="88" class="val-b">s2</text>
+        <text x="70" y="160" class="val-b">s3</text>
+        <text x="146" y="160" class="val-b">s4</text>
+        <text x="132" y="34" class="lbl">目标</text>
+        <text x="240" y="60" class="lbl">动作：上、下、左、右</text>
+        <text x="240" y="88" class="lbl">进入 s4：奖励 +1，回合结束</text>
+                <text x="240" y="144" class="lbl">撞墙留在原地</text>
+        <text x="240" y="172" class="lbl">折扣因子 γ = 0.9</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 14.2</span>
+        2×2 网格世界：s4 是目标，走进去得 +1 且回合结束；撞墙留在原格，奖励 0。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 策略评估：把 $v_{\pi_k}$ 算准</h2>
+    <p>固定一套策略 $\pi$，它的状态价值记作 $v_\pi$，下标 $\pi$ 表示"之后一直按 $\pi$ 选动作"。$v_\pi(s)$ 就是从 $s$ 出发按 $\pi$ 走完能拿到的回报（把每一步奖励加起来的总分）的平均值。</p>
+    <p>它满足贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）：</p>
+    <div class="eq">
+      <span class="eq-body">$$v_\pi=r_\pi+\gamma P_\pi v_\pi,\qquad v_\pi=(I-\gamma P_\pi)^{-1}r_\pi.$$</span>
+      <span class="eq-num">(14.1)</span>
+    </div>
+    <p>式中 $r_\pi$ 是策略 $\pi$ 下的奖励向量，$P_\pi$ 是状态转移（做完动作之后环境从当前状态跳到下一个状态）的概率矩阵，$\gamma$ 是折扣因子，$I$ 是单位矩阵。这两个矩阵符号的完整写法在 0009 课。第一式说明 $v_\pi$ 是不动点（再迭代一次也不变的那种解），第二式是它的闭式解。</p>
+    <p>状态多的时候用迭代法：反复套 $v\leftarrow r_\pi+\gamma P_\pi v$。由压缩映射（每迭代一次，两个估计之间的差距就缩小一点，所以最终必然稳定）性质，这个过程会收敛（一轮轮算下去，数值不再明显变化，稳定下来了），极限是 $v_\pi$（0011 课）。评估可以算到收敛，也可以只算几步。</p>
+  </section>
+
+  <section>
+    <h2>3. 策略改进：用动作值挑动作</h2>
+    <p>价值算准之后，每个状态动作对都有一个动作值。它的定义是</p>
+    <div class="eq">
+      <span class="eq-body">$$q_{\pi_k}(s,a)=\E[G_t\mid S_t=s,A_t=a].$$</span>
+      <span class="eq-num">(14.2)</span>
+    </div>
+    <p>式中省略了"之后按 $\pi_k$ 走"这条约定。$G_t$ 是从第 $t$ 步起的回报，$\E$ 表示对随机性求平均，$S_t$ 与 $A_t$ 是第 $t$ 步的状态与动作。动作值与状态价值的关系是 $v_{\pi_k}(s)=\sum_a\pi_k(a\mid s)\,q_{\pi_k}(s,a)$，后者是前者的加权平均。</p>
+    <p>策略改进在每个状态挑出让动作值最大的动作：</p>
+    <div class="eq">
+      <span class="eq-body">$$\pi_{k+1}(s)=\argmax_a q_{\pi_k}(s,a),\qquad s\in\mathcal S.$$</span>
+      <span class="eq-num">(14.3)</span>
+    </div>
+    <p>式中 $\argmax$（挑出让后面最大的那个选择）在并列时按约定顺序取靠前的动作。这样在每个状态都挑当前最大的做法叫贪心（在当前估计里挑看起来最好的那个）。这一步不需要模型，这一点在第 15 课会变成无模型算法的起点。</p>
+  </section>
+
+  <section>
+    <h2>4. 策略改进定理</h2>
+    <div class="thm">
+      <span class="label">定理 14.1（策略改进定理）</span>
+      <p>设 $\pi$ 是任意策略，$\pi'$ 在每个状态都取动作值最大的动作，那么</p>
+      <div class="eq">
+        <span class="eq-body">$$v_{\pi'}(s)\ge v_\pi(s),\qquad \forall s\in\mathcal S.$$</span>
+        <span class="eq-num">(14.4)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：先说明"加权平均不超过最大值"，再把不等式沿时间推到底，最后取极限。</p>
+      <p>记 $T_{\pi'}$ 是 $\pi'$ 的贝尔曼算子：</p>
+      <p>$$(T_{\pi'}v)(s)=\E\big[R_{t+1}+\gamma v(S_{t+1})\mid S_t=s,\ A_t\sim\pi'(s)\big].$$</p>
+      <p>第一步。把 $v_\pi(s)$ 按策略展开：</p>
+      <p>$$v_\pi(s)=\sum_a\pi(a\mid s)\,q_\pi(s,a)\le\max_a q_\pi(s,a)=q_\pi(s,\pi'(s))=(T_{\pi'}v_\pi)(s).$$</p>
+      <p>不等号只用权重非负、加起来等于 1 这两件事，与 $\pi$ 是否确定性无关。</p>
+      <p>第二步（单调性）。若 $v\le w$ 逐点成立，把两边的 $v$ 与 $w$ 换成同一个动作的 $r+\gamma\sum p\cdot$ 后仍然 $\le$，所以 $(T_{\pi'}v)(s)\le(T_{\pi'}w)(s)$。</p>
+      <p>$$(T_{\pi'}v)(s)=\sum_a\pi'(a\mid s)\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v(s')\Big]\le(T_{\pi'}w)(s).$$</p>
+      <p>把第一步的不等式反复套上单调性，得到一条逐点不减的链：</p>
+      <p>$$v_\pi\le T_{\pi'}v_\pi\le T_{\pi'}^2v_\pi\le\cdots$$</p>
+      <p>第三步（展开 $k$ 步）。前 $k$ 步拿真实奖励，尾巴留第 $k$ 步的价值估计，之后按 $\pi'$ 走：</p>
+      <p>$$(T_{\pi'}^k v_\pi)(s)=\E\Big[\sum_{t=0}^{k-1}\gamma^tR_{t+1}+\gamma^k v_\pi(S_k)\ \Big|\ S_0=s\Big].$$</p>
+      <p>第四步（取极限）。设奖励绝对值不超过 $R_{\max}$，则 $|v_\pi|\le R_{\max}/(1-\gamma)$。第一项随 $k\to\infty$ 趋于 $v_{\pi'}(s)$，因为尾巴有上界</p>
+      <p>$$\Big|\sum_{t\ge k}\gamma^tR_{t+1}\Big|\le\frac{\gamma^kR_{\max}}{1-\gamma}\ \longrightarrow\ 0.$$</p>
+      <p>第二项也有 $|\gamma^k\E[v_\pi(S_k)]|\le\gamma^kR_{\max}/(1-\gamma)\to0$，取极限得 $v_{\pi'}(s)\ge v_\pi(s)$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="同一个状态下四个动作的动作值，加权平均低于最大值">
+        <line x1="60" y1="170" x2="330" y2="170" class="axis-b"/>
+        <line x1="60" y1="170" x2="60" y2="40" class="axis-b"/>
+        <rect x="82" y="140" width="42" height="30" class="bar"/>
+        <rect x="142" y="80" width="42" height="90" class="bar-hi"/>
+        <rect x="202" y="110" width="42" height="60" class="bar"/>
+        <rect x="262" y="140" width="42" height="30" class="bar"/>
+        <text x="94" y="188" class="lbl">a1</text>
+        <text x="154" y="188" class="lbl">a2</text>
+        <text x="214" y="188" class="lbl">a3</text>
+        <text x="274" y="188" class="lbl">a4</text>
+        <text x="94" y="134" class="val">1</text>
+        <text x="154" y="74" class="val-b">3</text>
+        <text x="214" y="104" class="val">2</text>
+        <text x="274" y="134" class="val">1</text>
+        <line x1="60" y1="80" x2="350" y2="80" class="mark"/>
+        <text x="358" y="76" class="lbl">最大值 3</text>
+        <line x1="60" y1="118" x2="350" y2="118" class="mark"/>
+        <text x="358" y="114" class="lbl">加权平均 1.75</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 14.3</span>
+        四个动作的动作值。策略的价值是它们的加权平均（按均匀权重算是 1.75），
+        不会超过最高的那根柱子（3）。差值就是可改进的空间。</figcaption>
+    </figure>
+
+    
+    <div class="thm">
+      <span class="label">推论 14.2（严格改进）</span>
+      <p>在定理 14.1 的条件下，若存在状态 $s$ 使 $q_\pi(s,\pi'(s))>v_\pi(s)$，那么 $v_{\pi'}(s)>v_\pi(s)$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>此时第一步在 $s$ 处严格：$v_\pi(s)\lt(T_{\pi'}v_\pi)(s)$。第二步的链给出 $(T_{\pi'}v_\pi)(s)\le(T_{\pi'}^k v_\pi)(s)$ 对每个 $k\ge1$ 成立，令 $k\to\infty$ 得 $(T_{\pi'}v_\pi)(s)\le v_{\pi'}(s)$。串起来即 $v_\pi(s)\lt v_{\pi'}(s)$。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 策略迭代算法与收敛性</h2>
+    <div class="def">
+      <span class="label">算法 14.3（策略迭代）</span>
+      <p>输入：任意初始策略 $\pi_0$。第 $k$ 轮：（i）策略评估，解 $v_{\pi_k}=r_{\pi_k}+\gamma P_{\pi_k}v_{\pi_k}$ 或迭代到收敛；（ii）策略改进，对每个 $s$ 取 $\pi_{k+1}(s)=\argmax_a q_{\pi_k}(s,a)$，也就是式 (14.3)。若 $\pi_{k+1}=\pi_k$ 就返回。</p>
+      
+      
+      
+    </div>
+    <div class="thm">
+      <span class="label">定理 14.4（策略迭代有限步收敛）</span>
+      <p>设状态集与动作集有限，$0\le\gamma\lt1$，奖励有界。策略迭代至多 $|\mathcal A|^{|\mathcal S|}$ 轮后停下；停下时 $\pi_k$ 最优，$v_{\pi_k}=v^*$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：每轮改进都不让价值变小；只要还在严格变好，策略就不可能重复；策略总数有限，所以只改进有限次。</p>
+      <p>第一步（价值不减）。由定理 14.1，每轮都有 $v_{\pi_{k+1}}\ge v_{\pi_k}$ 逐点成立，于是 $v_{\pi_0}\le v_{\pi_1}\le\cdots$。</p>
+      <p>$$v_{\pi_0}\le v_{\pi_1}\le v_{\pi_2}\le\cdots$$</p>
+      <p>第二步（一旦不动就已最优）。若某轮 $\pi_{k+1}=\pi_k$，说明 $\pi_k$ 在每个状态都取到了动作值的最大者，代回价值的定义：</p>
+      <p>$$v_{\pi_k}(s)=\max_a q_{\pi_k}(s,a)=\max_a\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v_{\pi_k}(s')\Big].$$</p>
+      <p>这是最优贝尔曼方程，由压缩映射定理解唯一，等于 $v^*$（0011 课），所以 $\pi_k$ 最优。</p>
+      <p>第三步（不停机时每轮都严格变好）。设某轮 $\pi_{k+1}\ne\pi_k$ 但 $v_{\pi_{k+1}}=v_{\pi_k}$，把定理 14.1 证明里的链拿出来：</p>
+      <p>$$v_{\pi_k}(s)\le q_{\pi_k}(s,\pi_{k+1}(s))\le v_{\pi_{k+1}}(s)=v_{\pi_k}(s).$$</p>
+      <p>两头相等迫使 $v_{\pi_k}(s)=\max_a q_{\pi_k}(s,a)$ 对每个 $s$ 成立，回到第二步：$\pi_k$ 已最优，下一轮策略不会再变。所以不停机时每轮都有某状态的价值严格变大。</p>
+      <p>第四步（不重复）。若 $i\lt j$ 而 $\pi_i=\pi_j$，则 $v_{\pi_i}=v_{\pi_j}$，但第三步说明中间每一轮都严格变大一点，矛盾。所以不停机时策略两两不同；它们都由式 (14.3) 给出，是确定性策略（同一个状态永远只选同一个动作），一共只有 $|\mathcal A|^{|\mathcal S|}$ 个。</p>
+      <span class="qed">∎</span>
+    </div>
+    
+  </section>
+
+  <section>
+    <h2>6. 在网格世界上手算一轮</h2>
+    <p>取 $\pi_0$：每个状态都选右。此时 s1 向右到 s2，s2 向右撞墙留在 s2，s3 向右进 s4。代入 $v_\pi(s)=r(s,\pi(s))+\gamma v_\pi(s')$：</p>
+    <p>$$v_{\pi_0}(s_3)=1+0.9\times v_{\pi_0}(s_4)=1,\qquad v_{\pi_0}(s_1)=0+0.9\,v_{\pi_0}(s_2),$$</p>
+    <p>$$v_{\pi_0}(s_2)=0+0.9\,v_{\pi_0}(s_2)\ \Longrightarrow\ v_{\pi_0}(s_2)=0\ \Longrightarrow\ v_{\pi_0}(s_1)=0.$$</p>
+    <p>所以 $v_{\pi_0}=(0,0,1,0)$：s2 处的策略原地打转，永远进不了目标。</p>
+    <p>再改进。用 $q_{\pi_0}(s,a)=r(s,a)+0.9v_{\pi_0}(s')$ 逐格算动作值：</p>
+    <ul>
+      <li>s1：上 0，下 0.9，左 0，右 0。最大的是下。</li>
+      <li>s2：上 0，下 1，左 0，右 0。最大的是下。</li>
+      <li>s3：上 0，下 0.9，左 0.9，右 1。最大的是右。</li>
+    </ul>
+    <p>于是 $\pi_1$ 在 s1、s2、s3 上分别选下、下、右。再评估它：$v_{\pi_1}(s_2)=v_{\pi_1}(s_3)=1$，$v_{\pi_1}(s_1)=0.9$。逐点比较：$0.9>0$，$1>0$，$1=1$，与定理 14.1 和推论 14.2 对得上。</p>
+    <p>第二轮，用 $v_{\pi_1}$ 再算一次动作值：</p>
+    <p>第二轮用 $v_{\pi_1}$ 再算：s1 是 0.81、0.9、0.81、0.9，下与右并列取"下"；s2 最大是下，s3 最大是右。</p>
+    <p>改进结果与 $\pi_1$ 完全相同。策略不再变，算法停下，$\pi_1$ 就是最优策略，$v^*=(0.9,1,1,0)$，满足最优贝尔曼方程。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="一轮策略迭代前后的策略与价值">
+        <text x="40" y="26" class="val-b">第一轮之前</text>
+        <rect x="40" y="40" width="56" height="56" class="box"/><text x="62" y="76" class="val-b">→</text>
+        <rect x="96" y="40" width="56" height="56" class="box"/><text x="118" y="76" class="val-b">→</text>
+        <rect x="40" y="96" width="56" height="56" class="box"/><text x="62" y="132" class="val-b">→</text>
+        <rect x="96" y="96" width="56" height="56" class="box-a"/><text x="118" y="132" class="val-b">0</text>
+        <text x="40" y="176" class="lbl">每格选右，价值 (0, 0, 1, 0)</text>
+        <text x="310" y="26" class="val-b">第一轮之后</text>
+        <rect x="310" y="40" width="56" height="56" class="box"/><text x="332" y="76" class="val-b">↓</text>
+        <rect x="366" y="40" width="56" height="56" class="box"/><text x="388" y="76" class="val-b">↓</text>
+        <rect x="310" y="96" width="56" height="56" class="box"/><text x="332" y="132" class="val-b">→</text>
+        <rect x="366" y="96" width="56" height="56" class="box-a"/><text x="388" y="132" class="val-b">0</text>
+        <text x="310" y="176" class="lbl">下、下、右，价值 (0.9, 1, 1, 0)</text>
+        <path d="M196 96 H282" class="arrow-a"/>
+        <path d="M275 91 l9 5 l-9 5" class="arrow-a"/>
+        <text x="196" y="88" class="lbl">评估 + 改进</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 14.4</span>
+        第一轮前策略每格向右，s2 撞墙打转，价值 (0, 0, 1, 0)。改进后 s1、s2 改选下，价值升到 (0.9, 1, 1, 0)。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>7. 与值迭代的关系：截断策略迭代</h2>
+    <p>值迭代（0013 课）只有一行更新：</p>
+    <p>$$v_{k+1}(s)=\max_a\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v_k(s')\Big].$$</p>
+    <p>把它拆成两个动作看：式中的 $\max$ 就是一次策略改进，而"用 $v_k$ 算右边"只相当于一步策略评估。中间的情形是每轮评估固定有限步再改进，就是截断策略迭代。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="值迭代与策略迭代的流程对比">
+        <text x="16" y="32" class="val-b">值迭代</text>
+        <rect x="110" y="14" width="86" height="30" rx="4" class="box"/><text x="126" y="34" class="lbl">评估 1 步</text>
+        <rect x="216" y="14" width="86" height="30" rx="4" class="box"/><text x="232" y="34" class="lbl">改进 1 次</text>
+        <rect x="322" y="14" width="86" height="30" rx="4" class="box"/><text x="338" y="34" class="lbl">评估 1 步</text>
+        <rect x="428" y="14" width="86" height="30" rx="4" class="box"/><text x="444" y="34" class="lbl">改进 1 次</text>
+        <path d="M196 29 H214" class="arrow"/><path d="M302 29 H320" class="arrow"/><path d="M408 29 H426" class="arrow"/>
+        <text x="16" y="100" class="val-b">策略迭代</text>
+        <rect x="110" y="74" width="180" height="46" rx="4" class="box-a"/>
+        <text x="124" y="94" class="lbl">评估到收敛，把 v 算准</text>
+        <rect x="316" y="74" width="86" height="46" rx="4" class="box"/>
+        <text x="332" y="102" class="lbl">改进 1 次</text>
+        <path d="M290 97 H314" class="arrow"/>
+        <text x="16" y="176" class="val-b">截断策略迭代</text>
+        <rect x="110" y="150" width="120" height="46" rx="4" class="box"/>
+        <text x="124" y="178" class="lbl">评估 J 步</text>
+        <rect x="250" y="150" width="86" height="46" rx="4" class="box"/>
+        <text x="266" y="178" class="lbl">改进 1 次</text>
+        <path d="M230 173 H248" class="arrow"/>
+        <text x="110" y="218" class="lbl">J = 1 是值迭代，J 大时接近策略迭代</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 14.5</span>
+        值迭代每步都改进，策略迭代评估到收敛再改进。截断策略迭代把评估步数 J 当参数，在两者之间连续移动。</figcaption>
+    </figure>
+    <div class="def">
+      <span class="label">算法 14.6（截断策略迭代）</span>
+      <p>取初始价值估计 $v^{(0)}$，初始策略取成 $v^{(0)}$ 的贪心策略。第 $k$ 轮：（i）从 $v^{(k,0)}=v^{(k)}$ 出发，对 $\pi_k$ 迭代 $J_k$ 步，$v^{(k,j+1)}=T_{\pi_k}v^{(k,j)}$，记 $v^{(k+1)}=v^{(k,J_k)}$；（ii）对每个 $s$ 取 $\pi_{k+1}(s)=\argmax_a\big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v^{(k+1)}(s')\big]$。</p>
+      
+      
+    </div>
+    <div class="thm">
+      <span class="label">定理 14.7（两个极端）</span>
+      <p>取 $J_k=1$ 时，它恰好退化成值迭代（0013 课）：</p>
+      <div class="eq">
+        <span class="eq-body">$$v^{(k+1)}=Tv^{(k)}.$$</span>
+        <span class="eq-num">(14.5)</span>
+      </div>
+      <p>式中 $T$ 就是上面值迭代更新里的那个算子。取 $J_k\to\infty$ 时，它恰好就是策略迭代。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>第一步。$J_k=1$ 时 $v^{(k+1)}=T_{\pi_k}v^{(k)}$。按归纳假设 $\pi_k$ 是 $v^{(k)}$ 的贪心策略，于是 $T_{\pi_k}v^{(k)}=Tv^{(k)}$，得 $v^{(k+1)}=Tv^{(k)}$，与式 (14.5) 相同。</p>
+      <p>第二步。$T_{\pi_k}$ 是压缩映射，不动点唯一，等于 $v_{\pi_k}$（0011 课）。所以 $J_k\to\infty$ 时 $v^{(k+1)}\to v_{\pi_k}$，第 $k$ 轮退化成完整评估加改进，就是策略迭代。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 14.8（截断误差的收缩界）</span>
+      <p>对任意策略 $\pi$、任意初始价值估计 $v$ 与任意步数 $J\ge0$，</p>
+      <div class="eq">
+        <span class="eq-body">$$\|T_\pi^Jv-v_\pi\|_\infty\le\gamma^J\|v-v_\pi\|_\infty.$$</span>
+        <span class="eq-num">(14.6)</span>
+      </div>
+      <p>式中的 $\|\cdot\|_\infty$ 是无穷范数，取所有分量绝对值里最大的那个。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>对 $J$ 归纳。$J=0$ 时两边都是 $\|v-v_\pi\|_\infty$。设 $J$ 时成立，用 $T_\pi$ 的压缩性 $\|T_\pi x-T_\pi y\|_\infty\le\gamma\|x-y\|_\infty$ 与 $T_\pi v_\pi=v_\pi$，得</p>
+      <p>$$\|T_\pi^{J+1}v-v_\pi\|_\infty=\|T_\pi(T_\pi^Jv)-T_\pi v_\pi\|_\infty\le\gamma\|T_\pi^Jv-v_\pi\|_\infty\le\gamma^{J+1}\|v-v_\pi\|_\infty.$$</p>
+      <p>再代入归纳假设即得 $\le\gamma^{J+1}\|v-v_\pi\|_\infty$，归纳完成。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>式 (14.6) 把"评估打到多准"变成一个可以算的数：折扣因子取 0.9 时，$J=1$ 给 0.9，$J=10$ 约 0.35，$J=50$ 约 0.005。</p>
+    <div class="thm">
+      <span class="label">命题 14.9（一般 $J_k$ 的收敛性，引用）</span>
+      <p>在状态与动作都有限、$0\le\gamma\lt1$、奖励有界、每轮至少做一步评估（$J_k\ge1$）的设定下，截断策略迭代的价值估计与策略都收敛到最优：$\|v^{(k)}-v^*\|_\infty\to0$，且策略序列最终不再改变。标准证明见 Puterman 与 Shin 1978 年的文章，本书 §4.3 沿用，本课不重证。</p>
+    </div>
+    
+    
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>策略迭代把两个动作交替做：策略评估算准当前策略的价值，策略改进按动作值换掉吃亏的动作。</li>
+      <li>策略改进定理：新策略在每个状态都取动作值最大的动作时，$v_{\pi'}\ge v_\pi$ 逐点成立。</li>
+      <li>策略迭代有限轮内停下，停下时最优，轮数不超过策略总数。</li>
+      <li>把评估步数从 1 调到无穷，得到从值迭代到策略迭代的连续谱，即截断策略迭代；截断误差按 $\gamma^J$ 缩小。</li>
+    </ul>
+    <p>下一课离开有模型的世界：策略评估不再解方程，而是把回合一整局跑完，用回报的平均值估计动作值。这条路线叫蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值），第一站是 MC（Monte Carlo，蒙特卡洛）Basic。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 策略迭代里的"策略评估"这一步在做什么？</p>
+      <ol class="mcq-options">
+        <li>按当前策略算出它的价值，等于给这套策略打分</li>
+        <li>按动作值把当前策略里吃亏的动作换掉</li>
+        <li>直接算出最优价值，与当前策略无关</li>
+        <li>统计每个状态在回合里被访问了多少次</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：策略评估的输入是一套给定的策略，输出是它的价值 $v_\pi$，也就是式 (14.1) 的解。</p>
+        <p>B 说的是策略改进。C 把评估与"求最优"混在一起，评估只针对给定的那一套策略。D 是数据统计，与评估无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 定理 14.1 对"新策略"的要求是什么？</p>
+      <ol class="mcq-options">
+        <li>新策略只要在存在更好动作的状态改一改就行</li>
+        <li>新策略的动作值必须与最优动作值完全一致</li>
+        <li>新策略要在每个状态都取当前动作值最大的动作</li>
+        <li>新策略必须是随机的，否则无法持续探索</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理的条件是 $\pi'(s)\in\argmax_a q_\pi(s,a)$ 对每个 $s$ 成立，也就是式 (14.3) 的逐状态贪心。</p>
+        <p>A 只改一部分状态，定理的证明推不到底。B 把 $q_\pi$ 与最优动作值混为一谈，改进只跟当前策略的动作值有关。D 与本定理无关，定理对每个策略都允许。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 证明里 $v_\pi(s)=\sum_a\pi(a\mid s)q_\pi(s,a)\le\max_a q_\pi(s,a)$ 这一步用到了什么？</p>
+      <ol class="mcq-options">
+        <li>用到了 $T_{\pi'}$ 是压缩映射这个性质</li>
+        <li>用到了权重 $\pi(a\mid s)$ 非负且加起来等于 1</li>
+        <li>用到了每一步的奖励都非负这个事实</li>
+        <li>用到了状态数与动作数都有限这个条件</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：加权平均不超过最大值，只需要权重非负、权重之和为 1，这两个条件对任何策略都成立。</p>
+        <p>A 是第四步取极限时用的。C 提到的"奖励非负"不是证明需要的条件，奖励可以取负值。D 的有限性用在收敛性证明里。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 把 $(T_{\pi'}^k v_\pi)(s)$ 展开，得到的结果是什么？</p>
+      <ol class="mcq-options">
+        <li>前 $k$ 步奖励的折扣和，再加上 $v_\pi(s)$ 本身</li>
+        <li>$k$ 步奖励的折扣和，不再含任何价值估计</li>
+        <li>前 $k$ 步奖励的折扣和，再加上 $v_{\pi'}(S_k)$</li>
+        <li>前 $k$ 步奖励的折扣和，再加上 $\gamma^k v_\pi(S_k)$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：展开 $k$ 次之后，尾巴上留下的是第 $k$ 步的价值估计 $v_\pi(S_k)$，还要乘上折扣 $\gamma^k$。</p>
+        <p>A 漏掉了折扣因子。B 丢掉了尾巴，那样就无法把链推到底。C 把尾巴换成了未知的 $v_{\pi'}$，那本身就是待证明的目标。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 收敛性证明里"策略总数有限"这一步的作用是什么？</p>
+      <ol class="mcq-options">
+        <li>保证不可能一直严格变好下去，所以有限轮就停</li>
+        <li>保证每一轮的价值一定严格变大</li>
+        <li>保证状态价值函数一定存在上界 $v^*$</li>
+        <li>保证动作值可以用矩阵运算一次算出来</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每轮价值不减，严格变好时策略不会重复；策略只有有限多个，所以改进次数有限。</p>
+        <p>B 是推论 14.2 给的结论，与有限性无关。C 由上界 $R_{\max}/(1-\gamma)$ 保证，也不需要有限性以外的东西。D 说的是解线性方程组，属于策略评估的实现方式。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">6. 两个动作的动作值并列最大时，定理 14.1 的结论会怎样？</p>
+      <ol class="mcq-options">
+        <li>定理不再成立，必须先把并列打破才能改进</li>
+        <li>只有取动作编号最小的那个动作，价值才不会下降</li>
+        <li>定理仍然成立，任取一个最大动作都满足条件</li>
+        <li>并列时新策略的价值一定严格大于旧策略的价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理的条件是"取到最大"，并列时任何一个最大动作都在 $\argmax$ 里面，所以结论照旧，式 (14.4) 的不等号仍然成立。</p>
+        <p>A 与 B 把"取哪一个最优动作"和"定理是否成立"混在一起，两者的答案不同但都不影响定理。D 说反了：旧策略本来就落在最大点上时，价值可以一点都不变。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">7. 如果 $\pi$ 是随机策略（同一个状态可能按概率选不同动作），定理 14.1 还成立吗？</p>
+      <ol class="mcq-options">
+        <li>不成立，定理只对确定性策略成立</li>
+        <li>成立，证明的第一步对随机策略同样是加权平均</li>
+        <li>不成立，除非所有动作值都相等</li>
+        <li>成立，但必须把折扣因子取成 1</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_\pi(s)=\sum_a\pi(a\mid s)q_\pi(s,a)\le\max_a q_\pi(s,a)$ 对任何策略都成立，与策略是否确定无关；后面的单调性与取极限也只用到折扣因子小于 1。</p>
+        <p>A 与 C 把"策略必须确定"当成了前提。D 恰好相反：折扣因子取 1 时价值可能发散，证明里的尾巴就压不住了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">8. 在本课网格世界里，$\pi_0$ 在 s1、s2、s3 上都选"右"。$v_{\pi_0}(s_3)$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>0，因为 s3 向右会撞到右边的墙</li>
+        <li>0.9，因为进入目标的奖励要打一次折</li>
+        <li>1.9，因为奖励 1 加上下一步的 0.9</li>
+        <li>1，因为 $v_{\pi_0}(s_4)$ 固定为 0，这一步奖励是 1</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_{\pi_0}(s_3)=1+0.9\times0=1$，因为 s3 选右时这一步的奖励是 1。</p>
+        <p>A 记错了墙的位置：s3 向右正好走进 s4。B 把折扣用在了即时奖励上，折扣只作用于下一步的价值。C 把奖励又折了一次。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 接着上题换成 $\pi_1$，也就是 s1 选下、s2 选下、s3 选右，$v_{\pi_1}(s_1)$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>0，因为下一步的 s3 在 $\pi_1$ 下的价值是 1</li>
+        <li>0.81，因为要走两步才进目标，两步都打了折</li>
+        <li>0.9，因为路径是 s1 到 s3 再到 s4，只有最后一步给奖励</li>
+        <li>1，因为 s1 与 s3 处在同一行，价值相同</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_{\pi_1}(s_1)=0+0.9\times1=0.9$，因为 s1 选下这一步没有奖励，只有进入 s4 才拿 1。</p>
+        <p>A 漏掉了折扣。B 以为走进 s3 也会给奖励，s3 不是目标。D 把两个状态的数值混在一起，s3 的价值是 1，s1 要打一次折。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 为什么截断策略迭代要把"评估做多少步"单独拿出来当一个参数？</p>
+      <ol class="mcq-options">
+        <li>因为评估步数决定了每轮算力花多少与估计准多少</li>
+        <li>因为只有 $J_k=1$ 时价值估计才收敛到最优</li>
+        <li>因为策略迭代不允许用迭代法做策略评估</li>
+        <li>因为值迭代必须先算出一个完整策略才能更新价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$J$ 小就省算力、估计粗，$J$ 大就费算力、估计准，式 (14.6) 把这个关系写成了 $\gamma^J$ 的收缩。</p>
+        <p>B 说反了：$J$ 越大估计越准，$J=1$ 只是最省的那个极端。C 与事实不符，策略评估本来就可以用迭代法。D 把值迭代与策略迭代的关系说反了。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025, 第 4 章第 4.2–4.3 节。</p>
+      <p>策略改进定理的经典表述见 R. S. Sutton 与 A. G. Barto, <em>Reinforcement Learning: An Introduction</em>, 第 2 版第 4.3 节。截断策略迭代对应 M. L. Puterman 与 M. C. Shin, "Modified Policy Iteration Algorithms for Discounted Markov Decision Problems", <em>Management Science</em>, 1978。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问："把网格世界第二轮的四个动作值再算一遍"，或者 "为什么策略改进定理的证明里要先证单调性？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

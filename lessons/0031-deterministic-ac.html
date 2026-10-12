@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0031 · 确定性 Actor-Critic 与 DPG 定理 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0031" data-slug="deterministic-ac" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法 · 全书最后一课</p>
+    <h1>确定性 Actor-Critic 与 DPG 定理</h1>
+    <p class="lede">前面所有策略梯度（算出参数往哪调能让总分更高）算法都在对动作求期望，这在高维连续控制里代价很高。
+      这一课把策略（看到什么状态就选什么动作的规则）改成确定性策略（每个状态只输出一个动作）$a=\mu(s,\theta)$，期望就只剩对状态的一层。
+      由此得到的确定性策略梯度定理（DPG，deterministic policy gradient）是 DDPG（deep deterministic policy gradient，深度确定性策略梯度）一类算法的理论基础。
+      代价也要说清楚：确定性策略自己不探索，必须从外面补噪声。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>说出确定性策略相对随机策略省下了什么计算，又失去了什么</li>
+        <li>写出 DPG 定理，并指出它与随机策略梯度定理的差别</li>
+        <li>说明定理右端两项各自的作用</li>
+        <li>复述 DPG 定理证明的主要思路</li>
+        <li>说清为什么确定性 Actor-Critic 必须外接探索噪声</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 为什么要用确定性策略</h2>
+    <p>回顾随机策略（同一个状态按概率选不同动作）的梯度。无论用哪一套度量，梯度最后都写成</p>
+    <div class="eq">
+      <span class="eq-body">$$\nabla J(\theta)=\E\Big[\nabla\log\pi(A|S,\theta)\,q_\pi(S,A)\Big],$$</span>
+      <span class="eq-num">(31.1)</span>
+    </div>
+    <p>式 (31.1) 里的期望要对<em>动作</em>取。这意味着每算一次梯度，都要按 $\pi$ 采一批动作。
+      在连续控制里（机械臂的 7 个关节力矩、无人机的 12 维推力），
+      动作空间是高维连续的，采样估计这一层期望就成了一项可观的开销。</p>
+    <div class="def">
+      <span class="label">定义 1.1（确定性策略）</span>
+      <p><em>确定性策略</em>（每个状态只输出一个确定的动作，而不是一个分布）记作
+        $$a=\mu(s,\theta),\qquad \mu:\mathcal{S}\to\mathcal{A}.$$
+        它的特别之处在于：给定 $s$，动作是唯一确定的，没有"按概率抽"这一步。
+        于是价值函数（给每个状态打一个"值多少分"的分数的函数）里对动作的期望也消失了：
+        $v_\mu(s)=q_\mu\big(s,\mu(s,\theta)\big)$。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.2（省了什么，又失去了什么）</span>
+      <p>省下的是"对动作求期望"这一层采样，梯度估计的方差也随之小很多。
+        失去的是<em>内建的探索</em>：随机策略靠采样天然会试到不同动作，
+        而确定性策略永远选同一个，不试新动作就没有新数据。
+        所以后面必须从外部加噪声，这一点在算法一节会讲。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 225" role="img" aria-label="随机策略要在动作分布上求期望，确定性策略只取一个点">
+        <text x="26" y="20" class="lbl">随机策略：梯度要对整条分布求期望</text>
+        <line x1="50" y1="126" x2="250" y2="126" class="axis-b"/>
+        <path d="M70 124 C110 124 120 44 150 44 C180 44 190 124 230 124" class="curve"/>
+        <path d="M150 44 L150 126" class="mark"/>
+        <text x="132" y="146" class="lbl">μ(s,θ)</text>
+        <text x="60" y="170" class="lbl">要把整条曲线上的动作都算进平均</text>
+        <text x="60" y="192" class="lbl">每个动作都要算一次 q 值 → 代价高</text>
+        <line x1="272" y1="30" x2="272" y2="200" class="grid"/>
+        <text x="292" y="20" class="lbl">确定性策略：只算一个点</text>
+        <line x1="306" y1="126" x2="506" y2="126" class="axis-b"/>
+        <circle cx="406" cy="126" r="6" class="dot-a"/>
+        <text x="386" y="146" class="lbl">μ(s,θ)</text>
+        <text x="316" y="170" class="lbl">只算这一个动作的 q 值</text>
+        <text x="316" y="192" class="lbl">维度再高也只是一次前向计算</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 31.1</span>
+        随机策略的梯度要对动作分布求期望，动作维度越高、估计这一层期望的开销越大；
+        确定性策略只输出一个动作，只需算这一个动作的价值。
+        这是它在高维连续控制里被偏爱的原因。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 确定性策略梯度定理</h2>
+    <div class="thm">
+      <span class="label">定理 2.1（DPG：确定性策略梯度定理）</span>
+      <p>设策略为 $a=\mu(s,\theta)$，目标为 $J(\theta)=
+        \E_{s\sim d_\mu}\big[q_\mu(s,\mu(s,\theta))\big]$，其中 $d_\mu$ 是确定性策略下的状态访问分布。则
+        $$\nabla_\theta J(\theta)=\E_{s\sim d_\mu}\Big[
+        \nabla_\theta\mu(s,\theta)^\top\,\nabla_a q_\mu(s,a)\big|_{a=\mu(s,\theta)}\Big].$$</p>
+      <p>右端是两项的乘积：$\nabla_\theta\mu(s,\theta)$ 是<em>动作对参数的敏感度</em>，
+        $\nabla_a q_\mu(s,a)|_{a=\mu(s,\theta)}$ 是<em>价值对动作的敏感度</em>。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.2（怎么读这两个因子）</span>
+      <p>把它想成一条传递链：$q$ 告诉我们要往哪个动作方向改，
+        $\nabla_\theta\mu$ 告诉我们参数往哪调能让动作往那个方向动。
+        两者相乘，就是"参数该怎么调"。
+        注意定理里<em>没有</em> $\log\pi$，也没有对动作的期望，这是它与式 (31.1) 最直观的差别。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 215" role="img" aria-label="DPG 定理把价值对动作的敏感度经策略传回参数">
+        <rect x="30" y="66" width="130" height="52" rx="4" class="box-a"/>
+        <text x="56" y="90" class="val">参数 θ</text>
+        <text x="44" y="108" class="lbl">我们要更新的东西</text>
+        <path d="M166 92 H236" class="arrow-a"/>
+        <path d="M229 87 l9 5 l-9 5" class="arrow-a"/>
+        <text x="172" y="82" class="lbl">∇_θ μ</text>
+        <rect x="240" y="66" width="130" height="52" rx="4" class="box"/>
+        <text x="266" y="90" class="val">动作 a</text>
+        <text x="252" y="108" class="lbl">策略网络的输出</text>
+        <path d="M376 92 H446" class="arrow"/>
+        <path d="M439 87 l9 5 l-9 5" class="arrow"/>
+        <text x="382" y="82" class="lbl">∇_a q</text>
+        <rect x="450" y="66" width="72" height="52" rx="4" class="box"/>
+        <text x="466" y="96" class="val">价值 q</text>
+        <text x="30" y="156" class="lbl">两段敏感度相乘，就是"参数往哪调能让价值变大"：</text>
+        <text x="30" y="186" class="val-b">∇J = E[ ∇_θ μ · ∇_a q ]　（对状态取平均）</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 31.2</span>
+        DPG 定理的右端是一条链式传递：先看价值对动作有多敏感，
+        再看动作对参数有多敏感，两者相乘就是参数该往哪调。
+        这本质上就是链式法则在"策略在网络里"这一结构上的展开。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 与随机策略梯度定理的对比</h2>
+    <table class="cmp">
+      <thead>
+        <tr><th></th><th>随机策略梯度（第 0027 课）</th><th>确定性策略梯度（本课）</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>策略形式</td><td>$\pi(a|s,\theta)$，输出分布</td><td>$\mu(s,\theta)$，输出一个动作</td></tr>
+        <tr><td>梯度里的求导项</td><td>$\nabla_\theta\log\pi(a|s,\theta)$</td><td>$\nabla_\theta\mu(s,\theta)$</td></tr>
+        <tr><td>权重</td><td>$q_\pi(s,a)$</td><td>$\nabla_a q_\mu(s,a)$</td></tr>
+        <tr><td>要不要对动作取期望</td><td>要，决定了采样开销</td><td>不要，只对状态取期望</td></tr>
+        <tr><td>探索</td><td>策略自带</td><td>必须外部加噪声</td></tr>
+      </tbody>
+    </table>
+    <div class="rem">
+      <span class="label">注记 3.1（更深一层的差别）</span>
+      <p>权重从"价值本身"换成"价值的梯度"，这不是随手改的。
+        随机策略里，权重要表达"这个动作比平均好多少"，所以用 $q$；
+        确定性策略里没有"平均"可言，要让价值变大只有一个办法：
+        把动作朝着 $q$ 上升的方向挪，于是出现 $\nabla_a q$。
+        另外注意确定性策略梯度的期望是对状态取的，所以它比随机版本<em>少一层采样</em>，
+        这也是它方差更小的来源。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. DPG 定理的证明思路</h2>
+    <p>下面给出证明的骨架。完整推导见原书 10.4.1 节。</p>
+    <div class="proof">
+      <span class="label">证明（思路：从随机策略出发，让方差趋于零）</span>
+      <p><em>第一步，把确定性策略写成随机策略的极限。</em>
+        取一族随机策略 $\pi_\sigma(a|s,\theta)=\mathcal{N}\big(\mu(s,\theta),\sigma^2\big)$，
+        即均值是确定性策略、标准差是 $\sigma$ 的高斯策略。
+        当 $\sigma\to0$ 时这族策略趋于 $\mu$。</p>
+      <p><em>第二步，对高斯策略用随机策略梯度定理。</em>
+        高斯密度的对数梯度有一个干净的形式：
+        $\nabla_\theta\log\pi_\sigma(a|s,\theta)
+        =\frac{1}{\sigma^2}\big(a-\mu(s,\theta)\big)^\top\nabla_\theta\mu(s,\theta)$。
+        代入式 (31.1) 得到
+        $$\nabla J_\sigma(\theta)=\E\Big[\tfrac{1}{\sigma^2}(A-\mu(S,\theta))^\top\nabla_\theta\mu(S,\theta)\,q_\pi(S,A)\Big].$$</p>
+      <p><em>第三步，令 $\sigma\to0$。</em>
+        记 $A=\mu(S,\theta)+\sigma\xi$（$\xi$ 是标准正态），则 $\frac{1}{\sigma}(A-\mu)=\xi$，
+        而 $q_\pi$ 在 $A$ 处作一阶展开：
+        $$q_\pi(S,A)\approx q_\mu(S,\mu)+\sigma\,\xi^\top\nabla_a q_\mu(S,a)\big|_{a=\mu}+\cdots$$
+        代回并利用 $\E[\xi]=0$、$\E[\xi\xi^\top]=I$，
+        $\sigma\to0$ 时含 $\sigma$ 的项消失，剩下
+        $$\nabla J_\mu(\theta)=\E_{s\sim d_\mu}\Big[\nabla_\theta\mu(s,\theta)^\top
+        \nabla_a q_\mu(s,a)\big|_{a=\mu(s,\theta)}\Big].$$</p>
+      <p>最后一步说明状态分布：$\sigma\to0$ 时 $d_{\pi_\sigma}\to d_\mu$，
+        即随机策略下的状态访问分布收敛（一轮轮算下去，数值稳定到不再变化）到确定性策略下的那一个，
+        因此外层期望可以从 $d_{\pi_\sigma}$ 换成 $d_\mu$。
+        这一步的严格处理（以及可微性交换的合法条件）属于测度论范围，本课按引用处理。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="让高斯策略的标准差趋于零，随机策略梯度收敛到确定性策略梯度">
+        <text x="26" y="20" class="lbl">σ 大：分布铺得开</text>
+        <line x1="50" y1="110" x2="250" y2="110" class="axis-b"/>
+        <path d="M70 108 C120 108 130 44 150 44 C170 44 180 108 230 108" class="curve2"/>
+        <text x="60" y="132" class="lbl">要对很宽的范围求平均</text>
+        <text x="200" y="60" class="val">→</text>
+        <text x="256" y="20" class="lbl">σ 小：分布收窄</text>
+        <line x1="290" y1="110" x2="490" y2="110" class="axis-b"/>
+        <path d="M360 108 C392 108 396 40 414 40 C432 40 436 108 468 108" class="curve"/>
+        <text x="300" y="132" class="lbl">逐渐逼近一个点</text>
+        <text x="26" y="164" class="lbl">σ → 0 时，随机策略梯度 → 确定性策略梯度：</text>
+        <text x="26" y="192" class="val-b">E[ ∇log π · q ]　→　E[ ∇_θ μ · ∇_a q ]</text>
+        <text x="26" y="216" class="lbl">左边的动作期望在这一极限下塌缩成一个点，于是那一层期望消失了</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 31.3</span>
+        证明的核心思路是把确定性策略看成"方差趋于零的随机策略"。
+        随着 $\sigma\to0$，随机策略梯度里对动作求期望的那一层塌缩成单点取值，
+        于是公式里只剩下对状态的一层期望，$\log\pi$ 也换成了 $\mu$ 的梯度。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 4.1（这个证明告诉我们的方法）</span>
+      <p>"把新对象写成旧对象的极限"是推导里很常用的一招。它的好处是不必从零建立理论，
+        而是直接复用已经证过的结论，再取极限。
+        代价是极限过程需要额外的合法性检查（交换极限与期望、状态分布的收敛），
+        这些正是本课标为引用的部分。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 算法：确定性 Actor-Critic</h2>
+    <div class="def">
+      <span class="label">算法 5.1（确定性 Actor-Critic）</span>
+      <p>维护两个网络：actor（演员，负责做决定的那一方）即确定性策略 $a=\mu(s,\theta)$，以及 critic（评论家，负责打分的那一方）即动作值 $q(s,a,w)$。</p>
+      <p>① <em>与环境交互时加噪声</em>：实际执行的动作是
+        $$a_t=\mu(s_t,\theta)+\eta_t,$$
+        其中 $\eta_t$ 是探索噪声（常见做法是高斯噪声或时间相关的 OU 噪声）。
+        这一步是必须的，否则永远采不到新动作。</p>
+      <p>② <em>critic 更新</em>：用时序差分（一步的即时奖励加上下一步的估计，不必等整局结束）学 $q$，目标为
+        $y_t=r_{t+1}+\gamma\,q\big(s_{t+1},\mu(s_{t+1},\theta),w\big)$。</p>
+      <p>③ <em>actor 更新</em>：沿价值上升方向调参数，
+        $$\theta\leftarrow\theta+\alpha_\theta\,
+        \nabla_\theta\mu(s_t,\theta)^\top\nabla_a q(s_t,a,w)\big|_{a=\mu(s_t,\theta)}.$$</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.2（把探索放在外面带来的新问题）</span>
+      <p>噪声尺度的调参变得很敏感：太小则探索不足，学不到更好的动作；
+        太大则采到的动作与策略想执行的动作差太远，critic 的估计会对不上，
+        actor 反而被带偏。随机策略里这个权衡由策略自己的标准差承担，
+        而确定性策略把它变成了一个外部量：超参（训练前要你自己设定的量）。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 215" role="img" aria-label="确定性策略必须外接探索噪声，否则采不到新数据">
+        <text x="26" y="20" class="lbl">不加噪声：动作永远在同一个点上，环境回不来新信息</text>
+        <line x1="50" y1="86" x2="250" y2="86" class="axis-b"/>
+        <circle cx="150" cy="86" r="6" class="dot"/>
+        <text x="126" y="108" class="lbl">μ(s,θ) 永远落在这里</text>
+        <text x="60" y="132" class="lbl">学不到"旁边的动作会不会更好"</text>
+        <line x1="272" y1="30" x2="272" y2="150" class="grid"/>
+        <text x="292" y="20" class="lbl">加噪声：动作在附近铺开</text>
+        <line x1="306" y1="86" x2="506" y2="86" class="axis-b"/>
+        <circle cx="406" cy="86" r="6" class="dot-a"/>
+        <circle cx="376" cy="86" r="4" class="dot"/>
+        <circle cx="430" cy="86" r="4" class="dot"/>
+        <circle cx="392" cy="86" r="4" class="dot"/>
+        <circle cx="420" cy="86" r="4" class="dot"/>
+        <text x="316" y="108" class="lbl">每次执行的动作围绕 μ 抖动</text>
+        <text x="316" y="132" class="lbl">于是能比较邻近动作的好坏</text>
+        <text x="26" y="180" class="lbl">噪声尺度是个外部超参数：太小探索不足，太大则采到的动作离策略太远</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 31.4</span>
+        确定性策略自己不探索，必须从外部注入噪声。
+        左边没有噪声时，动作永远落在同一点，critic 也就永远学不到"旁边是否更好"；
+        右边加上噪声后，邻近动作被反复尝试，actor 才有改进的依据。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 5.3（这一课在全书里的位置）</span>
+      <p>到这里，本书的算法主线走完了：从价值迭代（反复用同一个更新式把价值表算到不动）出发，经由蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）与随机近似，
+        到时序差分、函数逼近（用函数代替表格存价值）、策略梯度，最后到 Actor-Critic（一边出招、一边打分）的三种形态：
+        QAC（Q Actor-Critic，最基础的那种）与 A2C（Advantage Actor-Critic，用"比平均好多少"当权重）、
+        off-policy（可以拿别人或自己以前的数据来学）与确定性策略。
+        DPG 定理就是现代连续控制算法（DDPG 及其后继）的理论出处。
+        想继续往工程实现走，可以读进阶篇里的相应课程。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>确定性策略 $a=\mu(s,\theta)$ 省掉了对动作求期望的那一层采样（定义 1.1）。</li>
+      <li>DPG 定理：$\nabla_\theta J=\E[\nabla_\theta\mu^\top\nabla_a q]$，只对状态取期望（定理 2.1）。</li>
+      <li>它与随机策略梯度定理的差别在于求导项与权重，也在于少了一层动作期望（第 3 节对照表）。</li>
+      <li>证明思路是把确定性策略看成方差趋于零的高斯策略，再取极限（第 4 节）。</li>
+      <li>确定性策略不探索，训练时必须外接噪声，噪声尺度成了一个敏感的超参数（算法 5.1）。</li>
+    </ul>
+    <p>全书的主线到此结束。回头看，所有算法都围绕同一件事：
+      把"价值满足某个方程"翻译成"用样本去逼近那个方程的解"。
+      价值迭代用完整模型逼近，蒙特卡洛用整局的回报（从某一步往后拿到的奖励加起来）逼近，
+      时序差分用单步样本逼近，函数逼近把表格换成网络，
+      策略梯度则干脆绕开价值、直接对策略求导。理解了这条主线，具体算法的差异就都成了细节。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 确定性策略相比随机策略，最主要省下的是什么？</p>
+      <ol class="mcq-options">
+        <li>省下了价值网络的训练，因为不再需要 critic</li>
+        <li>省下了对动作求期望的那一层采样，梯度方差也更小</li>
+        <li>省下了与环境的交互，可以用别人跑好的数据训练</li>
+        <li>省下了"给未来奖励打折"的那个系数，不再需要折扣</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：随机策略梯度的期望要对动作取，高维连续动作下采样开销大；
+          确定性策略只输出一个动作，只剩对状态的一层期望。</p>
+        <p>A 错在确定性 Actor-Critic 仍然需要 critic。
+          C 错在它照样要交互（还要额外加噪声）。
+          D 错在"给未来奖励打折"这件事与策略是随机还是确定无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. DPG 定理右端的两项分别是什么？</p>
+      <ol class="mcq-options">
+        <li>策略的概率与价值本身，与随机策略梯度一样</li>
+        <li>与第 0029 课 QAC 相同的那两项</li>
+        <li>两套分布的概率之比，以及概率取对数后的梯度</li>
+        <li>动作对参数的敏感度，与价值对动作的敏感度</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\nabla_\theta\mu(s,\theta)$ 说明参数怎么影响动作，
+          $\nabla_a q_\mu(s,a)$ 说明动作怎么影响价值，两者相乘即参数的更新方向。</p>
+        <p>A 错在 DPG 里没有 $\log\pi$。B 描述的是 A2C。
+          C 描述的是 off-policy 策略梯度（第 0030 课）。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. DPG 定理里为什么权重是 $\nabla_a q$ 而不是 $q$ 本身？</p>
+      <ol class="mcq-options">
+        <li>确定性策略没有"平均动作"这个概念，要让价值变大只能把动作往 $q$ 上升的方向挪</li>
+        <li>因为 $\nabla_a q$ 的数值总是比 $q$ 小，能让更新更稳定</li>
+        <li>因为 $q$ 无法计算，只能算它的梯度</li>
+        <li>因为 $\nabla_a q$ 的期望恰好等于 $q$ 的期望</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：随机策略里权重要表达"这个动作比平均好多少"，所以用 $q$；
+          确定性策略里没有分布可谈平均，改进的方式就是沿 $q$ 的上升方向调整动作。</p>
+        <p>B 错在数值大小不是理由。C 错在 $q$ 和它的梯度都能算。
+          D 错在两者期望一般不相等。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. DPG 定理证明的第一步做了什么？</p>
+      <ol class="mcq-options">
+        <li>把确定性策略直接对参数求导，得到链式法则的展开</li>
+        <li>对价值用"最优时Bellman方程"，消掉动作维度</li>
+        <li>把确定性策略写成一族方差趋于零的高斯策略</li>
+        <li>把策略梯度定理中的期望换成"用另一套分布的数据来估计"的形式</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：这样就能对随机策略用已经证过的策略梯度定理，
+          再让对方差趋于零，从而得到确定性情形。这是"把新对象写成旧对象的极限"这一招。</p>
+        <p>A 是最终要得到的结果，不是证明的起点。
+          B 走的是价值方法的路子，与策略梯度不同。
+          D 是第 0030 课处理 off-policy 的手段。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. 在证明的第三步里，为什么 $\E[\xi]=0$ 与 $\E[\xi\xi^\top]=I$ 这两条性质很关键？</p>
+      <ol class="mcq-options">
+        <li>它们保证了高斯分布的密度在实数轴上处处为正</li>
+        <li>它们说明了策略参数 $\theta$ 一定存在而且是唯一的</li>
+        <li>它们让价值在动作上是凸的，于是有唯一的最大值</li>
+        <li>它们让带 $\xi$ 的线性项消失、二次项留下，极限后只剩 $\nabla_a q$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\E[\xi]=0$ 消掉了零阶与一阶的交错项，
+          $\E[\xi\xi^\top]=I$ 把噪声的二次项收成单位矩阵，
+          于是 $\sigma\to0$ 后恰好剩下 $\nabla_\theta\mu^\top\nabla_a q$ 这个形式。</p>
+        <p>A 与这两条矩性质无关。B 错在定理不涉及参数存在性。
+          C 错在 DPG 定理并不要求 $q$ 对动作是凸的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 确定性策略最大的代价是什么？</p>
+      <ol class="mcq-options">
+        <li>梯度无法计算，只能靠有限差分近似</li>
+        <li>策略自己不探索，必须从外部注入噪声，噪声尺度又很难调</li>
+        <li>只能用于离散动作空间，无法处理连续控制</li>
+        <li>必须知道环境模型才能算 $\nabla_a q$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：同一个状态永远输出同一个动作，不试新动作就没有新数据。
+          加噪声能解决探索，但把"探索多少"变成了一个外部超参数，调参更敏感。</p>
+        <p>A 错在 DPG 定理给出了可计算的梯度。
+          C 说反了，连续控制正是它的主场。
+          D 错在 $\nabla_a q$ 由 critic 网络反向传播得到，不需要模型。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">7. 在算法 5.1 里，critic 的更新目标 $y_t$ 用的是哪个动作？</p>
+      <ol class="mcq-options">
+        <li>带噪声实际执行的那个动作 $a_t$，也就是真正发生的</li>
+        <li>从策略分布中重新采样得到的一个动作，每次都不同</li>
+        <li>由当前确定性策略在下一状态输出的 $\mu(s_{t+1},\theta)$</li>
+        <li>在下一状态使 $q$ 最大的动作，即 $\arg\max_a q$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：确定性 Actor-Critic 的目标里用的是目标策略自己的动作，
+          即 $q(s_{t+1},\mu(s_{t+1},\theta),w)$。这也是它属于 on-policy 一类的原因。</p>
+        <p>A 错在噪声只用于与环境交互，不进入目标。
+          B 错在确定性策略没有分布可采样。
+          D 是 Q-learning 风格的做法，与策略梯度路线不同。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 与式 (31.1) 相比，DPG 定理的期望只对状态取。这一差别带来什么后果？</p>
+      <ol class="mcq-options">
+        <li>梯度估计的方差更小，但也就失去了策略自带的探索</li>
+        <li>梯度不再是无偏的，因此收敛性没有保证</li>
+        <li>目标函数变成了平均奖励，不再是被打折的累积回报</li>
+        <li>定理只在状态取值离散的情形下成立</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：少了一层对动作的采样，估计自然更稳；
+          但同时策略永远输出同一个动作，探索必须靠外部噪声补回来。</p>
+        <p>B 错在 DPG 定理本身仍是等式，无偏性与这一层期望无关。
+          C 错在度量的选择是另一件事，与策略是否随机无关。
+          D 错在定理对连续状态同样成立（要求可微）。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 证明最后一步要把外层期望的状态分布从 $d_{\pi_\sigma}$ 换成 $d_\mu$，这一步依赖什么？</p>
+      <ol class="mcq-options">
+        <li>价值函数对动作可微，从而可以作一阶泰勒展开</li>
+        <li>噪声 $\xi$ 服从标准正态，因此各阶矩都已知</li>
+        <li>策略参数空间是有限维的，因此极限一定存在</li>
+        <li>当 $\sigma\to0$ 时随机策略下的状态访问分布收敛到确定性策略下的那个分布</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：外层期望是对状态取的，要把它从随机策略的分布换成确定性策略的分布，
+          必须先有"这两个分布确实趋于一致"这一结论。</p>
+        <p>A 与 B 是前两步用到的性质，不是这一步的依据。
+          C 错在有限维参数空间并不保证分布收敛。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. 把本书的算法主线连起来看，它们的共同点是什么？</p>
+      <ol class="mcq-options">
+        <li>都要求环境模型已知，只是求解的数值方法不同</li>
+        <li>都在把"价值满足某个方程"翻译成"用样本去逼近那个方程的解"</li>
+        <li>都从同一个初始策略出发，因此收敛路径完全相同</li>
+        <li>都保证收敛到全局最优，区别只在收敛速度</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：价值迭代用完整模型逼近，蒙特卡洛用整局回报逼近，
+          时序差分用单步样本逼近，策略梯度则绕开价值直接对策略求导。
+          手段不同，目标都是把方程的解找出来。</p>
+        <p>A 错在无模型方法（蒙特卡洛、时序差分）恰恰不需要模型。
+          C 错在初始策略与路径都可以不同。
+          D 错在只有动态规划那类方法在状态动作都有限的问题里有全局最优保证，
+          策略梯度一般只到局部最优。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 10 章 10.4 节（含确定性策略梯度定理 10.4.1 与算法描述 10.4.2）。</p>
+      <p>DPG 定理的原始文献是 D. Silver 等,
+        <em>Deterministic Policy Gradient Algorithms</em>, ICML 2014。
+        想接着看工程实现（另存一份"稍旧"的网络专门用来算目标、把旧经历存起来反复用、每次只把参数往新参数挪一点点），可读进阶篇里的 DDPG 一课。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 DPG 定理的证明用我这个任务重走一遍"，
+      或者 "为什么确定性策略的噪声比随机策略的标准差更难调？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

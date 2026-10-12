@@ -1,0 +1,73 @@
+# 文风扫描基线（改写前）
+#
+# 口径说明：这份基线是用 tools/scan-style.py 的**第一版**正则测量的。
+# 之后发现该正则把两个合法术语误判为「形容词通胀」：
+#   - 「深度 RL / 深度强化学习」里的「深度」= deep，是术语
+#   - 「系统性高估 / 系统性偏差」里的「系统性」= systematic，是统计学本义
+# 已把 形容词通胀 正则从 `深度|彻底|全面|系统(地|性)` 收紧为
+# `彻底|全面地|系统性地|全方位|深层次`。
+#
+# 影响：基线里约 5 处属于误报，真实基线约为 520 处（每千字约 5.98），
+# 而不是下表合计的 525 处（6.04）。差异小于 1%，不影响任何结论。
+# 最终验收一律使用收紧后的口径。
+
+文件                                         汉字     命中     每千字   破折号/千
+------------------------------------------------------------------------
+lessons/0012-function-approximation.html   2968     30   10.11    3.03
+lessons/0001-what-is-rl.html             2800     27    9.64    3.21
+lessons/0006-modeling-your-problem.html   2981     27    9.06    3.35
+lessons/0013-dqn.html                    2986     25    8.37    3.35
+lessons/0010-q-learning.html             2964     24    8.10    3.04
+lessons/0007-monte-carlo.html            2768     22    7.95    3.61
+lessons/0014-double-dueling-dqn.html     2795     22    7.87    2.86
+lessons/0009-sarsa.html                  2420     18    7.44    4.13
+lessons/0023-sac.html                    2766     20    7.23    3.62
+lessons/0004-value-bellman.html          2505     18    7.19    4.79
+lessons/0026-rlhf-dpo.html               3186     21    6.59    3.45
+lessons/0022-td3.html                    3090     20    6.47    4.21
+lessons/0002-bandits.html                2906     18    6.19    3.10
+lessons/0019-gae-trpo.html               2443     15    6.14    2.46
+lessons/0011-nstep-td-lambda.html        2471     15    6.07    3.24
+lessons/0003-mdp.html                    2817     17    6.03    3.55
+lessons/0025-offline-imitation.html      3466     20    5.77    3.75
+lessons/0017-policy-gradient.html        2604     15    5.76    1.15
+lessons/0027-capstone.html               3490     18    5.16    2.58
+lessons/0020-ppo.html                    2337     12    5.13    2.57
+lessons/0018-actor-critic.html           2474     12    4.85    2.02
+lessons/0024-model-based-planning.html   3299     16    4.85    2.73
+lessons/0005-dynamic-programming.html    2718     13    4.78    2.21
+lessons/0021-ddpg.html                   2401     11    4.58    2.92
+lessons/0016-rainbow-distributional.html   2673     12    4.49    1.50
+lessons/0008-td-learning.html            2478     11    4.44    2.42
+lessons/0015-prioritized-replay.html     2896     11    3.80    2.42
+reference/algorithms.html                5506     19    3.45    1.45
+reference/glossary.html                  4688     15    3.20    1.49
+MISSION.md                                421      0    0.00    0.00
+reference/notation.html                   598      0    0.00    0.00
+
+========================================================================
+合计：31 个文件，86915 汉字，524 处命中（每千字 6.03）
+========================================================================
+
+按模式汇总：
+  破折号插入        244   中文破折号做补充说明，密度高就很像 AI
+  强调腔           58   正是
+  模板腔           38   自指口吻
+  营销腔           38   形容词通胀
+  模板腔           27   27 课同一句开场白
+  营销腔           24   夸张用词
+  强调腔           23   恰恰
+  强调腔           23   这正是… —— 自我总结
+  对立句式          18   不是X而是Y —— 最典型的 AI 腔
+  强调腔            7   真正的X
+  强调腔            7   其实 —— 高频出现即 AI 味
+  套话过渡           5   同一意思重说一遍
+  模板腔            4   固定栏目名
+  总结腔            3   段末强行升华
+  套话过渡           2   让我们… —— 直译腔
+  套话过渡           1   播报式过渡
+  总结腔            1   这就是为什么
+  强调腔            1   本质上
+
+全局破折号: 244 处（每千字 2.81）
+全局加粗标签: 439 处（每千字 5.05）

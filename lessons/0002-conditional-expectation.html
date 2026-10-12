@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0002 · 条件期望与全期望公式 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0002" data-slug="conditional-expectation" data-part="数学预备篇" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">数学预备 2</p>
+    <h1>条件期望与全期望公式</h1>
+    <p class="lede">上一课把"平均"讲清楚了，本课讲"知道一部分信息之后，平均会变成多少"。
+      强化学习里几乎每个公式都带一根竖线 $\mid$，读作"在已知某个量的条件下求平均"，
+      写出来的东西就是条件期望（知道一部分信息之后重新算出来的平均值）。
+      贝尔曼方程（把这一步的价值和下一步的价值连起来的等式）的推导，第一步套的就是本课的全期望公式。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出离散与连续两种情形下条件期望的定义，并手算一个具体例子</li>
+        <li>能说清 $\E[Y\mid X]$ 与 $\E[Y\mid X=x]$ 为什么一个随机、一个确定</li>
+        <li>能独立证明全期望公式与条件期望的线性性</li>
+        <li>能推导条件方差分解 $\var(Y)=\E[\var(Y\mid X)]+\var(\E[Y\mid X])$</li>
+        <li>能指出贝尔曼方程的第一步推导用了哪两条性质</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 多知道一点，平均就变了</h2>
+    <p>掷两枚公平骰子，把点数加起来记作 $Y$。不看额外信息，长期平均是 $7$，上一课算过。</p>
+    <p>现在有人先告诉你第一枚是 $6$，再问 $Y$ 平均多少。第一枚固定为 $6$，第二枚在 $1$ 到 $6$ 之间均匀，
+      所以 $Y$ 取 $7,\dots,12$ 各 $1/6$，平均是
+      $$\frac{7+8+9+10+11+12}{6}=\frac{57}{6}=9.5.$$
+      信息一变，答案就从 $7$ 变成 $9.5$。这个新信息下的平均就是本课的主角。</p>
+    <div class="def">
+      <span class="label">定义 1.1（条件期望）</span>
+      <p>已知随机变量 $X$ 取值为 $x$ 时，对另一个随机变量 $Y$ 求的平均，叫 $Y$ 在 $X=x$ 下的<em>条件期望</em>，
+        记作 $\E[Y\mid X=x]$。竖线 $\mid$ 读作"在……的条件下"。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 230" role="img" aria-label="左边是不知道分组时的总平均，右边是知道分组后每组各自的平均">
+        <text x="30" y="20" class="val-b">不知道 X：一个总平均</text>
+        <line x1="30" y1="196" x2="250" y2="196" class="axis-b"/>
+        <line x1="30" y1="40" x2="30" y2="196" class="axis-b"/>
+        <circle cx="70" cy="126" r="3.5" class="dot"/>
+        <circle cx="98" cy="142" r="3.5" class="dot"/>
+        <circle cx="126" cy="114" r="3.5" class="dot"/>
+        <circle cx="150" cy="150" r="3.5" class="dot"/>
+        <circle cx="176" cy="128" r="3.5" class="dot"/>
+        <circle cx="202" cy="138" r="3.5" class="dot"/>
+        <circle cx="226" cy="120" r="3.5" class="dot"/>
+        <line x1="30" y1="115" x2="250" y2="115" class="mark"/>
+        <text x="34" y="107" class="val-b">E[Y] = 11600</text>
+        <line x1="272" y1="30" x2="272" y2="206" class="grid"/>
+        <text x="296" y="20" class="val-b">知道 X：每组一个平均</text>
+        <line x1="296" y1="196" x2="540" y2="196" class="axis-b"/>
+        <line x1="296" y1="40" x2="296" y2="196" class="axis-b"/>
+        <line x1="300" y1="140" x2="368" y2="140" class="mark"/>
+        <line x1="300" y1="112" x2="368" y2="112" class="mark"/>
+        <line x1="300" y1="56" x2="368" y2="56" class="mark"/>
+        <circle cx="316" cy="146" r="3.5" class="dot-a"/>
+        <circle cx="336" cy="136" r="3.5" class="dot-a"/>
+        <circle cx="356" cy="145" r="3.5" class="dot-a"/>
+        <circle cx="316" cy="117" r="3.5" class="dot-a"/>
+        <circle cx="336" cy="108" r="3.5" class="dot-a"/>
+        <circle cx="356" cy="117" r="3.5" class="dot-a"/>
+        <circle cx="316" cy="62" r="3.5" class="dot-a"/>
+        <circle cx="336" cy="52" r="3.5" class="dot-a"/>
+        <circle cx="356" cy="60" r="3.5" class="dot-a"/>
+        <text x="378" y="144" class="lbl">A 组：8000</text>
+        <text x="378" y="116" class="lbl">B 组：12000</text>
+        <text x="378" y="60" class="lbl">C 组：20000</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 2.1</span>
+        同一个数据集，问法不同，平均就不同。左边不看分组，只算一个总平均；右边按 X 分成三组，每组一条自己的平均线。
+        把三条组内平均按人数比例加权，就回到左边那条总平均线。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 1.2（条件期望出现的三处）</span>
+      <p>奖励的期望 $\E[R_{t+1}\mid S_t=s]$ 问的是站在 $s$ 上时下一步平均拿多少奖励；
+        状态价值（只看状态、不管具体选哪个动作的那个价值）本身就是条件期望；
+        贝尔曼方程的第一步也靠它。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 条件分布与条件期望的定义</h2>
+    <p>要算条件期望，先得有"给定 $X=x$ 之后 $Y$ 怎么分布"的东西，它就是条件分布：
+      把联合分布按条件切出来，重新归一化。</p>
+    <div class="def">
+      <span class="label">定义 2.1（条件分布，离散情形）</span>
+      <p>设 $X$ 与 $Y$ 是离散型随机变量，联合分布 $p(x,y)=P(X=x,\,Y=y)$，边缘分布 $p_X(x)=\sum_y p(x,y)$。
+        若 $p_X(x)>0$，则称
+        $$p(y\mid x)=\frac{p(x,y)}{p_X(x)}$$
+        为 $X=x$ 下 $Y$ 的条件分布。式中 $p_X(x)$ 是 $X$ 的边缘概率，起归一化的作用。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 2.2（条件期望，离散情形）</span>
+      <p>$$\E[Y\mid X=x]=\sum_y y\,p(y\mid x).$$
+        它跟普通期望用同一个公式，只是分布换成了 $p(y\mid x)$。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 2.3（条件期望，连续情形）</span>
+      <p>设 $(X,Y)$ 的联合密度是 $f(x,y)$，$X$ 的边缘密度 $f_X(x)=\int f(x,y)\,\d y$。若 $f_X(x)>0$，则
+        $$f(y\mid x)=\frac{f(x,y)}{f_X(x)},\qquad \E[Y\mid X=x]=\int_{-\infty}^{\infty} y\,f(y\mid x)\,\d y.$$
+        把求和号换成积分号、概率换成密度，形状不变。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 2.4（把 9.5 一行一行算出来）</span>
+      <p>给定 $X=6$，第二枚点数 $U$ 在 $1,\dots,6$ 上均匀，$Y=6+U$，所以 $p(y\mid 6)=1/6$，其中 $y=7,\dots,12$。按定义 2.2，
+        $$\E[Y\mid X=6]=\sum_{y=7}^{12} y\cdot\frac{1}{6}=\frac{7+8+9+10+11+12}{6}=9.5.$$</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.5（$p(y\mid x)$ 与 $p(x,y)$ 的分工）</span>
+      <p>$p(x,y)$ 管"两件事同时发生"，$p(y\mid x)$ 管"已知 $X=x$ 之后 $Y=y$"。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. $\E[Y\mid X]$ 是随机变量，$\E[Y\mid X=x]$ 是一个数</h2>
+    <p>这是最容易读错的一处。$x$ 是一个具体的数，$\E[Y\mid X=x]$ 也是一个数；
+      而 $X$ 是随机变量，$\E[Y\mid X]$ 跟着 $X$ 走，所以它本身也是随机变量。</p>
+    <div class="def">
+      <span class="label">定义 3.1（条件期望作为随机变量）</span>
+      <p>令 $g(x)=\E[Y\mid X=x]$，这是一个普通函数。把随机变量 $X$ 代进去，得到
+        $$\E[Y\mid X]=g(X),$$
+        它是随机变量：$X$ 取哪个值，它就取对应的 $g(x)$。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 226" role="img" aria-label="条件期望把每个 x 映射成一个数，取值随 X 而定，所以它是随机变量">
+        <text x="26" y="22" class="val-b">X 的取值 x</text>
+        <text x="150" y="22" class="val-b">g(x) = E[Y | X = x]</text>
+        <text x="392" y="22" class="val-b">概率</text>
+        <line x1="26" y1="34" x2="530" y2="34" class="grid"/>
+        <text x="46" y="62" class="val">1</text>
+        <text x="156" y="62" class="val">4.5</text>
+        <text x="392" y="62" class="val">1/6</text>
+        <path d="M76 58 H132" class="arrow-a"/><path d="M125 53 l9 5 l-9 5" class="arrow-a"/>
+        <text x="46" y="94" class="val">2</text>
+        <text x="156" y="94" class="val">5.5</text>
+        <text x="392" y="94" class="val">1/6</text>
+        <path d="M76 90 H132" class="arrow-a"/><path d="M125 85 l9 5 l-9 5" class="arrow-a"/>
+        <text x="46" y="126" class="val">3</text>
+        <text x="156" y="126" class="val">6.5</text>
+        <text x="392" y="126" class="val">1/6</text>
+        <path d="M76 122 H132" class="arrow-a"/><path d="M125 117 l9 5 l-9 5" class="arrow-a"/>
+        <text x="46" y="158" class="val">4</text>
+        <text x="156" y="158" class="val">7.5</text>
+        <text x="392" y="158" class="val">1/6</text>
+        <path d="M76 154 H132" class="arrow-a"/><path d="M125 149 l9 5 l-9 5" class="arrow-a"/>
+        <text x="46" y="190" class="val">5</text>
+        <text x="156" y="190" class="val">8.5</text>
+        <text x="392" y="190" class="val">1/6</text>
+        <path d="M76 186 H132" class="arrow-a"/><path d="M125 181 l9 5 l-9 5" class="arrow-a"/>
+        <text x="46" y="222" class="val">6</text>
+        <text x="156" y="222" class="val">9.5</text>
+        <text x="392" y="222" class="val">1/6</text>
+        <path d="M76 218 H132" class="arrow-a"/><path d="M125 213 l9 5 l-9 5" class="arrow-a"/>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 2.2</span>
+        左列是 X 的六种取值，中间是逐点条件期望 g(x)，右列是每种取值的概率。
+        把随机的 X 代进 g 以后，E[Y | X] 就成了随机变量。</figcaption>
+    </figure>
+    <div class="eg">
+      <span class="label">例 3.2（骰子例子里 g 长什么样）</span>
+      <p>给定第一枚是 $x$，两枚之和取 $x+1,\dots,x+6$ 各 $1/6$，于是
+        $$g(x)=\E[Y\mid X=x]=\frac{(x+1)+\cdots+(x+6)}{6}=x+3.5,\qquad \E[Y\mid X]=X+3.5,$$
+        取值 $4.5,5.5,6.5,7.5,8.5,9.5$，每个的概率是 $1/6$。
+        $4.5$ 在骰子上根本掷不出来，它只是"第一枚是 1 时的平均"。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.3（这个区别为什么关键）</span>
+      <p>正因为 $\E[Y\mid X]$ 是随机变量，才能对它再取一次期望。
+        贝尔曼方程要把 $\E[G_{t+1}\mid S_t=s]$ 再按 $S_{t+1}$ 分一层，靠的就是这一点。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 全期望公式：分两步求平均</h2>
+    <p>先说人话：想知道 $Y$ 的总平均，可以先把数据按 $X$ 的取值分成几堆，每堆内部求一次平均，
+      再按每堆的大小把这些平均加权。两次平均合起来，等于一次算到底。</p>
+    <div class="thm">
+      <span class="label">定理 4.1（全期望公式，也叫重期望公式）</span>
+      <p>设 $\E[|Y|]\lt\infty$，则</p>
+      <div class="eq">
+        <span class="eq-body">$$\E[Y]=\E\big[\E[Y\mid X]\big].$$</span>
+        <span class="eq-num">(2.1)</span>
+      </div>
+      <p>外层对 $X$ 的分布取平均，内层给定 $X$ 后对 $Y$ 取平均。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（离散情形）</span>
+      <p>思路：把右边按定义展开，用条件分布的定义把分母约掉，剩下的正好是 $\E[Y]$。</p>
+      <p>先按 $X$ 的取值加权，再把内层展开：
+        $$\E\big[\E[Y\mid X]\big]=\sum_x \E[Y\mid X=x]\,p_X(x)=\sum_x\sum_y y\,p(y\mid x)\,p_X(x).$$
+        由定义 2.1，$p(y\mid x)p_X(x)=p(x,y)$，代进去：
+        $$=\sum_x\sum_y y\,p(x,y)=\sum_y y\Big(\sum_x p(x,y)\Big)=\sum_y y\,p_Y(y)=\E[Y].$$
+        只用到了期望的定义、条件分布的定义与求和可交换，即得式 (2.1)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 4.2（先分组平均，再按人数加权）</span>
+      <p>某公司三个部门人数比例是 $0.5$、$0.3$、$0.2$，平均工资分别是 $8000$、$12000$、$20000$。
+        把部门记作 $X$、工资记作 $Y$，组内平均就是 $\E[Y\mid X=A]=8000$ 等三个数。按式 (2.1) 再平均一次：
+        $$\E[Y]=0.5\times8000+0.3\times12000+0.2\times20000=11600.$$</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 4.4（塔性质）</span>
+      <p>设 $X,Y,Z$ 是随机变量，则</p>
+      <div class="eq">
+        <span class="eq-body">$$\E\big[\E[Y\mid X,Z]\mid X\big]=\E[Y\mid X].$$</span>
+        <span class="eq-num">(2.2)</span>
+      </div>
+      <p>式中 $Z$ 是另一个随机变量。多知道一个 $Z$ 再多平均一次，等于什么都没多知道。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（离散情形，对每个 $x$ 验证）</span>
+      <p>固定 $x$，把条件分布写成联合分布之比，再代入 $p(z\mid x)=p(x,z)/p(x)$：
+        $$\E\big[\E[Y\mid X,Z]\mid X=x\big]=\sum_z p(z\mid x)\sum_y y\,\frac{p(x,y,z)}{p(x,z)}
+          =\frac{1}{p(x)}\sum_y y\,p(x,y)=\sum_y y\,p(y\mid x)=\E[Y\mid X=x].$$
+        中间一步把 $p(x,z)$ 约掉，最后一步用 $\sum_z p(x,y,z)=p(x,y)$。对每个 $x$ 成立，即得式 (2.2)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.5（连续情形要补什么）</span>
+      <p>连续情形逐字相同，只把求和号换成积分号，再多一步交换积分次序，依据是 Fubini 定理（引用）。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 条件期望的线性性</h2>
+    <p>普通期望是线性的，条件期望把已知的东西又固定了一层，线性性照样成立，同样不需要独立性。</p>
+    <div class="thm">
+      <span class="label">定理 5.1（条件期望的线性性）</span>
+      <p>设 $a,b$ 是常数，则</p>
+      <div class="eq">
+        <span class="eq-body">$$\E[aY+bZ\mid X]=a\,\E[Y\mid X]+b\,\E[Z\mid X].$$</span>
+        <span class="eq-num">(2.3)</span>
+      </div>
+      <p>等式在随机变量意义下成立，左右两边作为 $X$ 的函数处处相等。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（离散情形，对每个 $x$ 验证）</span>
+      <p>设给定 $X=x$ 时 $(Y,Z)$ 的条件联合分布是 $p(y,z\mid x)$。按定义展开，拆项并把常数提出来：
+        $$\E[aY+bZ\mid X=x]=\sum_y\sum_z (ay+bz)\,p(y,z\mid x)
+          =a\sum_y y\,p(y\mid x)+b\sum_z z\,p(z\mid x)=a\,\E[Y\mid X=x]+b\,\E[Z\mid X=x].$$
+        中间一步用的两个括号分别是条件边缘分布 $p(y\mid x)$ 与 $p(z\mid x)$。整条推导只用到求和的可加性，
+        不要求 $Y$ 与 $Z$ 独立，也不要求 $X$ 与它们独立，即得式 (2.3)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 5.2（已知的量可以直接提出来）</span>
+      <p>设 $h$ 是任意函数，则</p>
+      <div class="eq">
+        <span class="eq-body">$$\E\big[h(X)\,Y\mid X\big]=h(X)\,\E[Y\mid X].$$</span>
+        <span class="eq-num">(2.4)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>固定 $x$。在条件分布 $p(y\mid x)$ 下 $h(x)$ 是常数，可以从求和号里提出来：
+        $$\E[h(X)Y\mid X=x]=\sum_y h(x)\,y\,p(y\mid x)=h(x)\sum_y y\,p(y\mid x)=h(x)\,\E[Y\mid X=x],$$
+        即式 (2.4)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.3（用这两条把 9.5 再算一遍）</span>
+      <p>掷两枚骰子，$Y=X+U$，$U$ 与 $X$ 独立。由式 (2.3) 与式 (2.4)：
+        $$\E[Y\mid X=x]=\E[X+U\mid X=x]=\E[X\mid X=x]+\E[U\mid X=x]=x+\E[U].$$
+        $X$ 在条件 $X=x$ 下已确定，取值就是 $x$；$U$ 与 $X$ 独立，所以 $\E[U\mid X=x]=3.5$，代回得 $x+3.5$。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. 条件方差分解：波动来自哪里</h2>
+    <p>期望能分两步算，方差也能。总波动拆成两块：组内波动的平均，加上各组平均之间的波动。</p>
+    <div class="thm">
+      <span class="label">定理 6.1（条件方差分解，也叫全方差公式）</span>
+      <p>设 $\var(Y)\lt\infty$，则</p>
+      <div class="eq">
+        <span class="eq-body">$$\var(Y)=\E\big[\var(Y\mid X)\big]+\var\big(\E[Y\mid X]\big).$$</span>
+        <span class="eq-num">(2.5)</span>
+      </div>
+      <p>右边第一项是组内波动的平均，第二项是各组平均之间的波动。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：把右边两项都化成 $Y$ 的矩，再看相加能不能凑出 $\var(Y)=E[Y^2]-(E[Y])^2$。
+        记 $\mu=\E[Y\mid X]$，它是一个随机变量。</p>
+      <p>第一项按条件方差的定义展开，并对两项分别用式 (2.1)：
+        $$\E\big[\var(Y\mid X)\big]=\E\Big[\E[Y^2\mid X]-\mu^2\Big]=\E[Y^2]-\E[\mu^2].$$
+        第二项按普通方差的计算公式展开，并用 $\E[\mu]=\E[Y]$：
+        $$\var(\mu)=\E[\mu^2]-\big(\E[\mu]\big)^2=\E[\mu^2]-\big(\E[Y]\big)^2.$$
+        两式相加，中间两项抵消：
+        $$\E[Y^2]-\E[\mu^2]+\E[\mu^2]-\big(\E[Y]\big)^2=\E[Y^2]-\big(\E[Y]\big)^2=\var(Y),$$
+        即式 (2.5)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="两组各自很集中，但两组中心离得远，两部分合起来才是总波动">
+        <line x1="40" y1="200" x2="500" y2="200" class="axis-b"/>
+        <line x1="60" y1="142" x2="204" y2="142" class="mark"/>
+        <line x1="306" y1="72" x2="450" y2="72" class="mark"/>
+        <line x1="40" y1="110" x2="500" y2="110" class="mark"/>
+        <circle cx="90" cy="134" r="4" class="dot-a"/>
+        <circle cx="120" cy="148" r="4" class="dot-a"/>
+        <circle cx="150" cy="138" r="4" class="dot-a"/>
+        <circle cx="180" cy="146" r="4" class="dot-a"/>
+        <circle cx="336" cy="64" r="4" class="dot-a"/>
+        <circle cx="366" cy="78" r="4" class="dot-a"/>
+        <circle cx="396" cy="68" r="4" class="dot-a"/>
+        <circle cx="426" cy="76" r="4" class="dot-a"/>
+        <line x1="216" y1="142" x2="216" y2="72" class="arrow"/>
+        <path d="M211 79 l5 -9 l5 9" class="arrow"/>
+        <path d="M211 135 l5 9 l5 -9" class="arrow"/>
+        <text x="228" y="112" class="lbl">组间差距</text>
+        <text x="74" y="180" class="lbl">组内波动</text>
+        <text x="320" y="180" class="lbl">组内波动</text>
+        <text x="366" y="128" class="val-b">总平均</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 2.3</span>
+        两组数据各自很集中，组内波动很小；但两组中心离得远，组间差距很大。
+        总波动把这两块加起来：只看组内会低估波动，只看组间也会低估波动，式 (2.5) 就是这句话的公式版本。</figcaption>
+    </figure>
+    <div class="eg">
+      <span class="label">例 6.2（骰子例子里两块各占一半）</span>
+      <p>掷两枚骰子，$Y=X+U$，单枚骰子的方差 $\var(X)=\var(U)=\frac{35}{12}\approx2.917$。
+        给定 $X$ 后只剩 $U$ 随机，所以 $\var(Y\mid X)=\frac{35}{12}$。
+        另一块 $\var(\E[Y\mid X])=\var(X+3.5)=\frac{35}{12}$。两块相加得 $\frac{35}{6}\approx5.833$，
+        与 $\var(Y)=\var(X)+\var(U)=\frac{35}{6}$ 一致。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 6.3（这条公式在讲什么）</span>
+      <p>把 $X$ 固定住以后，剩下的波动只有 $\E[\var(Y\mid X)]$ 这一块，另一块被条件消掉了。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. 贝尔曼方程的第一步就是全期望公式</h2>
+    <p>先固定一套策略（一套"看到什么状态就选什么动作"的规则），记作 $\pi$。
+      强化学习关心回报（从现在起把每一步奖励加起来的总分），它是随机变量，只能问平均。
+      为了让未来的分数有界，还要乘一个折扣因子（越往后的奖励，权重越小），记作 $\gamma$。
+      于是 $G_t=R_{t+1}+\gamma R_{t+2}+\gamma^2R_{t+3}+\cdots$，式中 $R_{t+1}$ 是第 $t+1$ 步的奖励。</p>
+    <p>状态价值（只看状态、不管具体选哪个动作的那个价值）的定义是 $v_\pi(s)=\E[G_t\mid S_t=s]$，
+      式中 $S_t$ 是第 $t$ 步的状态，小写 $s$ 是它的一个取值。
+      把 $G_t=R_{t+1}+\gamma G_{t+1}$ 代入，再用条件期望的线性性（式 (2.3)）：
+      $$\begin{aligned}
+        v_\pi(s)&=\E[R_{t+1}+\gamma G_{t+1}\mid S_t=s]\\
+        &=\E[R_{t+1}\mid S_t=s]+\gamma\,\E[G_{t+1}\mid S_t=s].
+      \end{aligned}$$
+      式中第一项 $r(s)=\E[R_{t+1}\mid S_t=s]$ 是站在状态 $s$ 上下一步平均能拿多少奖励。</p>
+    <p>第二项要按 $S_{t+1}$ 再分一层。先用塔性质（式 (2.2)）：
+      $$\E[G_{t+1}\mid S_t=s]=\E\big[\E[G_{t+1}\mid S_t=s,\,S_{t+1}]\mid S_t=s\big].$$
+      再用马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关），
+      知道 $S_{t+1}$ 之后 $S_t$ 不再提供额外信息，内层可以去掉 $S_t$ 这个条件：
+      $$\E[G_{t+1}\mid S_t=s,\,S_{t+1}]=\E[G_{t+1}\mid S_{t+1}]=v_\pi(S_{t+1}).$$
+      代回上式，得到逐元素形式的贝尔曼方程：</p>
+    <div class="eq">
+      <span class="eq-body">$$v_\pi(s)=\E[R_{t+1}\mid S_t=s]+\gamma\,\E\big[v_\pi(S_{t+1})\mid S_t=s\big].$$</span>
+      <span class="eq-num">(2.6)</span>
+    </div>
+    <p>把式 (2.6) 的条件期望展开成对动作与下一个状态的求和：
+      $$v_\pi(s)=\sum_a\pi(a\mid s)\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)\,v_\pi(s')\Big],$$
+      式中 $r(s,a)=\E[R_{t+1}\mid S_t=s,A_t=a]$，$p(s'\mid s,a)$ 是状态转移（做完动作后环境跳到哪个状态）的概率，
+      $\pi(a\mid s)$ 是策略在状态 $s$ 下选动作 $a$ 的概率。把每个状态写一行，就得到一组线性方程：</p>
+    <div class="eq">
+      <span class="eq-body">$$v_\pi=r_\pi+\gamma P_\pi v_\pi,\qquad v_\pi=(I-\gamma P_\pi)^{-1}r_\pi.$$</span>
+      <span class="eq-num">(2.7)</span>
+    </div>
+    <p>式中 $v_\pi$ 是各状态价值排成的列向量，$r_\pi$ 是每行奖励期望排成的向量，
+      $P_\pi$ 是转移概率（这个跳转有若干可能的结果，每个结果各带一个概率）排成的矩阵，$I$ 是单位矩阵。
+      逆矩阵凭什么存在，见 0003 课。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="贝尔曼方程把价值拆成一步奖励加上打折后的下一步价值">
+        <rect x="30" y="80" width="110" height="46" rx="6" class="box-a"/>
+        <text x="56" y="108" class="val-b">状态 s</text>
+        <line x1="140" y1="103" x2="226" y2="103" class="arrow-a"/>
+        <path d="M219 98 l9 5 l-9 5" class="arrow-a"/>
+        <text x="148" y="92" class="lbl">动作 a</text>
+        <rect x="238" y="80" width="120" height="46" rx="6" class="box"/>
+        <text x="252" y="108" class="val-b">奖励 r(s, a)</text>
+        <line x1="358" y1="103" x2="444" y2="103" class="arrow-a"/>
+        <path d="M437 98 l9 5 l-9 5" class="arrow-a"/>
+        <rect x="456" y="80" width="70" height="46" rx="6" class="box-a"/>
+        <text x="476" y="108" class="val-b">s′</text>
+        <text x="212" y="164" class="lbl">v(s) = E[ r + γ · v(s′) | s ]</text>
+        <text x="30" y="194" class="lbl">第一步奖励加上打折后的下一步价值，两边都要对随机性求平均</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 2.4</span>
+        贝尔曼方程把价值拆成两截：这一步拿到的奖励 r(s, a)，加上打折后的下一步价值。
+        式子里 γ 是折扣因子，s′ 是做完动作后环境跳到的下一个状态，对应的等式是式 (2.6)。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 7.1（为什么条件期望必须当成随机变量）</span>
+      <p>看式 (2.6) 的第二项 $\E[v_\pi(S_{t+1})\mid S_t=s]$。若 $v_\pi$ 只是一个数而不是函数，
+        就写不出 $v_\pi(S_{t+1})$，也就没法把它塞回外层条件期望。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>条件期望分两步求平均：先用条件分布加权，再按 $X$ 的分布加权，见式 (2.1)。</li>
+      <li>$\E[Y\mid X=x]$ 是一个数，$\E[Y\mid X]$ 是随机变量；只有后者能写进贝尔曼方程。</li>
+      <li>条件期望永远线性（式 (2.3)），已知的量可以直接提出来（式 (2.4)）。</li>
+      <li>条件方差分解把总波动分成组内与组间两块，见式 (2.5)。</li>
+      <li>贝尔曼方程第一步用线性性，第二步用塔性质（式 (2.2)）加马尔可夫性，见式 (2.6)。</li>
+    </ul>
+    <p>下一课把状态价值排成向量，用式 (2.7) 那样的矩阵等式统一处理，
+      那需要先讲清楚向量、矩阵、范数与特征值。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 关于 $\E[Y\mid X]$ 与 $\E[Y\mid X=x]$，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>两者都是数，只是写法不同</li>
+        <li>两者都是随机变量，只是自变量不同</li>
+        <li>前者是随机变量，后者是一个确定的数</li>
+        <li>前者是一个确定的数，后者是随机变量</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$x$ 是一个具体的取值，$\E[Y\mid X=x]$ 是普通的数；
+          而 $X$ 是随机变量，$\E[Y\mid X]=g(X)$ 跟着 $X$ 变，所以是随机变量。</p>
+        <p>A 错在把两者当成同一个东西。B 错在后半句：小写 $x$ 不是随机变量。
+          D 把两个方向都说反了，这一对符号的区别刚好与它写的相反。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 条件期望 $\E[Y\mid X=x]=\sum_y y\,p(y\mid x)$ 里的 $p(y\mid x)$ 是什么？</p>
+      <ol class="mcq-options">
+        <li>在 $X=x$ 的条件下 $Y=y$ 的条件概率</li>
+        <li>$X=x$ 与 $Y=y$ 同时发生的联合概率</li>
+        <li>$X=x$ 自己的边缘概率，与 $Y$ 无关</li>
+        <li>$Y=y$ 自己的边缘概率，与 $X$ 无关</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$p(y\mid x)=p(x,y)/p_X(x)$，分母是 $X$ 的边缘概率，
+          所以它是一个条件概率，读作"已知 $X=x$ 时 $Y=y$ 的可能"。</p>
+        <p>B 描述的是 $p(x,y)$，少了归一化这一步，整行加起来不等于 1。
+          C 与 D 分别是 $p_X(x)$ 和 $p_Y(y)$，都不随另一个变量变化，做不了条件加权。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 全期望公式的证明里，从 $\sum_x\sum_y y\,p(y\mid x)p_X(x)$ 走到 $\sum_x\sum_y y\,p(x,y)$，
+        用到了什么？</p>
+      <ol class="mcq-options">
+        <li>条件期望的线性性，它允许把求和拆成两项</li>
+        <li>条件分布的定义，即 $p(y\mid x)=p(x,y)/p_X(x)$</li>
+        <li>$X$ 与 $Y$ 相互独立，所以联合概率可以拆开</li>
+        <li>期望的非负性，它保证每一项贡献都不小于零</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：那一步做的事就是把 $p(y\mid x)p_X(x)$ 换回 $p(x,y)$，
+          它把定义 2.1 的两边同乘 $p_X(x)$ 之后取等号。</p>
+        <p>A 用在后面的求和拆分上，与这一步无关。C 是常见的乱猜：定理 4.1 对任意 $X,Y$ 都成立，
+          这里根本没有独立性假设。D 是一条恒成立但用不上的性质。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 从 $v_\pi(s)=\E[G_t\mid S_t=s]$ 走到
+        $\E[R_{t+1}\mid S_t=s]+\gamma\,\E[G_{t+1}\mid S_t=s]$，这一步用了哪条性质？</p>
+      <ol class="mcq-options">
+        <li>马尔可夫性，它把历史信息全部丢掉</li>
+        <li>条件方差分解，它把总波动拆成两块</li>
+        <li>独立同分布假设，它保证每一步互不影响</li>
+        <li>条件期望的线性性，它允许把和拆成两项</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$G_t=R_{t+1}+\gamma G_{t+1}$ 是一个和式，
+          在条件 $S_t=s$ 下把它拆成两项，靠的就是式 (2.3) 那条线性性，而且不需要独立性。</p>
+        <p>A 是下一步才用到的性质，用在这里算提前量。B 管的是方差，与期望的拆分无关。
+          C 在本课程里根本不成立，相邻两步的奖励明显相关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 把 $\E[G_{t+1}\mid S_t=s]$ 换成 $\E[v_\pi(S_{t+1})\mid S_t=s]$，用到了什么？</p>
+      <ol class="mcq-options">
+        <li>条件期望的线性性，把两项分别处理</li>
+        <li>$G_{t+1}$ 与 $S_t$ 相互独立，条件可以删掉</li>
+        <li>塔性质，配合马尔可夫性把多余的条件去掉</li>
+        <li>方差分解公式，把波动换成两个期望</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：先按 $S_{t+1}$ 分一层得到 $\E[\E[G_{t+1}\mid S_t,S_{t+1}]\mid S_t=s]$，
+          这步是塔性质，也就是式 (2.2)；再由马尔可夫性把内层的 $S_t$ 去掉，
+          最后用 $v_\pi(S_{t+1})=\E[G_{t+1}\mid S_{t+1}]$ 收尾。</p>
+        <p>A 处理的是和式，这里处理的是一个条件期望套条件期望。
+          B 说反了：$G_{t+1}$ 里包含未来的奖励，与 $S_t$ 并不独立。
+          D 与期望的这一步无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">6. 若某个取值 $x_0$ 满足 $p_X(x_0)=0$，那么 $\E[Y\mid X=x_0]$ 会怎样？</p>
+      <ol class="mcq-options">
+        <li>没有定义，因为条件分布要用 $p_X(x_0)$ 做分母</li>
+        <li>等于 $0$，因为没有任何样本落在这一档里</li>
+        <li>等于 $\E[Y]$，条件没有起任何作用</li>
+        <li>等于 $x_0$，因为条件已经把 $X$ 的值给定了</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定义 2.1 与定义 2.3 都写了"若 $p_X(x)>0$"这个前提，
+          分母为零时条件分布无从谈起，条件期望自然没有定义。</p>
+        <p>B 把"没有样本"和"平均是零"混为一谈。C 只在 $X$ 与 $Y$ 独立时才可能成立，
+          而且这里连条件期望都没定义。D 混淆了 $X$ 的取值与 $Y$ 的平均值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 关于条件期望的线性性 $\E[aY+bZ\mid X]=a\E[Y\mid X]+b\E[Z\mid X]$，哪个说法对？</p>
+      <ol class="mcq-options">
+        <li>必须要求 $Y$ 与 $Z$ 独立才成立</li>
+        <li>必须要求 $X$ 与 $Y$ 独立才成立</li>
+        <li>只有 $X$ 取有限个值时才能成立</li>
+        <li>对任意随机变量都成立，不需要任何独立性</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：证明里只用到求和的可加性，条件联合分布怎么相关都不影响结论。</p>
+        <p>A 与 B 把"不相关"和"可加"这两件事绑在了一起，期望的线性性从来不需要独立。
+          C 是多余的顾虑：连续情形把求和换成积分，同一条推导照样成立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. 掷两枚公平骰子，$X$ 是第一枚的点数，$Y$ 是两枚点数之和。$\E[Y\mid X=2]$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$7$</li>
+        <li>$5.5$</li>
+        <li>$3.5$</li>
+        <li>$2$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由例 3.2，$\E[Y\mid X=x]=x+3.5$，代入 $x=2$ 得 $5.5$。
+          直接算也对：$Y$ 取 $3,4,5,6,7,8$，平均是 $33/6=5.5$。</p>
+        <p>A 是无条件期望 $\E[Y]$，漏掉了已经知道 $X=2$ 这条信息。
+          C 是单枚骰子的期望。D 把条件里 $X$ 的取值当成了答案。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 某公司三个部门人数比例是 $0.5$、$0.3$、$0.2$，
+        平均工资分别是 $8000$、$12000$、$20000$。全体平均工资是多少？</p>
+      <ol class="mcq-options">
+        <li>$13333$</li>
+        <li>$12000$</li>
+        <li>$10000$</li>
+        <li>$11600$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：按全期望公式，也就是式 (2.1)，
+          $0.5\times8000+0.3\times12000+0.2\times20000=4000+3600+4000=11600$。</p>
+        <p>A 是三个数的算术平均，把人数比例丢掉了。B 是三个部门里居中的那个平均工资，
+          不是全体平均。C 只是第三项的加权结果，漏算了前两项。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 为什么贝尔曼方程的条件要写成 $\E[\cdot\mid S_t=s]$，而不是直接写 $\E[\cdot]$？</p>
+      <ol class="mcq-options">
+        <li>因为价值 $v_\pi(s)$ 只关心从 $s$ 出发的那部分轨迹</li>
+        <li>因为不写成条件期望就推不出折扣因子这一项</li>
+        <li>因为条件期望总是小于对应的无条件期望</li>
+        <li>因为只有条件期望才满足期望的线性性</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_\pi(s)$ 问的是"从现在站在 $s$ 上开始，往后平均能拿多少"，
+          所以要对"$S_t=s$"这件事取条件，把别的起点排除在外。</p>
+        <p>B 错在折扣因子来自回报的定义，与是否取条件无关。
+          C 完全说反了，条件期望与无条件期望谁大谁小要具体看，没有普遍的大小关系。
+          D 错在线性性对两种期望都成立。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        附录 A「Preliminaries for Probability Theory」。本课的条件期望定义、全期望公式与符号口径与之一致；
+        贝尔曼方程的条件期望推导对应正文第 2.4 节。</p>
+      <p>想补更完整的条件期望与条件方差，可读 Grimmett &amp; Stirzaker,
+        <em>Probability and Random Processes</em> 第 3、4 章，
+        或 Williams, <em>Probability with Martingales</em> 第 9、10 章（塔性质的严格版本）。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把全期望公式用我熟悉的掷骰子再讲一遍"，
+      或者 "为什么 $\E[Y\mid X]$ 是随机变量，用一个极端的例子说明？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

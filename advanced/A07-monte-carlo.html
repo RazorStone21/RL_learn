@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A07 · 蒙特卡洛方法 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A07" data-slug="monte-carlo" data-part="进阶篇 · 第二部分 · 无模型方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第二部分 · 无模型方法</p>
+    <h1>蒙特卡洛方法</h1>
+    <p class="lede">这一节解决没有模型时的第一个问题：你不知道环境内部的规律，
+      但仍然能靠一次次实际跑出来的完整回合，估出每个状态值多少分。这个办法叫蒙特卡洛方法，
+      这一节会把它讲清楚，也会讲清它的硬伤在哪里。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出首次访问蒙特卡洛预测的估计式，并说清每个符号对应代码里的什么</li>
+        <li>能解释它为什么不需要环境模型，以及它需要什么前提</li>
+        <li>能说出它与 TD（temporal difference，时序差分）在偏差与波动上的差别，判断自己的场景适不适合用它</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>不知道模型，但可以动手试</h2>
+    <p>先说清楚"没有模型"是什么意思。第 <a href="A05-dynamic-programming.html">0005 课</a>的动态规划
+      需要你先知道一组概率。所谓转移概率，就是做完一个动作之后会跳到哪个状态、各有多大的可能性，
+      以及跳到那里能拿多少奖励。库存业务里就是"明天客户会买多少件，各种情况各占几成"。
+      这在现实里几乎永远拿不到。</p>
+    <p>拿不到概率，不代表什么都做不了。你可以直接去试：按现在的做法跑一天，
+      看看到底发生了什么，把结果记下来。这么跑很多遍，就攒下了一条条真实的经历。</p>
+    <p><span class="term">蒙特卡洛方法（把一整局走完，用真实拿到的总分来估计价值）</span>
+      用的就是这些经历，完全不需要那组概率，因此属于
+      <span class="term">无模型（model-free，只用交互得到的数据，不去问环境内部规律）</span>方法。
+      名字来自赌场里的蒙特卡洛，说的就是"用大量随机试验去估一个数"。</p>
+    <p>这个想法你已经用过。想知道一枚硬币正面朝上的可能性有多大，你不会去拆开硬币量它的重心，
+      而是抛它一百次，数一数正面出现了几次。抛出来的结果就是"经历"，最后那个比例就是你的估计。</p>
+  </section>
+
+  <section>
+    <h2>用采样回报的算术平均代替期望</h2>
+    <p>先补两个零基础缺口，后面每一课都要用。</p>
+    <p>第一个是概率。概率就是"平均一百次里大约发生几次"：说某件事有 0.5 的概率发生，
+      就是平均一百次里大约有五十次发生。随机游走里"每步以 0.5 的概率向左走一格"，
+      意思是平均一百步里大约五十步向左、五十步向右。</p>
+    <p>第二个是期望。期望就是"同一件事重复很多次之后的平均结果"。
+      抛一枚公平硬币，正面得 1 分、反面得 0 分，重复很多次，平均每次大约得 0.5 分，
+      这个 0.5 就是得分的期望。注意它不必是某一次真的会出现的分数。</p>
+    <p>现在回到价值估计。给定一套策略（看到什么状态就选什么动作的规则），从起点跑完一整局，这一局就结束了。
+      这样的一整局叫<span class="term">回合（从开始到结束的一整局）</span>。
+      跑一趟记下来的这串东西是：<span class="math">s<sub>0</sub>, a<sub>0</sub>, r<sub>1</sub>, s<sub>1</sub>, … , r<sub>T</sub></span>，
+      其中字母右下角的小字母表示它是第几步的量，比如 <span class="math">s<sub>0</sub></span> 是第 0 步的状态。</p>
+    <p>把一路上拿到的分数按折扣折算，加起来得到一个总分。
+      这个总分叫<span class="term">回报（从现在起一直到结束，把每一步奖励加起来的总分）</span>。
+      折扣的力度由<span class="term">折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折）</span>
+      决定，它通常写作 <var>γ</var>。<var>γ</var> 是折扣因子。</p>
+    <p>于是<span class="term">折扣回报（每个奖励都先打折、再全部加起来的总分）</span>可以写成：
+      <span class="math">G<sub>t</sub> = r<sub>t+1</sub> + γr<sub>t+2</sub> + …</span>。
+      意思是从第 t 步往后，第一步的奖励原价算，第二步打一次折，第三步打两次折，以此类推。</p>
+    <p>蒙特卡洛（英文全称 Monte Carlo，本课简称 MC）的做法直接得近乎粗暴：
+      同一个起点多跑几局，把每次拿到的回报加起来再除以次数，这就是算术平均。</p>
+    <div class="eq">
+      <span class="eq-body">V(s) ≈ (1 / N(s)) Σ<sub>i=1</sub><sup>N(s)</sup> G<sub>i</sub>(s)</span>
+      <span class="eq-num">(7.1)</span>
+    </div>
+    <p>公式 (7.1) 里，<span class="math">Σ</span> 是求和号，意思是"把后面那串东西全部加起来"；
+      <var>N(s)</var> 是状态 s 一共被走到过多少次；<span class="math">G<sub>i</sub>(s)</span> 是第 i 次走到 s 时拿到的回报。
+      整条式子读作：把在 s 处收集到的所有回报加起来，再除以次数，就是 s 的价值估计。</p>
+    <p>还有一种分法要知道。<span class="term">首次访问（first-visit）</span>的做法是：
+      一个回合里状态 s 可能出现多次，只统计第一次出现之后的回报。
+      <span class="term">每次访问（every-visit）</span>则每次都统计。
+      两者在回合数足够多时<span class="term">收敛（一轮轮算下去，数值不再明显变化，稳定下来了）</span>到同一个值<a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[Sutton &amp; Barto §5.1]</a>，实践里首次访问更常用，因为它的证明更干净。</p>
+    <p>实现上不必存下所有回报，用增量式样本平均即可：</p>
+    <div class="eq">
+      <span class="eq-body">V(s) ← V(s) + (1 / N(s)) [ G − V(s) ]</span>
+      <span class="eq-num">(7.2)</span>
+    </div>
+    <p>公式 (7.2) 里的箭头读作"更新为"。<var>N(s)</var> 是 s 被访问的次数。
+      访问越多，修正幅度越小，这就是"平均"在起作用。</p>
+    <p>把 <span class="math">1 / N(s)</span> 换成一个固定的小常数，就得到能跟着变化走的版本。
+      这个常数叫<span class="term">学习率（每次更新时，往新信息的方向挪多远）</span>，通常写作 <var>α</var>。<var>α</var> 是学习率。
+      后面 TD 就是用这种写法。</p>
+  </section>
+
+  <section>
+    <h2>蒙特卡洛控制：保证每个动作都被试到</h2>
+    <p>前面只讲了"给一套策略打分"，这件事叫
+      <span class="term">策略评估（给定一套策略，算出它到底值多少分）</span>。
+      但我们的目标不止是打分，还要把策略改好。要改策略，就得知道每个动作值多少分，
+      也就是<span class="term">动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）</span>，
+      通常写作 <span class="math">Q(s, a)</span>。</p>
+    <p>为什么一定要动作价值？因为改策略的时候要比较"这个状态下选哪个动作更好"。
+      只有动作价值能直接回答这个问题：挑出让 Q 最大的那个动作，
+      这个"挑出最大值对应的选择"的动作，读作
+      <span class="term">argmax（挑出让后面那个式子最大的那个选择）</span>。</p>
+    <p>问题来了。如果行为策略一直只挑当前看起来最好的动作，那些从没被选过的
+      状态动作对就一次都没被采到过，它们的 Q 一直停在初始值上，等于错的。
+      而改策略的时候会拿这个错值去比较，改出来的策略就建立在噪声上。
+      "一直只挑当前看起来最好的"，这种挑法叫
+      <span class="term">贪心（在当前估计里挑看起来最好的那个）</span>。</p>
+    <p>所以要保证每个动作都有机会被试到，常用的办法有两个。</p>
+    <ul>
+      <li><span class="term">探索起点（exploring starts，每个回合从随机挑的一对状态和动作开始）</span>：
+        这样任何状态动作对都有机会被采到。</li>
+      <li><span class="term">ε-soft 策略（让每个动作都保留一点被选中的概率，谁都不许变成 0）</span>：
+        行为策略对每个动作至少留 <span class="math">ε / |A|</span> 的概率。
+        式子里的 <var>ε</var> 是一个 0 到 1 之间的小数，
+        <span class="math">|A|</span> 是动作的总个数。</li>
+    </ul>
+    <p>把这两件事合起来，就是 on-policy（边学的那套策略，就是正在用来产生数据的那套）的蒙特卡洛控制：
+      用 ε-soft 的行为策略采回合、估计 Q，再把行为策略换成对 Q 的 ε-greedy 版本。
+      它仍然是 ε-soft 的，所以下一轮还能继续探索。这里的行为策略就是真正在环境里做决定的那套规则，
+      它会随着 Q 一起变。</p>
+  </section>
+
+  <section>
+    <h2>off-policy 与重要性采样</h2>
+    <p>上面讲的是"边学的那套策略，就是正在产生数据的那套"。这种情形叫
+      on-policy（边打边改自己的打法）。还有一种情形：数据是旧的策略跑出来的，
+      你想用这批数据去评估另一套新策略。这叫
+      off-policy（看别人的录像学自己的打法）。</p>
+    <p>这两套策略不一样，直接用旧数据算平均就会偏。修正办法是给每个回报乘一个比例。
+      比例的含义是：这个动作在新策略下出现的可能性，除以它在旧策略下出现的可能性。
+      这个比例叫<span class="term">重要性采样（用另一套策略产生的数据，来估计当前策略的表现，需要按概率比例做修正）</span>比。这个比值写作 <var>ρ</var>。<var>ρ</var> 是重要性采样比。
+      它的定义是
+      <span class="math">ρ = Π<sub>t</sub> π(a<sub>t</sub> | s<sub>t</sub>) / b(a<sub>t</sub> | s<sub>t</sub>)</span>。
+      式子里的 <span class="math">Π<sub>t</sub></span> 是连乘号，意思是把每一个时间步的比值都乘起来。</p>
+    <p>这个连乘有个坏处：它会让估计的波动随回合长度迅速变大。
+      几十步的回合里，只要有几步的比值明显大于 1，乘起来就会把回报放大成极端值。</p>
+    <p>所以在实践里，直接这样做的蒙特卡洛很少用。好用的 off-policy
+      方法要到 Q-learning 才出现，在第 <a href="A10-q-learning.html">0010 课</a>。</p>
+  </section>
+
+  <section>
+    <h2>硬伤：必须等回合结束</h2>
+    <p>蒙特卡洛有一个绕不过去的限制：它要拿到完整的回报 G 才能更新。
+      回合还没结束，它就一个数也学不到。</p>
+    <p>如果一局要等三个月，或者任务根本不结束（持续运营的系统），这个办法就直接失效。
+      而且 G 把一个回合里所有的随机性都堆进了一个数，波动很大，
+      同一个起点的两次结果可能差得远。</p>
+    <p>下一课的 TD 就是冲着这两点来的：只用一个即时奖励加上"下一步的估计"就能更新，边走边学。</p>
+  </section>
+
+  <figure class="sim" data-sim="random-walk" data-states="5" data-runs="100"></figure>
+
+  <section>
+    <h2>什么时候该用它</h2>
+    <p>适用条件可以浓缩成一句：你能反复拿到完整的、有明确起止的回合。
+      一次促销周期、一局游戏、一轮 A/B 测试都算回合；一个永不结束的推荐流不算。</p>
+    <p>它还有一个优点：对环境的假设最少。连"下一步只取决于现在"这种条件都不需要满足，
+      也能拿来用（只是那时候你估的东西含义变了）。
+      这让它成为最保险的<span class="term">基线（拿来做对照的基准方法）</span>，
+      代价是<span class="term">样本效率（拿到同样多的经验能学多好）</span>低：同样的经验量，它学得比别人慢。</p>
+    <p>上面的演示把它与 TD(0) 放在同一个随机游走环境上对比：它的误差曲线起步很高，
+      TD 一开始就压下来。把它的 α 调小，它最终能收敛到更低的误差。效率与极限精度的取舍，
+      就是下一课的主题。符号不确定时可以查<a href="../reference/notation.html">符号表</a>。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 蒙特卡洛方法与动态规划相比，最根本的差别是什么？</p>
+      <ol class="mcq-options">
+        <li>不需要环境的转移概率，只靠采样得到的完整回合估计价值</li>
+        <li>不需要折扣因子，因此能直接处理无限长的回报序列</li>
+        <li>收敛速度一定快于动态规划，因为它不做全量的备份</li>
+        <li>只能处理随机环境，遇到确定性环境时就会完全失效</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：动态规划的更新要知道 <span class="math">p(s', r | s, a)</span> 这组概率，
+          才能对着所有可能的情况求平均；蒙特卡洛用真实跑出来的回报取平均，直接绕过了这组概率，
+          代价是需要完整的回合和更多样本。</p>
+        <p>B 错：蒙特卡洛照样用折扣，处理无限长回报靠的是 γ 而不是"不需要 γ"。
+          C 说反了：蒙特卡洛的样本效率通常低于动态规划（dynamic programming，DP）。
+          D 也错：确定性环境照样能采样，只是每条轨迹重复而已。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 首次访问与每次访问这两种统计方式的区别在哪里？</p>
+      <ol class="mcq-options">
+        <li>首次访问只估计回合的起始状态，每次访问估计全部状态</li>
+        <li>首次访问每个回合只更新一次，每次访问沿路径更新多次</li>
+        <li>首次访问只统计状态首次出现后的回报，每次访问都统计</li>
+        <li>首次访问必须用常数步长，每次访问必须用样本平均值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：差别只在于"同一个回合里状态出现多次时算几次"。
+          首次访问只在第一次出现时记一笔，每次访问每次出现都记一笔；两者极限相同。</p>
+        <p>A 把"首次"理解成了"只更新起点"，那是探索起点的概念，不是这个。
+          B 也说错了对象：一回合里可能更新很多个状态，只是每个状态最多记一次。
+          D 把访问规则和步长规则混在一起，二者互不绑定。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 为什么蒙特卡洛控制需要探索起点或 ε-soft 行为策略？</p>
+      <ol class="mcq-options">
+        <li>因为访问次数越多，环境反馈的奖励数值才会越准确</li>
+        <li>因为这套办法要求每个状态被访问一个固定的次数才算稳定</li>
+        <li>因为不访问所有动作就无法计算折扣因子对回报的影响</li>
+        <li>因为没被访问过的 (s, a) 没有估计，改进会用到错值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：这套办法只用"见过的东西"做平均。某个状态动作对从没被采到，
+          它的 Q 就一直是初始值，而改策略时会拿这个错值去比较，甚至选中它。</p>
+        <p>A 把"奖励准确"和"价值被采样"混为一谈：奖励是环境给的，不需要多访问才变准。
+          B 编造了一个"固定次数"的要求：收敛需要的是访问次数趋于无穷，不是某个固定配额。
+          C 更是无关：折扣因子是你设定的常数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 直接用重要性采样做 off-policy，典型问题是什么？</p>
+      <ol class="mcq-options">
+        <li>采样比连乘会让估计的方差随回合长度迅速增长</li>
+        <li>采样比恒等于 1，导致目标策略始终无法被真正评估</li>
+        <li>行为策略必须是完全随机的，否则采样比没有定义</li>
+        <li>必须额外知道环境模型，否则采样比无法被计算出来</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：采样比是每个时间步比值的连乘。比值可以远大于 1，
+          连乘之后能把一个普通回报放大成极端值，于是估计的方差随回合长度爆炸式增长。</p>
+        <p>B 说反了：采样比只在两个策略完全一致时才恒为 1，那时根本不需要 off-policy。
+          C 错：行为策略只要对所有动作概率为正即可（soft），不必均匀。
+          D 也错：采样比只用到两个策略在已发生动作上的概率，不需要环境模型；需要模型的是 DP。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 下列哪种业务场景最适合用蒙特卡洛方法？</p>
+      <ol class="mcq-options">
+        <li>持续运行、永不结束并且需要实时决策的竞价系统</li>
+        <li>做一次决策就要等上三个月才能看到结果的长期项目</li>
+        <li>能反复完整跑完、有明确起止的促销周期或一局游戏</li>
+        <li>每一步都必须立刻更新价值估计的在线推荐服务场景</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：蒙特卡洛的唯一硬前提是"能拿到完整回合"。促销周期、一局对弈这种
+          有明确起止、可以反复采样的场景，正好满足；而且它们通常对样本效率要求不高。</p>
+        <p>A 和 D 都缺"回合"这个前提，属于持续型任务，应该用能单步更新的 TD 类方法。
+          B 虽然形式上是回合，但一个回合三个月，它在拿到第一个回报前什么都学不到，
+          工程上不可接受，TD 的用武之地就在这里。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0007-code-1">
+      <h3>代码题 1 · 用首次访问蒙特卡洛估计状态价值</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>从这一节起没有环境模型可用，只能靠完整回合的采样。
+          这一题验证的就是蒙特卡洛预测：同一条随机走法反复跑很多局，把每局拿到的总分取平均，
+          用这个平均值当作每个状态的价值。<code>mc_prediction</code> 是价值估计的第一步，
+          "给一套策略打分"时就调用它，后面还要拿它的结果和 TD 对比。
+          返回的 <code>V</code> 里，<code>V[s]</code> 表示"从状态 s 出发走到终点，平均能拿多少分"。</p>
+        <p>环境是 Sutton &amp; Barto 的 5 状态随机游走：状态编号 0 到 6，
+          0 和 6 是终止状态，走到 0 得 0 分、走到 6 得 1 分。
+          中间 5 个状态每走一步，以 0.5 的概率向左一格、0.5 的概率向右一格（蒙特卡洛的英文是 Monte Carlo，本课简称 MC），
+          也就是平均一百步里大约五十步向左。每局都从状态 3 出发。</p>
+        <p>请实现 <code>mc_prediction(n_episodes=20000, gamma=1.0, seed=0)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>n_episodes</code>：int，采样多少个完整回合，默认 20000；</li>
+          <li><code>gamma</code>：float，折扣因子，默认 1.0；</li>
+          <li><code>seed</code>：int，随机种子，默认 0。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状 <code>(7,)</code>，float：<code>V[s]</code> 是状态 <code>s</code> 的价值估计；状态 0 与 6 是终止状态，价值保持 0。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>返回值是 numpy 数组且形状为 <code>(7,)</code>；<code>V[0]</code> 与 <code>V[6]</code> 保持 0；<code>V[1..5]</code> 与真值 <var>s</var>/6 的偏差小于 0.05；<code>V[5]</code> 比 <code>V[1]</code> 高出 0.4 以上。上面这些精度只有在按首次访问统计、用样本平均更新时才达标，同一个回合里重复出现的状态只算第一次，不要换成固定步长；随机数必须来自 <code>np.random.default_rng(seed)</code>，不要用全局 <code>np.random</code>；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>第一句先建随机数生成器：<code>rng = np.random.default_rng(seed)</code>，
+              后面每一步的随机数都从它取，这样同一个种子必然给出同一串数。</li>
+          <li>再建两个长度 7 的数组：<code>V = np.zeros(7)</code> 放价值估计，
+              <code>counts = np.zeros(7)</code> 放每个状态被走到过多少次。
+              <code>np.zeros(7)</code> 返回"装了 7 个 0 的一维数组"，下标从 0 开始。</li>
+          <li>每个回合从 <code>s = 3</code> 出发，用一个 <code>while True</code> 循环走：
+              每次抽 <code>rng.random()</code>（它返回 0 到 1 之间的一个随机小数），
+              小于 0.5 就让 <code>s</code> 减 1，否则加 1，并把走过的新状态追加进一个列表。
+              走到 0 或 6 就 <code>break</code>。</li>
+          <li>回合结束后先给回报定初值：走到 6 时 <code>G = 1.0</code>，走到 0 时 <code>G = 0.0</code>。</li>
+          <li>用 <code>for st in reversed(轨迹列表)</code> 从末尾往前遍历，每遇到一个状态先做
+              <code>G = r + gamma * G</code> 把折扣补上（这里的 r 是进入该状态那一步的奖励，
+              除终点外都是 0），再用 <code>seen</code> 集合判断这个状态是不是本回合第一次出现，
+              是的话就让 <code>counts[st] += 1</code>，再做增量平均
+              <code>V[st] += (G - V[st]) / counts[st]</code>。</li>
+          <li>循环跑完 <code>n_episodes</code> 个回合后 <code>return V</code>。
+              两个终止状态的价值不动，所以一直是 0。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def mc_prediction(n_episodes=20000, gamma=1.0, seed=0):
+    # TODO: 采样完整回合，做首次访问蒙特卡洛估计
+    return np.zeros(7)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+V = mc_prediction(n_episodes=20000, seed=0)
+check(isinstance(V, np.ndarray), "V 应当是 numpy 数组")
+check(V.shape == (7,), f"V 必须是长度 7 的数组，实际 {V.shape}")
+check(abs(float(V[0])) < 1e-12 and abs(float(V[6])) < 1e-12,
+      f"两个终止状态的价值应保持 0，实际 {V[0]} / {V[6]}")
+
+for s in range(1, 6):
+    check(abs(float(V[s]) - s / 6.0) < 0.05,
+          f"V[{s}] 应接近 {s}/6={s/6.0:.3f}，实际 {float(V[s]):.3f}")
+
+check(float(V[5]) - float(V[1]) > 0.4,
+      f"越靠近右侧终止状态价值应越高，实际 V[5]-V[1]={float(V[5])-float(V[1]):.3f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def mc_prediction(n_episodes=20000, gamma=1.0, seed=0):
+    rng = np.random.default_rng(seed)
+    V = np.zeros(7)
+    counts = np.zeros(7)
+    for _ in range(n_episodes):
+        s = 3
+        states = []
+        while True:
+            s += -1 if rng.random() < 0.5 else 1
+            states.append(s)
+            if s == 0 or s == 6:
+                break
+        G = 1.0 if s == 6 else 0.0
+        seen = set()
+        for st in reversed(states):
+            if st in (0, 6):
+                G *= gamma
+                continue
+            if st not in seen:
+                seen.add(st)
+                counts[st] += 1
+                V[st] += (G - V[st]) / counts[st]
+            G *= gamma
+    return V
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0007-code-2">
+      <h3>代码题 2 · 用 ε-soft 蒙特卡洛控制解一个小网格</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>只估价值不够。要改策略，就得先知道每个动作值多少分，
+          也就是动作价值 <code>Q(s, a)</code>；拿到 <code>Q</code> 之后对每一行取
+          <code>argmax</code>，就得到"每个状态选哪个动作"的规则。
+          <code>mc_control</code> 做的是 on-policy（边学的那套策略，就是正在产生数据的那套）
+          的蒙特卡洛控制：在 3×3 网格上反复跑完整回合，
+          用探索起点加 ε-greedy 的行为策略保证每个状态动作对都被试到。
+          业务上对应能反复跑完、又有明确起止的场景，比如一局游戏或一轮促销周期。</p>
+        <p>请实现 <code>mc_control(episodes=20000, epsilon=0.1, gamma=1.0, seed=0)</code>。环境是 3×3 网格：状态按行优先编号 0–8，8 是终止状态（到达即结束，奖励 0），其他状态每走一步奖励 −1；动作编号 0=上、1=右、2=下、3=左，撞到边界时原地不动；每个回合从一个随机非终止状态、一个随机动作开始，之后按当前 <code>Q</code> 的 ε-greedy 选动作，平局取下标小的。更新用首次访问的样本平均。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>episodes</code>：int，采样回合数，默认 20000；</li>
+          <li><code>epsilon</code>：float，ε-greedy 中以该概率随机选动作，默认 0.1；</li>
+          <li><code>gamma</code>：float，折扣因子，默认 1.0；</li>
+          <li><code>seed</code>：int，随机种子，默认 0。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状 <code>(9, 4)</code>，float：<code>Q[s, a]</code> 是状态动作价值，从全 0 开始累积。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>Q</code> 的形状是 <code>(9, 4)</code>；对 <code>Q</code> 取 <code>argmax</code> 得到的贪心策略里，终点左侧那格（状态 7）选动作 1（右），终点上方那格（状态 5）选动作 2（下）；从状态 0 出发沿贪心动作走，6 步以内到达终点 8；随机数只用 <code>np.random.default_rng(seed)</code>；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>开局先写 <code>rng = np.random.default_rng(seed)</code>，
+              再用 <code>Q = np.zeros((9, 4))</code> 和 <code>counts = np.zeros((9, 4))</code>
+              建两个二维数组。形状 <code>(9, 4)</code> 表示 9 行 4 列，
+              下标写成 <code>Q[s, a]</code>，行下标和列下标都从 0 开始。</li>
+          <li>另写一个小函数当行为策略：先抽 <code>rng.random()</code>，
+              小于 <code>epsilon</code> 就用 <code>int(rng.integers(0, 4))</code> 随机取一个动作下标
+              （<code>rng.integers(0, 4)</code> 返回 0、1、2、3 中的一个整数，右端 4 取不到），
+              否则用 <code>int(np.argmax(Q[s]))</code> 取 Q 最大那一列的下标。</li>
+          <li>每个回合按题面从随机的一个非终止状态和一个随机动作开始，
+              然后在 <code>while True</code> 里用题面给的 <code>move</code> 规则算出下一个状态，
+              奖励是"进入终点得 0，否则得 −1"，
+              把 <code>(s, a, r)</code> 追加进轨迹列表，再用行为策略选下一个动作，直到走到终点。</li>
+          <li>回合结束后从轨迹末尾往前推：每退一步先算 <code>G = r + gamma * G</code>。
+              用 <code>seen</code> 集合保证同一个状态动作对在一个回合里只统计第一次出现，
+              是第一次就 <code>counts[s, a] += 1</code>，再 <code>Q[s, a] += (G - Q[s, a]) / counts[s, a]</code>。</li>
+          <li>跑完 <code>episodes</code> 个回合后 <code>return Q</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def mc_control(episodes=20000, epsilon=0.1, gamma=1.0, seed=0):
+    # TODO: 探索起点 + ε-greedy 行为策略的首次访问蒙特卡洛控制
+    return np.zeros((9, 4))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+ROWS, COLS = 3, 3
+N = ROWS * COLS
+GOAL = N - 1
+
+def _move(s, a):
+    r, c = divmod(s, COLS)
+    if a == 0:
+        r -= 1
+    elif a == 1:
+        c += 1
+    elif a == 2:
+        r += 1
+    else:
+        c -= 1
+    r = min(max(r, 0), ROWS - 1)
+    c = min(max(c, 0), COLS - 1)
+    return r * COLS + c
+
+Q = mc_control(episodes=20000, seed=0)
+check(Q.shape == (N, 4), f"Q 的形状应为 ({N}, 4)，实际 {Q.shape}")
+
+check(int(np.argmax(Q[GOAL - 1])) == 1,
+      f"终点左侧那格应当向右走，实际选了动作 {int(np.argmax(Q[GOAL - 1]))}，Q={np.round(Q[GOAL-1], 2)}")
+check(int(np.argmax(Q[GOAL - 3])) == 2,
+      f"终点上方那格应当向下走，实际选了动作 {int(np.argmax(Q[GOAL - 3]))}，Q={np.round(Q[GOAL-3], 2)}")
+
+s, path = 0, [0]
+for _ in range(10):
+    if s == GOAL:
+        break
+    s = _move(s, int(np.argmax(Q[s])))
+    path.append(s)
+check(s == GOAL, f"贪心策略应当能从状态 0 走到终点，实际停在 {s}（路径 {path}）")
+check(len(path) - 1 <= 6, f"最短路径只要 4 步，实际走了 {len(path) - 1} 步：{path}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def mc_control(episodes=20000, epsilon=0.1, gamma=1.0, seed=0):
+    rng = np.random.default_rng(seed)
+    ROWS, COLS = 3, 3
+    N = ROWS * COLS
+    GOAL = N - 1
+
+    def move(s, a):
+        r, c = divmod(s, COLS)
+        if a == 0:
+            r -= 1
+        elif a == 1:
+            c += 1
+        elif a == 2:
+            r += 1
+        else:
+            c -= 1
+        r = min(max(r, 0), ROWS - 1)
+        c = min(max(c, 0), COLS - 1)
+        return r * COLS + c
+
+    Q = np.zeros((N, 4))
+    counts = np.zeros((N, 4))
+
+    def behavior(s):
+        if rng.random() < epsilon:
+            return int(rng.integers(0, 4))
+        return int(np.argmax(Q[s]))
+
+    for _ in range(episodes):
+        s = int(rng.integers(0, N - 1))
+        a = int(rng.integers(0, 4))
+        traj = []
+        while True:
+            s_next = move(s, a)
+            r = 0.0 if s_next == GOAL else -1.0
+            traj.append((s, a, r))
+            s = s_next
+            if s == GOAL:
+                break
+            a = behavior(s)
+        G, seen = 0.0, set()
+        for st, at, rt in reversed(traj):
+            G = rt + gamma * G
+            if (st, at) in seen:
+                continue
+            seen.add((st, at))
+            counts[st, at] += 1
+            Q[st, at] += (G - Q[st, at]) / counts[st, at]
+    return Q
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.),
+        第 5.1 节（MC 预测）与第 5.3–5.4 节（MC 控制、探索起点与 ε-soft）。
+        第 5.5 节讲 off-policy 与重要性采样的方差问题，想深挖可以接着读。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>需要更慢的另一种讲法时，Stanford CS234 的前几讲对 MC 与 TD 的对比讲得很细：
+        <a class="cite" href="https://web.stanford.edu/class/cs234/">[课程主页]</a>。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。可以问：
+      "我手上的 XX 数据只有零散的日志、没有完整回合，还能用 MC 吗？替代方案是什么？"
+      或者让它把随机游走实验的方差来源逐步拆给你看。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

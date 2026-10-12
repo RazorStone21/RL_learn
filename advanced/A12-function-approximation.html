@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A12 · 函数逼近与致命三元组 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A12" data-slug="function-approximation" data-part="进阶篇 · 第二部分 · 无模型方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第二部分 · 无模型方法</p>
+    <h1>函数逼近与致命三元组</h1>
+    <p class="lede">前面几课的算法都假设"每个状态动作对一个格子，记下来就行"。
+      真实问题的状态太多，这张表根本列不完。这一节说清两件事：
+      怎么用一套参数去替代表格，以及为什么把"参数化"和前面两个习惯凑在一起会变得不安全。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能说出表格法在连续状态与泛化上的两个硬伤</li>
+        <li>能解释半梯度与"真梯度"的差别，以及线性逼近为什么便宜</li>
+        <li>能背出致命三元组的三项，并说出 DQN（deep Q-network，深度 Q 网络）的两件装备各修哪一环</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>表格法的天花板</h2>
+    <p>到第 <a href="A10-q-learning.html">0010 课</a>为止，所有方法都默认 Q 是一张表：
+      每个 (s,a) 一个格子。这个假设在三种现实面前立刻塌掉。</p>
+    <ul>
+      <li>状态是连续的。库存水位、价格、温度、用户停留时长，取值有无穷多个，格子列不完。</li>
+      <li>就算能离散化，维度也是指数级涨的。10 个维度各分 10 档，
+        就是 10<sup>10</sup> 个格子（10 后面跟着 10 个 0）。</li>
+      <li>更麻烦的是表格法不会泛化（在没见过的状态上也能给出靠谱的估计）。
+        它只更新被访问过的那一个格子，没人去过的格子永远停在初始值；
+        而真实系统里，绝大多数状态是没见过的。</li>
+    </ul>
+    <p>还有一件事要顺手分清：状态转移（你做完动作之后，环境从当前状态跳到下一个状态）
+      在现实里往往是随机的，同一个动作可能跳到好几个地方。这一点后面还会用到。</p>
+    <p>出路是函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值）：
+      用一套参数 <var>w</var> 和一个特征（把原始状态加工成一组数字，供函数使用）提取器
+      <span class="math">x(s)</span>，把状态直接映射成一个估计值 <span class="math">v̂(s;w)</span>。</p>
+    <p>记号读一遍。<span class="math">x(s)</span> 表示"把状态 s 加工成的那组数字"；
+      <span class="math">v̂(s;w)</span> 里那个小尖帽读作"估计"，
+      整体意思是"用参数 w 算出来的、对状态 s 值多少分的估计"。
+      这样一来，一个状态上的学习会自动扩散到相似状态上，
+      这就是"每个状态一个数"换成"一套参数加一组特征"得到的好处。</p>
+  </section>
+
+  <section>
+    <h2>半梯度 TD：少算了哪一项</h2>
+    <p>把 TD(0) 的更新搬到参数空间之前，先把三个词说清。
+      梯度（往哪个方向调参数能让误差下降最快）；
+      自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）；
+      策略（一套"看到什么状态就选什么动作"的规则）。</p>
+    <p>有了这三个词，做法就一句话：拿自举带来的误差去乘梯度。</p>
+    <p>式 (12.1) 里的 <span class="math">∇<sub>w</sub></span> 读作"对参数 w 求梯度"，
+      也就是"往哪个方向调 w，估计值上升得最快"；<span class="math">←</span> 读作"更新为"。
+      价值函数（从某个状态出发、按某套策略走下去，平均能拿多少总分）在这里被换成了
+      <span class="math">v̂(s;w)</span>，一个由参数 w 算出来的近似值。</p>
+    <div class="eq">
+      <span class="eq-body">w ← w + α δ<sub>t</sub> ∇<sub>w</sub> v̂(S<sub>t</sub>;w),&nbsp;&nbsp; δ<sub>t</sub> = R<sub>t+1</sub> + γ v̂(S<sub>t+1</sub>;w) − v̂(S<sub>t</sub>;w)</span>
+      <span class="eq-num">(12.1)</span>
+    </div>
+    <p>式中 α 是学习率（每次更新时往新信息的方向挪多远），
+      γ 是折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折），
+      δ 是 TD 误差（这一步的目标减去当前的估计）。</p>
+    <p>这叫半梯度（更新时只对"预测的那部分"求梯度，对"目标那部分"当常数看）TD，
+      "半"字的来源是它刻意少算了一半：
+      如果真把 <span class="math">δ<sup>2</sup></span> 当损失对 <var>w</var> 求梯度，
+      目标里那个 <span class="math">v̂(S<sub>t+1</sub>;w)</span> 也含 <var>w</var>，
+      求导会多出 <span class="math">−γ∇<sub>w</sub>v̂(S<sub>t+1</sub>;w)</span> 这一项。
+      半梯度假装目标是常数，只对 <span class="math">v̂(S<sub>t</sub>;w)</span> 求导。</p>
+    <p>这不是偷懒。真梯度法在自举目标下需要知道转移概率
+      （这一步动作之后跳到哪，有好几种可能，每种各带着自己的概率），
+      而且它优化的并不是我们要的东西；半梯度虽然"不完整"，但时序差分
+      （不用等到一局结束，用"走一步之后的新估计"来更新"走这一步之前的估计"）
+      能在无模型条件下工作，靠的就是它（S&amp;B 第 9.3 节）。
+      线性情形最能看清成本：<span class="math">v̂(s;w) = w · x(s)</span>，
+      梯度就是 <span class="math">x(s)</span>，更新变成 <span class="math">w ← w + α δ x(S<sub>t</sub>)</span>，
+      一次向量加法，和表格法一样便宜。</p>
+  </section>
+
+  <section>
+    <h2>特征怎么造</h2>
+    <ul>
+      <li>粗编码（把每个维度切成若干互相重叠的小段，落在同一段里的状态共用同一份权重），
+        也叫 tile coding。可以想成给一整条数轴盖上一叠错开的网格：相邻的位置会落在
+        好几个相同的格子里，于是它们自动共享经验。没访问过的状态只要与访问过的同段，
+        立刻就有了合理的值。这是实践里最常用的一种。</li>
+      <li>多项式特征：<span class="math">x(s) = [1, s, s², …]</span>。
+        它的曲线很光滑，但把同一个公式用到训练区间之外，高阶项会迅速变成很大的数。</li>
+      <li>傅里叶基（Fourier basis）：适合拟合光滑函数，频率成分可以逐档控制。</li>
+    </ul>
+    <p>关键直觉：泛化是双刃剑。粗编码让没去过的状态也有值（好），
+      但把同一套参数用到训练分布之外，输出的值可能毫无意义（坏）。
+      下一道代码题会让你亲眼看到这件事。</p>
+  </section>
+
+  <section>
+    <h2>致命三元组</h2>
+    <p>S&amp;B 把下面三件事同时出现的情形称为
+      <span class="term">致命三元组（deadly triad，三件事凑在一起会出事）</span>：</p>
+    <ol>
+      <li>函数逼近（用一个带参数的函数替代表格）</li>
+      <li>自举（拿估计去更新估计）</li>
+      <li>用 off-policy（边学的那套策略不是产生数据的那套，数据来自另一套旧策略）的方式训练</li>
+    </ol>
+    <p>单独看每一件都没问题，凑齐之后就不再有稳定学好的保证。
+      收敛（一轮轮算下去，数值不再明显变化，稳定下来了）说的就是这件事。
+      下面这张表列出几种组合，表里有两个词先说清：
+      蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）；
+      回报（从现在起一直到结束，把每一步奖励加起来的总分）。
+      去掉任意一件都安全：</p>
+    <table>
+      <thead><tr><th>组合</th><th>结果</th></tr></thead>
+      <tbody>
+        <tr><td>表格法 + 自举 + off-policy</td><td>Q-learning，收敛（第 0010 课）</td></tr>
+        <tr><td>函数逼近 + 自举 + on-policy</td><td>线性 SARSA(λ)，通常可用（第 0011 课）</td></tr>
+        <tr><td>函数逼近 + off-policy + 不自举</td><td>蒙特卡洛式的回报回归，也还行</td></tr>
+      </tbody>
+    </table>
+    <p>失败长什么样：权重数值一路膨胀到 <code>inf</code>；价值曲面被"扫"成一条完全错误的直线；
+      策略在训练中期突然锁死。这三种症状在真实项目里都出现过。</p>
+  </section>
+
+  <section>
+    <h2>为什么会这样，以及 DQN 怎么修</h2>
+    <p>off-policy 意味着训练数据的分布（这批数据偏向哪些情况）跟行为策略实际访问到的状态
+      跟目标策略将要访问的不是同一批。函数逼近又把这个状态上的更新扩散到整个邻域：
+      如果你恰好用错误分布上的误差去反复修正目标策略才关心的区域，误差就会被放大；
+      自举又提供了让误差自我循环的路径。两件事叠加，误差可以越滚越大。</p>
+    <p>DQN 加的两件工程装备，正好各自对付其中一个环节。
+      经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用）
+      把高度相关的在线样本打散成近似独立同分布的批次，削弱"分布漂移 + 样本相关"的放大效应，
+      同时让每条样本被复用很多次。
+      目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑）
+      把自举目标固定一段时间，让"追逐一个同时在动的靶子"变回"回归一个短期不动的靶子"。
+      这两件事在 <a href="A13-dqn.html">0013 课</a>展开。</p>
+    <p>最后把几个会在练习里露面的词分清。
+      策略评估（给定一套策略，算出它到底值多少分）；
+      策略改进（根据算出的分数，把策略里明显吃亏的选择换掉）；
+      策略迭代（反复"打分 → 改招"，直到改不动为止）。
+      它们在别的算法里是一整套循环，这里只借名字做对照。</p>
+    <p>再补三个。随机策略（不挑好坏、纯靠概率乱选动作的规则）；
+      重要性采样（用另一套策略产生的数据来估计当前策略的表现，需要按概率比例做修正）；
+      探索率（每次决策时，有多大比例的概率去做"随便试一个"）。</p>
+    <div class="note">
+      <p>三个诊断信号。权重爆炸成 <code>inf</code> 或 <code>NaN</code>（not a number，非数），先归一化特征、再降学习率；
+        训练区间内拟合不错但上线后预测离谱，多半是外推，先确认推理时的状态是否落在训练分布内；
+        训练损失在降而真实回报不涨，说明特征表达力不足，或者你在 off-policy 下用一个被污染的目标做拟合。</p>
+    </div>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 与函数逼近相比，表格法最根本的局限是什么？</p>
+      <ol class="mcq-options">
+        <li>每个状态动作对都要独立估计，没访问过的状态无法泛化</li>
+        <li>它无法处理随机性的环境，只能用于确定性的状态转移过程</li>
+        <li>它必须使用完整回合的数据，因此不能做单步的增量式更新</li>
+        <li>它的存储开销随动作数线性增长，动作一多就会耗尽内存</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：表格法把每个 (s,a) 当作互不相干的参数，
+          学到的东西不会迁移到别的状态上。状态连续或者维度一高，需要访问的格子数就爆炸，
+          而没被访问过的格子永远是初始值。函数逼近用共享参数解决的就是这一点。</p>
+        <p>B 与随机性无关，表格法处理随机环境毫无问题。C 说反了：TD 类方法用的就是单步增量更新，
+          表格法完全可以。D 是真实存在的代价，但存储通常不是先崩的那一环，泛化能力才是。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 半梯度 TD 与"真正的梯度下降"差在哪里？</p>
+      <ol class="mcq-options">
+        <li>它不调整学习率，而是固定用访问次数的倒数来做加权平均</li>
+        <li>它把自举目标当成常数，忽略了目标里对参数的那一部分梯度</li>
+        <li>它每次只用一条样本来更新，而真梯度每步要用一整个批次</li>
+        <li>它对奖励做了归一化处理，因此不再是无偏的参数更新规则</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (12.1) 里目标 <span class="math">R<sub>t+1</sub> + γv̂(S<sub>t+1</sub>;w)</span>
+          也依赖 <var>w</var>，真梯度会多出一项 <span class="math">−γ∇<sub>w</sub>v̂(S<sub>t+1</sub>;w)</span>。
+          半梯度直接把它丢掉了，而 TD 不需要环境模型就能工作，靠的就是这份"不完整"。</p>
+        <p>A 说的是一种步长调度，与梯度定义无关。C 说的是批量大小，不是梯度的差别。
+          D 与奖励归一化无关，而且半梯度并不是无偏的，这就是它的代价。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. 致命三元组指的是哪三件事同时出现？</p>
+      <ol class="mcq-options">
+        <li>探索策略、利用策略与折扣因子这三者同时出现在一次决策里</li>
+        <li>策略评估、策略改进与策略迭代这三步循环同时被反复调用</li>
+        <li>函数逼近、自举与 off-policy 训练三者同时被使用</li>
+        <li>经验回放、目标网络与 ε（探索率）衰减这三个工程技巧同时被启用</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：单独任意两项都有收敛结论，三项凑齐后现有的理论保证就消失了。
+          这也是为什么"用神经网络 + Q-learning + 回放缓冲区"必须额外加防护，
+          而表格 Q-learning 却可以放心用。</p>
+        <p>A 是 MDP（马尔可夫决策过程，就是"下一个状态只看现在、跟更早的历史无关"的那类问题设定）的基本要素，B 是动态规划的算法骨架，两者都不是危险性来源。
+          D 恰好相反：那三个技巧是缓解三元组后果的工程手段，不是问题本身。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 为什么 off-policy 与函数逼近放在一起会放大误差？</p>
+      <ol class="mcq-options">
+        <li>因为 off-policy 必须做重要性采样，而它会放大估计方差</li>
+        <li>因为 off-policy 不能自举，只能等回合结束再更新</li>
+        <li>因为目标策略是随机的，而随机策略的参数梯度本身就是有偏的</li>
+        <li>行为策略访问到的状态分布与目标策略要评估的分布并不一致</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：你在用一批来自行为策略的状态去拟合目标策略的价值，
+          两个分布不同；函数逼近又把这个状态上的误差扩散到整个邻域。
+          于是错误分布上的误差会被反复投影、放大，再通过自举循环回自己身上。</p>
+        <p>A 只在某些 off-policy 方法里成立，Q-learning 并不需要重要性采样。
+          B 说反了：off-policy 的自举是 Q-learning 的特点。
+          C 与目标策略是否随机无关，这里的关键是状态分布不匹配。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 参数化的价值函数在训练区间之外，通常表现为哪种行为？</p>
+      <ol class="mcq-options">
+        <li>平滑地延伸到无穷远处，单调逼近真实的长期价值</li>
+        <li>给出与最近训练数据接近的常数，或者毫无规律的乱跳值</li>
+        <li>自动回落到零，因为参数在没有数据的地方不会被更新</li>
+        <li>保持训练区间内的最大值，直到状态重新回到训练区间内</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：参数只被训练数据约束过，区间之外是什么样完全由函数形式决定。
+          线性或粗编码在远处通常给出一个常数（最后一个被激活的权重），
+          多项式则会迅速发散，而取模哈希的 tile coding 会直接"绕回"训练过的区域。</p>
+        <p>A 是一种常见的错觉：没有任何机制保证单调外推。C 错，参数不会因为"没有数据"就自动归零。
+          D 也没有依据，超出区间时的输出与区间内的最大值之间没有必然关系。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0012-code-1">
+      <h3>代码题 1 · 用线性特征实现半梯度 TD(0)</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>从本课起价值函数不再是一张表格，而是由一套参数 <code>w</code> 和特征 <span class="math">φ(s)</span> 算出来的函数。
+          半梯度 TD(0) 把式 (12.1) 的更新搬到参数空间，是函数逼近下做策略评估的最小单元。
+          这个函数对一条已经采好的轨迹扫一遍，被训练循环调用一次就更新一次 <code>w</code>；
+          输入是这条轨迹每一步的状态特征与奖励，输出是更新后的权重，拿它可以接着算 <span class="math">v̂(s;w)</span>。
+          这里补 numpy 的基础：<code>phi</code> 是形状 <code>(T+1, d)</code> 的二维数组，
+          可以看成 <code>T+1</code> 行、每行 <code>d</code> 个数的一个表格，
+          <code>phi[t]</code> 是第 <code>t</code> 行，也就是第 t 步状态的那组特征；下标从 0 开始。
+          <code>w @ phi[t]</code> 是两个一维数组的内积：每个位置各乘各的，再把所有乘积加起来，结果是一个数。</p>
+        <p>请实现 <code>semi_gradient_td(phi, rewards, gamma, alpha, w)</code>。</p>
+        <div class="eq">
+          <span class="eq-body">w ← w + α [ r<sub>t</sub> + γ w·φ<sub>t+1</sub> − w·φ<sub>t</sub> ] φ<sub>t</sub></span>
+          <span class="eq-num">(12.2)</span>
+        </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>phi</code>：形状 <code>(T+1, d)</code> 的二维 numpy 数组，<code>phi[t]</code> 是第 <code>t</code> 步状态的特征向量；
+            <code>phi[T]</code> 是最后一步之后那个状态的特征，终止时传全 0 行，<code>d</code> 是特征维数；</li>
+          <li><code>rewards</code>：长度 <code>T</code> 的一维奖励序列，<code>rewards[t]</code> 是从第 <code>t</code> 步转移拿到的即时奖励；</li>
+          <li><code>gamma</code>：折扣因子 γ，标量；</li>
+          <li><code>alpha</code>：学习率 α，标量；</li>
+          <li><code>w</code>：长度 <code>d</code> 的一维权重数组，是这次更新前对 <span class="math">v̂</span> 的估计。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状 <code>(d,)</code>：走完整条轨迹之后的权重，
+            用它就能算任意状态的值 <span class="math">v̂(s;w) = w·φ(s)</span>。不就地修改传入的 <code>w</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>传入的 <code>w</code> 调用后保持原值，返回的是新数组；
+          返回形状必须是 <code>(d,)</code>；奖励全为 0 且初始 <code>w</code> 为 0 时返回仍全为 0；
+          γ=0 时只学即时奖励，单状态、每步奖励 1 时收敛到 1.0；γ=0.9 且每步奖励 1 时收敛到 1/(1−0.9)=10；
+          更新只沿 <code>phi[t]</code> 做，测试里 delta=1、<code>w=[2,3]</code> 时应得 <code>[3,3]</code>，
+          把 <code>phi[t+1]</code> 那一侧的梯度也算进去则会得 <code>[3,2]</code>。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>第一步，复制一份可写的权重：<code>w = np.array(w, dtype=float)</code>。
+              它返回一个新数组，改起来不会影响调用方传进来的那个。</li>
+          <li>第二步，用 <code>for t in range(len(rewards))</code> 扫过每一步。
+              <code>rewards</code> 的长度是 <code>T</code>，所以 t 依次取 0 到 T−1。</li>
+          <li>第三步，取出这一步和下一步的特征：
+              <code>f = np.asarray(phi[t], dtype=float)</code>、
+              <code>f_next = np.asarray(phi[t + 1], dtype=float)</code>。</li>
+          <li>第四步，算 TD 误差：
+              <code>delta = rewards[t] + gamma * float(w @ f_next) - float(w @ f)</code>。
+              <code>w @ f</code> 返回内积，是一个数。</li>
+          <li>第五步，只沿 <code>f</code> 的方向更新：<code>w = w + alpha * delta * f</code>。
+              这里 <code>alpha * delta</code> 是一个数，乘到数组上时 numpy 会把每个元素各乘一遍。
+              半梯度的关键就在这一步：不要再减掉 <code>gamma * f_next</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def semi_gradient_td(phi, rewards, gamma, alpha, w):
+    # TODO: 半梯度 TD(0)：delta = r + gamma*v(s') - v(s)，w <- w + alpha*delta*phi[t]
+    return np.asarray(w, dtype=float)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+phi = np.ones((3001, 1))
+w = semi_gradient_td(phi, np.ones(3000), 0.9, 0.05, np.zeros(1))
+check(abs(w[0] - 10.0) < 0.2,
+      f"单状态、每步奖励 1、gamma=0.9 时 V 应收敛到 1/(1-0.9)=10，实际 {w[0]:.3f}")
+
+w_zero = semi_gradient_td(phi, np.ones(3000), 0.0, 0.05, np.zeros(1))
+check(abs(w_zero[0] - 1.0) < 1e-6,
+      f"gamma=0 时只学即时奖励，应收敛到 1.0，实际 {w_zero[0]:.6f}")
+
+w_keep = semi_gradient_td(phi[:6], np.zeros(5), 0.9, 0.5, np.zeros(1))
+check(np.allclose(w_keep, 0.0), "奖励全为 0 且初始 V=0 时 TD 误差为 0，w 不应变化")
+
+phi2 = np.array([[1.0, 0.0], [0.0, 1.0]])
+w2 = semi_gradient_td(phi2, np.array([0.0]), 1.0, 1.0, np.array([2.0, 3.0]))
+check(np.allclose(w2, [3.0, 3.0]),
+      f"半梯度只用 phi(s) 乘 TD 误差：delta = 3-2 = 1，w 应为 [3,3]；"
+      f"若把 v(s') 里参数的梯度也算进去会得到 [3,2]，实际 {np.round(w2, 3)}")
+
+w3 = semi_gradient_td(np.ones((4, 3)), np.ones(3), 0.9, 0.1, np.zeros(3))
+check(w3.shape == (3,), f"返回的 w 必须是一维、长度等于特征维数 3，实际 {w3.shape}")
+
+w4 = np.array([0.5])
+semi_gradient_td(phi[:4], np.ones(3), 0.9, 0.5, w4)
+check(abs(w4[0] - 0.5) < 1e-12, "不要就地修改调用方传入的 w，要返回新数组")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def semi_gradient_td(phi, rewards, gamma, alpha, w):
+    w = np.array(w, dtype=float)
+    for t in range(len(rewards)):
+        f = np.asarray(phi[t], dtype=float)
+        f_next = np.asarray(phi[t + 1], dtype=float)
+        delta = rewards[t] + gamma * float(w @ f_next) - float(w @ f)
+        w = w + alpha * delta * f
+    return w
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0012-code-2">
+      <h3>代码题 2 · 用粗编码特征观察外推失效</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>表格法不会泛化，粗编码用多组互相重叠的格子共享权重来补这个短板，
+          代价是把同一套 <code>w</code> 用到训练区间之外时输出会失真。
+          这题的两个函数是线性函数逼近的最小闭环：<code>coarse_code</code> 把连续标量状态编码成 0/1 特征向量，
+          <code>linear_value</code> 用这组特征和权重算出这一点的估计值。
+          式 (12.3) 里的 <code>idx</code> 是这一组格子里的第几格，<code>⌊ ⌋</code> 读作向下取整，
+          <code>offset</code> 是这一组格子相对数轴的错位量，<code>mod</code> 是取余数。
+          训练时先调前者拿特征、再调后者求值，这题看的就是这套特征在训练区间外的表现。</p>
+        <p>请实现 <code>coarse_code(x, n_tilings=4, n_tiles=8, width=1.0)</code> 与
+          <code>linear_value(w, x, n_tilings=4, n_tiles=8, width=1.0)</code>。</p>
+        <div class="eq">
+          <span class="eq-body">idx<sub>i</sub> = ⌊(x − offset<sub>i</sub>) / width⌋ mod n_tiles</span>
+          <span class="eq-num">(12.3)</span>
+        </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>coarse_code</code> 的 <code>x</code>：标量 float，状态在某一维上的取值；</li>
+          <li><code>coarse_code</code> 的 <code>n_tilings</code> / <code>n_tiles</code> / <code>width</code>：tiling 个数（默认 4）、
+            每个 tiling 的格子数（默认 8）、格宽（默认 1.0），第 <code>i</code> 个 tiling 的偏移是 <code>i / n_tilings</code>；</li>
+          <li><code>linear_value</code> 的 <code>w</code>：长度 <code>n_tilings*n_tiles</code> 的一维数组，与特征向量每个位置一一对应；</li>
+          <li><code>linear_value</code> 的 <code>x</code> / <code>n_tilings</code> / <code>n_tiles</code> / <code>width</code>：
+            与前者同义，用来生成同一个特征向量。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>coarse_code</code> 返回 <code>np.ndarray</code>，形状 <code>(n_tilings*n_tiles,)</code>，默认 <code>(32,)</code>：
+            每个 tiling 恰好一个位置是 1，占用下标 <code>i*n_tiles</code> 到 <code>(i+1)*n_tiles-1</code>，其余位置是 0；</li>
+          <li><code>linear_value</code> 返回 Python <code>float</code>：<code>w</code> 与
+            <code>coarse_code(x, n_tilings, n_tiles, width)</code> 的内积，也就是 <span class="math">v̂(x;w)</span>；不修改传入的 <code>w</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>默认参数下形状是 <code>(32,)</code>、恰好 4 个 1、取值只有 0 和 1；
+          <code>x=1.0</code> 与 <code>1.3</code> 的特征共享 1 到 3 个位置，相邻输入部分重叠，这是泛化的来源；
+          <code>x=1.0</code> 与 <code>4.0</code> 的特征不相等；
+          <code>x=100.0</code> 与 <code>4.0</code> 的特征完全相同，两者的预测值因此相等，外推失效；
+          用 <code>linspace(0, 4, 41)</code> 的特征最小二乘拟合出的 <code>w</code>，对 <code>x=2.0</code> 的预测与 2 相差不超过 0.5，
+          对 <code>x=100.0</code> 则退化回区间内的水平（小于 20）。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先写 <code>coarse_code</code>。第一步造一个全零数组：
+              <code>f = np.zeros(n_tilings * n_tiles)</code>，默认就是长度 32 的一排 0。</li>
+          <li>第二步，对每一组格子循环：<code>for i in range(n_tilings):</code>。
+              第 <code>i</code> 组占用的下标区间是 <code>i*n_tiles</code> 到 <code>(i+1)*n_tiles-1</code>。</li>
+          <li>第三步，算这一组里落在哪一格：<code>offset = i / n_tilings</code>，
+              <code>idx = int(np.floor((x - offset) / width)) % n_tiles</code>。
+              <code>np.floor(...)</code> 返回向下取整之后的浮点数，<code>int(...)</code> 再把它变成整数；
+              <code>%</code> 是取余数，Python 对负数也返回非负结果，所以编号总能落在
+              0 到 <code>n_tiles-1</code> 之间。</li>
+          <li>第四步，把这一格点亮：<code>f[i * n_tiles + idx] = 1.0</code>。循环结束后返回 <code>f</code>。</li>
+          <li>再写 <code>linear_value</code>，一行就够：
+              <code>return float(np.dot(np.asarray(w, dtype=float), coarse_code(x, n_tilings, n_tiles, width)))</code>。
+              <code>np.dot</code> 返回两个一维数组的内积，也就是"逐项相乘再求和"的结果，是一个数。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def coarse_code(x, n_tilings=4, n_tiles=8, width=1.0):
+    # TODO: 返回长度 n_tilings*n_tiles 的 0/1 特征向量，每个 tiling 恰好激活 1 个特征
+    return np.zeros(n_tilings * n_tiles)
+
+
+def linear_value(w, x, n_tilings=4, n_tiles=8, width=1.0):
+    # TODO: 线性值函数 = w 与 coarse_code(x) 的内积
+    return 0.0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+f = coarse_code(1.0)
+check(f.shape == (32,), f"特征维数应为 n_tilings*n_tiles = 32，实际 {f.shape}")
+check(abs(float(np.sum(f)) - 4.0) < 1e-9,
+      f"每个 tiling 恰好激活 1 个特征，4 个 tiling 共 4 个 1，实际 {float(np.sum(f)):.3f}")
+check(set(np.unique(f).tolist()) <= {0.0, 1.0}, "特征只能是 0 或 1")
+
+fa, fb = coarse_code(1.0), coarse_code(1.3)
+shared = int(np.dot(fa, fb))
+check(0 < shared < 4,
+      f"相邻输入的激活块会部分重叠，这是泛化的来源：应共享 1~3 个特征，实际共享 {shared} 个")
+
+check(not np.array_equal(coarse_code(1.0), coarse_code(4.0)),
+      "训练区间内不同位置的特征向量必须不同")
+
+check(np.array_equal(coarse_code(100.0), coarse_code(4.0)),
+      "取模会让 x=100 与 x=4 落到完全相同的特征上，外推因此失效")
+
+xs = np.linspace(0.0, 4.0, 41)
+Phi = np.stack([coarse_code(x) for x in xs])
+w_fit, *_ = np.linalg.lstsq(Phi, xs, rcond=None)
+check(abs(linear_value(w_fit, 2.0) - 2.0) < 0.5,
+      f"在训练区间内应当拟合得不错：v(2) 应接近 2，实际 {linear_value(w_fit, 2.0):.3f}")
+v_far = linear_value(w_fit, 100.0)
+check(v_far < 20.0,
+      f"把同一个 w 用到 x=100，预测会退化回区间内的水平（约 {v_far:.2f}）而不是 100")
+check(abs(v_far - linear_value(w_fit, 4.0)) < 1e-9,
+      "v(100) 与 v(4) 应当完全相等：模型对'远'这件事毫无概念")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def coarse_code(x, n_tilings=4, n_tiles=8, width=1.0):
+    f = np.zeros(n_tilings * n_tiles)
+    for i in range(n_tilings):
+        offset = i / n_tilings
+        idx = int(np.floor((x - offset) / width)) % n_tiles
+        f[i * n_tiles + idx] = 1.0
+    return f
+
+
+def linear_value(w, x, n_tilings=4, n_tiles=8, width=1.0):
+    return float(np.dot(np.asarray(w, dtype=float), coarse_code(x, n_tilings, n_tiles, width)))
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.)。
+        第 9 章给出式 (12.1) 的半梯度 TD 与线性逼近；第 11 章讨论 off-policy 下的函数逼近，
+        其中第 11.3 节 "The Deadly Triad" 是本节核心定义的来源。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>想看这套理论在深度 RL（reinforcement learning，强化学习）里的工程后果与对策，读 Lilian Weng 的
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">A (Long) Peek into Reinforcement Learning</a>
+        中关于 DQN 及其变体的部分。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "我手上的状态里有连续变量，帮我设计一组粗编码特征。"
+      或者 "我这套训练为什么会发散，帮我按致命三元组的三项逐条排查。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0017 · Robbins-Monro 算法及其收敛性 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0017" data-slug="robbins-monro" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 · 基础工具 ／ 第 17 课</p>
+    <h1>Robbins-Monro 算法及其收敛性</h1>
+    <p class="lede">求平均数是最好算的统计量，可样本一条一条到达时，我们并不想把它们全存下来。
+      本课从一个更新式出发，走到更难的题目上：手里只有一个黑盒，怎么找到它的零点。
+      答案是 Robbins-Monro 算法，简称 RM（罗宾斯-门罗算法）。它能不能靠近根，全看步长怎么选。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出均值估计的增量形式，并说明它省下了什么</li>
+        <li>能说清 Robbins-Monro 算法在什么意义上求解方程 $g(w)=0$</li>
+        <li>能陈述收敛定理的三个条件，并逐条说明每个条件在管什么</li>
+        <li>能构造反例说明两个步长条件缺一不可</li>
+        <li>能验证步长 $a_k=1/k$ 满足两个条件，并说明此时估计就是样本平均</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 从"求平均"的增量写法说起</h2>
+    <p>0001 课用大数定律说明了"多试几次取平均就准"，做法是把样本全部存下来再算一次平均。
+      可样本要是一条一条到达，这样做就得保存全部历史。还有一条路：每来一个样本，只把当前的估计挪一点。</p>
+    <p>设前 $k-1$ 个样本的算术平均记作 $w_k=\frac{1}{k-1}\sum_{i=1}^{k-1}x_i$。
+      第 $k$ 个样本 $x_k$ 到了之后，这 $k$ 个样本的平均是</p>
+    <div class="eq">
+      <span class="eq-body">$$w_{k+1}=\frac{1}{k}\sum_{i=1}^{k}x_i=\frac{1}{k}x_k+\frac{k-1}{k}w_k=w_k+\frac{1}{k}\big(x_k-w_k\big).$$</span>
+      <span class="eq-num">(17.1)</span>
+    </div>
+    <p>看式 (17.1) 的最后一个等号：式子里只有旧的估计 $w_k$ 和刚到的样本 $x_k$。</p>
+    <div class="def">
+      <span class="label">定义 17.2（增量式均值估计）</span>
+      <p>设 $x_1,x_2,\dots$ 是随机变量 $X$ 的样本，
+        $$w_{k+1}=w_k+\alpha_k\big(x_k-w_k\big),\qquad k=1,2,\dots$$
+        其中 $w_k$ 是第 $k$ 步对 $\E[X]$ 的估计，$\alpha_k$ 是步长，也就是学习率（每次更新时，往新信息的方向挪多远）。
+        当 $\alpha_k\in(0,1]$ 时，新估计是旧估计与样本 $x_k$ 的加权平均。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 190" role="img" aria-label="左边是把所有样本存下来再求平均，右边是只留一个估计值逐步更新">
+        <text x="26" y="22" class="val-b">存下所有样本再求平均</text>
+        <rect x="26" y="36" width="176" height="46" class="box"/>
+        <rect x="36" y="44" width="30" height="30" class="bar"/><text x="46" y="90" class="lbl">x₁</text>
+        <rect x="76" y="44" width="30" height="30" class="bar"/><text x="86" y="90" class="lbl">x₂</text>
+        <rect x="116" y="44" width="30" height="30" class="bar"/><text x="126" y="90" class="lbl">x₃</text>
+        <rect x="156" y="44" width="30" height="30" class="bar"/><text x="166" y="90" class="lbl">xₖ</text>
+        <text x="26" y="118" class="lbl">要保存 k 个数，再求和、再除以 k</text>
+        <line x1="248" y1="30" x2="248" y2="160" class="grid"/>
+        <text x="272" y="22" class="val-b">增量更新：只留一个数</text>
+        <rect x="272" y="40" width="56" height="40" class="box-a"/><text x="296" y="66" class="val">wₖ</text>
+        <path d="M336 60 H432" class="arrow-a"/><path d="M425 55 l9 5 l-9 5" class="arrow-a"/>
+        <text x="360" y="50" class="lbl">新样本 xₖ</text>
+        <rect x="272" y="104" width="56" height="40" class="box-a"/><text x="288" y="130" class="val">wₖ₊₁</text>
+        <path d="M300 84 V100" class="arrow-a"/><path d="M295 93 l5 9 l5 -9" class="arrow-a"/>
+        <text x="344" y="130" class="lbl">wₖ₊₁ = wₖ + aₖ(xₖ − wₖ)</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 17.1</span>
+        左边的做法要存下整批样本，右边的做法只维护一个数。每来一个样本，就把当前估计往样本方向推一小步；
+        步长 aₖ 决定推多远。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">命题 17.3（$\alpha_k=1/k$ 时估计就是样本平均）</span>
+      <p>取 $\alpha_k=1/k$，初值 $w_1$ 任意，则对一切 $k\ge1$ 有 $w_{k+1}=\frac{1}{k}\sum_{i=1}^{k}x_i$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（对 $k$ 归纳）</span>
+      <p>$k=1$ 时 $w_2=w_1+\frac{1}{1}(x_1-w_1)=x_1$，等于前 $1$ 个样本的平均，成立。</p>
+      <p>设 $w_k=\frac{1}{k-1}\sum_{i=1}^{k-1}x_i$，代入定义 17.2 的更新式：
+        $$w_{k+1}=w_k+\frac{1}{k}(x_k-w_k)=\frac{k-1}{k}w_k+\frac{1}{k}x_k
+        =\frac{1}{k}\sum_{i=1}^{k-1}x_i+\frac{1}{k}x_k=\frac{1}{k}\sum_{i=1}^{k}x_i.$$
+        归纳完成。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 17.4（步长不止一种取法）</span>
+      <p>$\alpha_k=1/k$ 只是最省事的一种。换成别的正数序列，$w_{k+1}$ 一般就没有这么干净的闭式解了。
+        于是问题变成：什么样的步长还能保证 $w_k$ 收敛（一轮轮算下去，数值不再明显变化，稳定下来了）到 $\E[X]$？</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 更一般的题目：只知道带噪声的输出</h2>
+    <p>均值估计只是特例。把视线放宽一点：给定函数 $g:\R\to\R$，要求解方程 $g(w)=0$。
+      如果 $g$ 的表达式已知，牛顿法这类算法可以直接用；麻烦在于 $g$ 可能根本写不出来。</p>
+    <p>假设手里只有一个黑盒：给它一个输入 $w$，它吐回一个带噪声的输出
+      $$\tilde{g}(w,\eta)=g(w)+\eta,$$
+      式中 $\eta$ 是观测噪声，$\tilde{g}$ 读作"g 加波浪号"。我们既不知道 $g$ 长什么样，
+      也不知道这次抽到的 $\eta$ 是多少，只能拿这一串带噪的输入输出把 $g(w)=0$ 的根找出来。</p>
+    <div class="eg">
+      <span class="label">例 17.5（优化问题也是求根问题）</span>
+      <p>要最小化 $J(w)$，一阶必要条件是 $\nabla_w J(w)=0$，其中 $\nabla_w$ 表示"对 $w$ 求梯度"
+        （往哪个方向调参数能让误差下降最快）。取 $g(w)=\nabla_w J(w)$，优化问题就变成了求根问题。
+        0019 课会看到，随机梯度下降走的就是这条路线。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 180" role="img" aria-label="黑盒把输入 w 变成带噪声的输出，零点在输入端是未知的">
+        <rect x="196" y="56" width="120" height="66" rx="6" class="box-a"/>
+        <text x="232" y="86" class="val-b">黑盒 g</text>
+        <text x="222" y="108" class="lbl">只知输入输出</text>
+        <path d="M60 89 H186" class="arrow-a"/><path d="M179 84 l9 5 l-9 5" class="arrow-a"/>
+        <text x="86" y="78" class="val">输入 w</text>
+        <path d="M326 89 H462" class="arrow-a"/><path d="M455 84 l9 5 l-9 5" class="arrow-a"/>
+        <text x="340" y="78" class="val">g(w) + η</text>
+        <circle cx="382" cy="112" r="3.5" class="dot"/><circle cx="404" cy="122" r="3.5" class="dot"/>
+        <circle cx="428" cy="104" r="3.5" class="dot"/><circle cx="444" cy="118" r="3.5" class="dot"/>
+        <text x="356" y="146" class="lbl">同一次输入，输出每次都不一样</text>
+        <text x="60" y="162" class="lbl">目标：找到让 g(w) = 0 的那个 w</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 17.2</span>
+        对同一个 w 反复观测，输出会在 g(w) 附近散开，散开的幅度由噪声决定。
+        算法没法消掉噪声，只能在噪声里一步步把 w 挪到根上。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. Robbins-Monro 算法</h2>
+    <div class="def">
+      <span class="label">定义 17.6（Robbins-Monro 算法）</span>
+      <p>RM 算法的迭代式是</p>
+      <div class="eq">
+        <span class="eq-body">$$w_{k+1}=w_k-a_k\,\tilde{g}(w_k,\eta_k),\qquad k=1,2,\dots$$</span>
+        <span class="eq-num">(17.2)</span>
+      </div>
+      <p>其中 $w_k$ 是第 $k$ 步对根的估计，$\tilde{g}(w_k,\eta_k)$ 是把 $w_k$ 送进黑盒后拿到的带噪输出，
+        $a_k>0$ 是步长。算法不需要关于 $g$ 的任何表达式，只需要能对给定的 $w$ 取一次观测。</p>
+    </div>
+    <p>它为什么能走到根上？先看没有噪声的简化版 $w_{k+1}=w_k-a_kg(w_k)$，假设 $g$ 单调递增、根 $w^*$ 唯一。</p>
+    <ul>
+      <li>若 $w_k>w^*$，则 $g(w_k)>0$，于是 $w_{k+1}=w_k-a_kg(w_k)\lt w_k$。只要 $a_kg(w_k)$ 不太大，就有 $w^*\lt w_{k+1}\lt w_k$。</li>
+      <li>若 $w_k\lt w^*$，则 $g(w_k)<0$，于是 $w_{k+1}>w_k$，同理 $w_k\lt w_{k+1}\lt w^*$。</li>
+    </ul>
+    <p>两种情况下 $w_{k+1}$ 都落在 $w_k$ 与 $w^*$ 之间，比 $w_k$ 更靠近根。
+      有噪声时这件事不再逐次成立，某一步可能被推错方向；但噪声均值为 $0$，走错的步在长期里会被走对的步抵掉。</p>
+    <div class="eg">
+      <span class="label">例 17.7（手算前几步）</span>
+      <p>取 $g(w)=\tanh(w-1)$，根是 $w^*=1$。设 $w_1=3$，$a_k=1/k$，先关掉噪声。
+        则 $w_2=3-\tanh(2)\approx3-0.964=2.036$，
+        $w_3\approx2.036-\frac{1}{2}\times0.776=1.648$，
+        $w_4\approx1.648-\frac{1}{3}\times0.570=1.458$。三步就从 $3$ 挪到了 $1.46$ 附近。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="RM 迭代在函数曲线与横轴之间来回投影，逐步逼近根">
+        <line x1="60" y1="190" x2="525" y2="190" class="axis-b"/>
+        <line x1="60" y1="26" x2="60" y2="190" class="axis-b"/>
+        <path d="M60 171 C 100 150 140 125 175 110 C 210 95 250 62 290 49 C 340 36 380 33 405 33 C 450 31 490 30 520 30" class="curve"/>
+        <text x="66" y="42" class="lbl">g(w)</text>
+        <text x="486" y="208" class="lbl">w</text>
+        <line x1="175" y1="110" x2="175" y2="190" class="mark"/>
+        <text x="150" y="222" class="val-b">w* = 1</text>
+        <line x1="405" y1="190" x2="405" y2="33" class="grid"/>
+        <circle cx="405" cy="190" r="4" class="dot-a"/><text x="392" y="178" class="val">w₁</text>
+        <circle cx="294" cy="190" r="4" class="dot-a"/><text x="286" y="178" class="val">w₂</text>
+        <circle cx="250" cy="190" r="4" class="dot-a"/>
+        <circle cx="228" cy="190" r="3" class="dot-a"/>
+        <circle cx="215" cy="190" r="3" class="dot-a"/>
+        <path d="M399 200 H300" class="arrow-a"/><path d="M307 195 l-9 5 l9 5" class="arrow-a"/>
+        <text x="296" y="218" class="lbl">每一步都比上一步更靠近根</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 17.3</span>
+        在 w₁ 处向上读到曲线上的 g(w₁) 是正的，于是往左挪 a₁g(w₁) 得到 w₂，再向上读一次，如此反复。
+        曲线在根左边为负、右边为正，这个"读一次、往反方向挪一点"的循环就把估计推向根。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4. 收敛性定理</h2>
+    <div class="thm">
+      <span class="label">定理 17.8（Robbins-Monro 收敛定理）</span>
+      <p>在式 (17.2) 的 RM 算法中，若</p>
+      <p>(1) $0\lt c_1\le\nabla_w g(w)\le c_2$ 对一切 $w$ 成立；</p>
+      <p>(2) 步长满足</p>
+      <div class="eq">
+        <span class="eq-body">$$\sum_{k=1}^{\infty}a_k=\infty,\qquad \sum_{k=1}^{\infty}a_k^2<\infty;$$</span>
+        <span class="eq-num">(17.3)</span>
+      </div>
+      <p>(3) $\E[\eta_k\mid\mathcal{H}_k]=0$ 且 $\E[\eta_k^2\mid\mathcal{H}_k]<\infty$，其中
+        $\mathcal{H}_k=\{w_k,w_{k-1},\dots\}$ 是到第 $k$ 步为止的历史；</p>
+      <p>那么 $w_k$ 几乎必然收敛到 $g(w^*)=0$ 的根 $w^*$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（此处引用，下一课补出）</span>
+      <p>本课不证明定理 17.8。证明路线留在下一课：先陈述 Dvoretzky 收敛定理，再把式 (17.2) 写成它的形式，逐条核对条件。
+        那条路线里需要外部结论的地方是拟鞅收敛定理，下一课会标明引用的位置。
+        另一种走鞅论的证明见 Borkar 的书第 2 章。</p>
+      <p>（引用，不在此证明）</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>式中 $\mathcal{H}_k$ 读作"历史"，意思是第 $k$ 步之前发生过的一切。$\E[\eta_k\mid\mathcal{H}_k]$ 是给定历史后的条件期望，
+      也就是"把历史按住不动，噪声平均下来是多少"。</p>
+    <div class="rem">
+      <span class="label">注记 17.9（条件 1 管形状）</span>
+      <p>$\nabla_wg(w)\ge c_1>0$ 说明 $g$ 单调递增，因此 $g(w)=0$ 的根存在且唯一。若 $g=\nabla_wJ$，
+        这条等价于 $J$ 是凸的，就是函数图像像一个碗。
+        上界 $\nabla_wg(w)\le c_2$ 防止函数陡到无穷。$g(w)=w^3-5$ 在 $|w|$ 大处的导数没有上界，
+        初始点选得不好算法就会发散；$g(w)=\tanh(w-1)$ 则上下界都有。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 17.10（条件 2 管步长）</span>
+      <p>式 (17.3) 的前一半说的是"总步长无限"，保证算法有足够的脚力走到根；
+        后一半说的是"步子最终必须越迈越小"。后一半成立时 $a_k\to0$，更新量 $a_k\tilde{g}(w_k,\eta_k)\to0$，
+        相邻两步的差 $w_{k+1}-w_k$ 趋于 $0$，估计才停得下来。这两条一个管"走得动"，一个管"停得下"。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 17.11（条件 3 管噪声）</span>
+      <p>噪声必须条件均值为 $0$，否则它会把估计一直推向一边。二阶矩有限则保证噪声不会偶尔大到把估计打飞。
+        条件只用到条件期望，所以允许噪声依赖历史，也不要求高斯分布。
+        $\{x_k\}$ 独立同分布且 $\E[x_k^2]<\infty$ 时，条件 3 自动满足。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 两个步长条件缺一不可</h2>
+    <p>定理给的是充分条件：满足就收敛。反过来问一句，式 (17.3) 的两半能不能删掉一半？
+      下面两个反例说明都不能删。它们只是反例论证：定理只管"满足就收敛"，不管"不满足就不收敛"，
+      所以只能对具体的反例做具体计算。</p>
+    <div class="eg">
+      <span class="label">反例 17.12（步长衰减太快：走不到）</span>
+      <p>取 $g(w)=\tanh(w-1)$，它满足条件 1，根是 $w^*=1$。关掉噪声，把步长改成 $a_k=2^{-k}$，
+        于是 $\sum_{k}a_k=1<\infty$，条件 2 的前半被破坏。从 $w_1=5$ 出发：
+        $$w_{k+1}=w_k-2^{-k}\tanh(w_k-1)\ge w_k-2^{-k},$$
+        因为 $|\tanh(z)|\le1$。把 $k=1,\dots,n$ 的这些不等式加起来，中间的 $w_k$ 两两抵消，
+        $$w_{n+1}\ge w_1-\sum_{k=1}^{n}2^{-k}>5-1=4 .$$
+        所以 $w_k$ 永远不小于 $4$，而根在 $1$，它一步也到不了。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 17.13（一般化的说法）</span>
+      <p>把每一步的位移加起来：$w_1-w_\infty=\sum_{k}a_k\tilde{g}(w_k,\eta_k)$，
+        所以总的可移动距离不超过 $\big(\sup_k|\tilde{g}|\big)\sum_k a_k$。
+        $\sum a_k$ 有限时这个上界有限，只要初始点离根比这个上界还远，算法就注定到不了。</p>
+    </div>
+    <div class="eg">
+      <span class="label">反例 17.14（步长不衰减：停不下来）</span>
+      <p>回到均值估计，让 $X$ 等概率地取 $0$ 和 $2$，则 $\E[X]=1$。取常数步长 $a_k\equiv1$：
+        $$w_{k+1}=w_k+1\cdot(x_k-w_k)=x_k .$$
+        估计值直接等于刚抽到的样本，于是在 $0$ 和 $2$ 之间来回跳，永远稳定不下来。
+        这里 $\sum a_k=\infty$ 是成立的，被破坏的是 $\sum a_k^2<\infty$。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 17.15（常数小步长为什么常用）</span>
+      <p>把步长取成常数 $a\in(0,1)$，递推变成 $w_{k+1}=(1-a)w_k+ax_k$。此时新噪声不断注入，
+        估计的方差稳定在 $\frac{a\sigma^2}{2-a}>0$，其中 $\sigma^2$ 是 $x_k$ 的方差；这个式子由
+        $\var(w)=a^2\sigma^2+(1-a)^2\var(w)$ 解出。所以 $w_k$ 不收敛到一个点，而是在最优点附近的一个小邻域里晃。
+        实践中常这样做：$a_k=1/k$ 到后期几乎不再吸收新样本，而常数小步长能跟上缓慢变化的系统。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 215" role="img" aria-label="左图是两条步长序列的累计和，右图是三种步长随时间的变化">
+        <text x="26" y="20" class="val-b">累计步长 Σaₖ</text>
+        <line x1="52" y1="160" x2="250" y2="160" class="axis-b"/>
+        <line x1="52" y1="34" x2="52" y2="160" class="axis-b"/>
+        <path d="M56 156 L90 140 L130 124 L170 110 L210 98 L246 88" class="curve"/>
+        <text x="146" y="84" class="lbl">aₖ = 1/k：一路涨</text>
+        <path d="M56 156 C 84 116 120 106 246 104" class="curve2"/>
+        <text x="112" y="134" class="lbl">aₖ = 2⁻ᵏ：停在 1</text>
+        <text x="26" y="184" class="lbl">累计和有限，走不到远处的根</text>
+        <text x="26" y="202" class="lbl">涨到无穷才走得动</text>
+        <line x1="272" y1="34" x2="272" y2="205" class="grid"/>
+        <text x="296" y="20" class="val-b">单步步长 aₖ</text>
+        <line x1="320" y1="160" x2="520" y2="160" class="axis-b"/>
+        <line x1="320" y1="34" x2="320" y2="160" class="axis-b"/>
+        <path d="M322 44 Q 360 96 516 120" class="curve"/>
+        <text x="392" y="72" class="lbl">aₖ = 1/√k：衰减太慢</text>
+        <path d="M322 62 Q 380 118 516 138" class="curve2"/>
+        <text x="396" y="152" class="lbl">aₖ = 1/k：平方可和</text>
+        <line x1="322" y1="102" x2="516" y2="102" class="mark"/>
+        <text x="330" y="96" class="lbl">aₖ = 常数：平方不可和</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 17.4</span>
+        左边看累计步长，右边看单步步长。aₖ = 1/k 的累计和涨到无穷（调和级数），单步的平方和有限（巴塞尔和），
+        两条都过关。aₖ = 2⁻ᵏ 的累计和只有 1，走不到远处的根；aₖ = 常数与 aₖ = 1/√k 的单步不衰减。</figcaption>
+    </figure>
+    <p>提一句 $a_k=1/\sqrt{k}$：它满足 $\sum a_k=\infty$，却破坏 $\sum a_k^2<\infty$，同样不收敛。
+      严格论证要用到独立随机变量级数的收敛判别法，本课不展开，这里只用它说明"只保留前半条是不够的"。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 520 200" role="img" aria-label="步长按二分之一的幂衰减时，估计值停在根的上方再也下不去">
+        <line x1="60" y1="36" x2="60" y2="180" class="axis-b"/>
+        <line x1="60" y1="180" x2="500" y2="180" class="axis-b"/>
+        <text x="24" y="30" class="lbl">wₖ</text>
+        <text x="486" y="196" class="lbl">k</text>
+        <path d="M80 44 C 140 52 200 62 260 66 C 350 69 430 68.5 490 68.5" class="curve"/>
+        <line x1="60" y1="68.5" x2="500" y2="68.5" class="mark"/>
+        <text x="250" y="60" class="lbl">下界 4：再往下走不动了</text>
+        <line x1="60" y1="144" x2="500" y2="144" class="mark"/>
+        <circle cx="60" cy="144" r="4" class="dot-a"/>
+        <text x="320" y="140" class="val-b">根 w* = 1</text>
+        <text x="86" y="40" class="val">w₁ = 5</text>
+        <text x="60" y="176" class="lbl">每步只挪 2⁻ᵏ，总位移不到 1</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 17.5</span>
+        步长按 2⁻ᵏ 衰减时，wₖ 很快降到 4 附近就停住了。它离根 w* = 1 还差 3，
+        可剩下的所有步长加起来也不到 1，所以永远补不上这段距离。</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg viewBox="0 0 520 190" role="img" aria-label="常数步长下估计值在最优解两侧来回跳，步长越小晃动幅度越小">
+        <line x1="60" y1="100" x2="500" y2="100" class="mark"/>
+        <text x="380" y="94" class="val-b">E[X] = 1</text>
+        <line x1="60" y1="30" x2="60" y2="170" class="axis-b"/>
+        <line x1="60" y1="170" x2="500" y2="170" class="axis-b"/>
+        <circle cx="90" cy="150" r="4" class="dot"/><circle cx="140" cy="50" r="4" class="dot"/>
+        <circle cx="190" cy="150" r="4" class="dot"/><circle cx="240" cy="50" r="4" class="dot"/>
+        <circle cx="290" cy="150" r="4" class="dot"/><circle cx="340" cy="50" r="4" class="dot"/>
+        <circle cx="390" cy="150" r="4" class="dot"/><circle cx="440" cy="50" r="4" class="dot"/>
+        <path d="M90 150 L140 50 L190 150 L240 50 L290 150 L340 50 L390 150 L440 50" class="arrow"/>
+        <path d="M100 118 L150 88 L200 112 L250 94 L300 106 L350 97 L400 103 L450 99" class="curve"/>
+        <circle cx="100" cy="118" r="3.5" class="dot-a"/><circle cx="150" cy="88" r="3.5" class="dot-a"/>
+        <circle cx="200" cy="112" r="3.5" class="dot-a"/><circle cx="250" cy="94" r="3.5" class="dot-a"/>
+        <circle cx="300" cy="106" r="3.5" class="dot-a"/><circle cx="350" cy="97" r="3.5" class="dot-a"/>
+        <circle cx="400" cy="103" r="3.5" class="dot-a"/><circle cx="450" cy="99" r="3.5" class="dot-a"/>
+        <text x="118" y="166" class="lbl">黑点：aₖ = 1，在 0 与 2 之间跳</text>
+        <text x="250" y="80" class="lbl">蓝点：aₖ = 0.2，只在小邻域里晃</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 17.6</span>
+        在反例 17.14 里，常数步长让估计值在两个样本值之间来回跳。把步长改小，跳动幅度随之收窄，
+        但它仍然在最优值附近晃，不会停在那一点上。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>6. 回到均值估计：验证 $a_k=1/k$</h2>
+    <p>把均值估计塞进 RM 的框架里。取</p>
+    <div class="eq">
+      <span class="eq-body">$$g(w)=w-\E[X],$$</span>
+      <span class="eq-num">(17.4)</span>
+    </div>
+    <p>则 $g(w)=0$ 的根就是 $w^*=\E[X]$。给黑盒一个 $w$，它吐回 $\tilde{g}(w,\eta)=w-x$，其中 $x$ 是 $X$ 的一个样本。
+      把观测写成"真实值加噪声"：</p>
+    <div class="eq">
+      <span class="eq-body">$$\tilde{g}(w,\eta)=w-x=\big(w-\E[X]\big)+\big(\E[X]-x\big)\doteq g(w)+\eta,\qquad \eta\doteq \E[X]-x .$$</span>
+      <span class="eq-num">(17.5)</span>
+    </div>
+    <p>式中 $\doteq$ 读作"定义为"。把式 (17.5) 代进式 (17.2) 得到</p>
+    <div class="eq">
+      <span class="eq-body">$$w_{k+1}=w_k-a_k\tilde{g}(w_k,\eta_k)=w_k-a_k\big(w_k-x_k\big),$$</span>
+      <span class="eq-num">(17.6)</span>
+    </div>
+    <p>它就是定义 17.2 里的增量式均值估计。</p>
+    <p>接着核对三个条件。由式 (17.4)，$\nabla_wg(w)=1$，取 $c_1=c_2=1$ 即可，条件 1 成立。
+      条件 3 里，$\E[\eta_k\mid\mathcal{H}_k]=\E[\E[X]-x_k]=0$，若样本二阶矩有限则二阶条件也成立。
+      剩下的条件是 2，取 $a_k=1/k$：</p>
+    <div class="eq">
+      <span class="eq-body">$$\sum_{k=1}^{\infty}\frac{1}{k}=\infty,\qquad \sum_{k=1}^{\infty}\frac{1}{k^2}=\frac{\pi^2}{6}<\infty .$$</span>
+      <span class="eq-num">(17.7)</span>
+    </div>
+    <p>式中 $\pi$ 是圆周率。式 (17.7) 的前一半：调和数的部分和约为 $\ln n+\kappa$，
+      $\kappa\approx0.577$ 是欧拉常数，所以它随 $n$ 无界增长；后一半是巴塞尔问题的结论，和约为 $1.645$。</p>
+    <div class="thm">
+      <span class="label">命题 17.16（均值估计的收敛性）</span>
+      <p>设 $x_1,x_2,\dots$ 独立同分布，$\E[x_k^2]<\infty$，取 $a_k=1/k$。
+        则增量式均值估计的 $w_k$ 几乎必然收敛到 $\E[X]$，而且这个结论不依赖 $X$ 服从哪一种分布。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（引用定理 17.8，条件逐条核对）</span>
+      <p>令 $g(w)=w-\E[X]$、$\eta_k=\E[X]-x_k$，则由式 (17.5)，观测满足 $\tilde{g}(w_k,\eta_k)=g(w_k)+\eta_k$，
+        这里要证的算法正好是式 (17.2) 的形式。</p>
+      <p>条件 1：由式 (17.4)，$\nabla_wg(w)=1$，取 $c_1=c_2=1$，对一切 $w$ 成立。</p>
+      <p>条件 2：由式 (17.7)，$\sum_k 1/k=\infty$，$\sum_k 1/k^2=\pi^2/6<\infty$。</p>
+      <p>条件 3：因为 $x_k$ 与历史 $\mathcal{H}_k$ 独立，而 $\E[X]$ 是常数，
+        $\E[\eta_k\mid\mathcal{H}_k]=\E[X]-\E[x_k]=0$；又
+        $\E[\eta_k^2\mid\mathcal{H}_k]=\E[(x_k-\E[X])^2]=\var(X)<\infty$。</p>
+      <p>三个条件都满足，由定理 17.8，$w_k$ 几乎必然收敛到 $g$ 的唯一根 $\E[X]$。
+        整个推导只在条件 3 用到二阶矩有限，没有用到分布的具体形状。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 17.17（和样本平均的关系）</span>
+      <p>由命题 17.3，$a_k=1/k$ 时 $w_{k+1}$ 恰好是前 $k$ 个样本的算术平均。
+        所以"样本平均"是 RM 在一个特定步长下的特例；换成别的合法步长照样收敛，
+        只是 $w_k$ 变成每个样本按不同权重计入的加权平均。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. 这个定理的证明在哪里</h2>
+    <div class="rem">
+      <span class="label">注记 17.18（本课给了什么，没给什么）</span>
+      <p>本课给出的是定理 17.8 的完整陈述、每个条件作用的解释、以及"两个步长条件都不能删"的反例，
+        证明块里只写了引用说明，没有假装证完。原因在于那条证明要用到鞅
+        （一类"给定过去之后平均不再变化的随机过程"）与拟鞅收敛定理，属于测度论概率的范围。</p>
+      <p>下一课会补上这条路，并指出引用拟鞅收敛定理的位置。
+        若想看另一种基于鞅的证明，可读 Borkar 的《Stochastic Approximation: A Dynamical Systems Viewpoint》第 2 章。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>增量式均值估计 $w_{k+1}=w_k+\alpha_k(x_k-w_k)$ 只维护一个数；$\alpha_k=1/k$ 时它就等于样本平均。</li>
+      <li>RM 算法 $w_{k+1}=w_k-a_k\tilde{g}(w_k,\eta_k)$ 只需要黑盒的输入输出，就能求 $g(w)=0$ 的根。</li>
+      <li>收敛定理的三条：$g$ 单调且导数有界；$\sum a_k=\infty$ 且 $\sum a_k^2<\infty$；噪声条件均值为 $0$ 且二阶矩有界。</li>
+      <li>两个步长条件分别管"走得动"和"停得下"，各有一个反例说明不能单独删掉。</li>
+      <li>均值估计取 $g(w)=w-\E[X]$ 就是 RM 的特例，$a_k=1/k$ 时收敛到 $\E[X]$，与分布形状无关。</li>
+    </ul>
+    <p>下一课换一个角度：与其对每个算法单独证明收敛，不如找一个统一的结果，
+      让 RM、均值估计、随机梯度下降全都变成它的特例。这个结果叫 Dvoretzky 收敛定理。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 关于 RM 算法 $w_{k+1}=w_k-a_k\tilde{g}(w_k,\eta_k)$，下列说法正确的是哪个？</p>
+      <ol class="mcq-options">
+        <li>它要求事先知道 $g$ 的解析表达式</li>
+        <li>它要求观测噪声服从高斯分布，否则不收敛</li>
+        <li>它只需要能对给定输入拿到带噪输出，不需要 $g$ 的表达式</li>
+        <li>它每次更新都要用一整批样本，而不是一个</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：RM 的全部输入就是"给一个 $w$，拿回一个 $\tilde{g}$"。$g$ 是黑盒，只能观测；
+          条件 3 也只要求条件均值为 $0$、二阶矩有限，不要求高斯。</p>
+        <p>A 恰好说反了：知道表达式就不必用这种只靠观测的办法。B 给条件 3 加了码，
+          噪声的分布形状不在要求之内。D 混淆了 RM 与批量算法，RM 每次只用一个观测值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 定理 17.8 的三个条件里，哪一条保证 $g(w)=0$ 的根存在且唯一？</p>
+      <ol class="mcq-options">
+        <li>$0\lt c_1\le\nabla_wg(w)\le c_2$ 对一切 $w$ 成立</li>
+        <li>$\sum_{k}a_k=\infty$</li>
+        <li>$\sum_{k}a_k^2<\infty$</li>
+        <li>$\E[\eta_k\mid\mathcal{H}_k]=0$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\nabla_wg(w)\ge c_1>0$ 说明 $g$ 严格单调递增，从负到正只会穿过横轴一次，
+          根因此存在且唯一。上界 $c_2$ 管的是函数不能陡到无穷。</p>
+        <p>B、C 管的是步长能不能走得到、停不停得下，与根的存在性无关。D 管的是噪声的平均方向。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 证明命题 17.3 时，归纳步里把 $\frac{k-1}{k}w_k$ 换成 $\frac{1}{k}\sum_{i=1}^{k-1}x_i$，依据是什么？</p>
+      <ol class="mcq-options">
+        <li>期望的线性性：可以把求和逐项拆开</li>
+        <li>噪声的条件均值为零：历史不影响噪声</li>
+        <li>大数定律：样本均值收敛到期望</li>
+        <li>归纳假设：$w_k$ 已经是前 $k-1$ 个样本的平均</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：归纳法要先把结论用到第 $k$ 步上，也就是 $w_k=\frac{1}{k-1}\sum_{i=1}^{k-1}x_i$，
+          才能把 $\frac{k-1}{k}w_k$ 换掉，然后验证 $k+1$ 也成立。</p>
+        <p>A 在这一步没被用到，它管的是期望的运算。B 是收敛定理的条件，与这个代数恒等式无关。
+          C 是一个极限结论，给不出 $w_k$ 的精确表达式。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 把均值估计的观测 $\tilde{g}(w,\eta)=w-x$ 写成 $g(w)+\eta$ 时，噪声项 $\eta$ 等于什么？</p>
+      <ol class="mcq-options">
+        <li>$\eta=x-\E[X]$</li>
+        <li>$\eta=\E[X]-x$</li>
+        <li>$\eta=\E[X]$</li>
+        <li>$\eta=w-\E[X]$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$w-x=(w-\E[X])+(\E[X]-x)$，前一个括号是 $g(w)$，剩下的 $\E[X]-x$ 就是 $\eta$，
+          这样取出的 $\eta$ 满足条件均值为零。</p>
+        <p>A 差一个负号。C 与样本 $x$ 无关，不是噪声。D 只是 $g(w)$ 本身，把它当噪声会让均值估计的
+          观测写成 $g(w)+g(w)$，对不上原式。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 条件 3 为什么写成条件期望 $\E[\eta_k\mid\mathcal{H}_k]=0$，而不是无条件的 $\E[\eta_k]=0$？</p>
+      <ol class="mcq-options">
+        <li>因为条件期望总比无条件期望更容易计算</li>
+        <li>因为非高斯噪声的无条件期望没有定义</li>
+        <li>因为估计值是随机的，噪声可以依赖历史，条件期望才能管住它</li>
+        <li>两种写法完全等价，区别只是和原书保持一致</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$w_k$ 是随机变量，$\eta_k$ 的分布可以依赖 $w_k$ 的取值。要求给定历史之后的条件均值为零，
+          才能保证每一步的更新方向在平均意义下指向根；无条件期望为零管不住这种依赖。</p>
+        <p>A 说反了，条件期望一般更难算。B 错在无条件期望对任何可积随机变量都有定义。
+          D 错在两者不等价，条件期望为零更强。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 在反例 17.12 中，由 $w_{k+1}=w_k-2^{-k}\tanh(w_k-1)$ 得到 $w_{k+1}\ge w_k-2^{-k}$，用的是哪一条？</p>
+      <ol class="mcq-options">
+        <li>中值定理：$g$ 的导数有上下界</li>
+        <li>双曲正切是单调递增的函数，取值有界</li>
+        <li>期望的线性性：可以把求和逐项拆开</li>
+        <li>$|\tanh(z)|\le1$，故这一项不超过 $2^{-k}$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：只需要知道 $\tanh$ 的取值落在 $-1$ 到 $1$ 之间，就能判断 $2^{-k}\tanh(\cdot)$ 的绝对值不超过 $2^{-k}$，
+          从而把等式放缩成不等式。</p>
+        <p>A 用不上，这一步不需要导数信息。B 的单调性在例 17.7 的定性分析里用过，这里只用取值范围。
+          C 与期望无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 步长取 $a_k=2^{-k}$ 时，$\sum_k a_k=1$，会出现什么问题？</p>
+      <ol class="mcq-options">
+        <li>总位移被 1 这个上界卡住，初始点离根超过 1 就永远走不到</li>
+        <li>步长衰减太快，浮点数的舍入误差会不断累积</li>
+        <li>噪声的方差会被逐渐放大成无穷大</li>
+        <li>方程根的个数会从唯一变成无穷多个</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每一步最多挪 $a_k\sup|\tilde{g}|$，总位移不超过 $\sum_k a_k\sup|\tilde{g}|=1$，
+          而反例里 $w_1$ 到根的距离是 4，所以 $w_k$ 永远停在 4 以上。</p>
+        <p>B 是另一个层面的问题，与这里的不等式无关。C 说反了：噪声不起放大作用，毛病出在步长太小。
+          D 混淆了"根的个数"和"能不能到达根"，根始终只有一个。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. 在均值估计里取常数步长 $a_k\equiv a\in(0,1)$，下列判断哪个对？</p>
+      <ol class="mcq-options">
+        <li>它满足两个步长条件，$w_k$ 几乎必然收敛到 $\E[X]$</li>
+        <li>它破坏 $\sum_k a_k^2<\infty$，$w_k$ 在最优点附近的一个邻域里持续抖动</li>
+        <li>它破坏 $\sum_k a_k=\infty$，$w_k$ 停在初始值不再移动</li>
+        <li>它让噪声的条件均值变成非零，估计出现系统性偏差</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：常数步长的平方和发散，所以条件 2 不再成立。递推 $w_{k+1}=(1-a)w_k+ax_k$ 的方差稳定在
+          $a\sigma^2/(2-a)>0$，估计不会收敛到一个点。</p>
+        <p>A 错在条件 2 不成立，收敛结论也就用不上。C 说反了，$\sum a_k=\infty$ 是成立的。
+          D 错在噪声本身没有变，它的条件均值仍然是零。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 增量式均值估计取 $w_1=0$，样本依次为 $2$、$4$、$6$，$\alpha_k=1/k$，则 $w_4$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$2$</li>
+        <li>$3$</li>
+        <li>$4$</li>
+        <li>$6$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：逐步算，$w_2=0+1\times(2-0)=2$，$w_3=2+\frac{1}{2}(4-2)=3$，
+          $w_4=3+\frac{1}{3}(6-3)=4$。它等于三个样本的算术平均。</p>
+        <p>A 只是第一个样本。B 是前两个样本的平均。D 只是最后一个样本。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 反例 17.12 中 $w_1=5$，$g(w)=\tanh(w-1)$，$a_k=2^{-k}$，可以保证 $w_k$ 始终满足什么？</p>
+      <ol class="mcq-options">
+        <li>$w_k\ge 1$</li>
+        <li>$w_k\ge 3$</li>
+        <li>$w_k\ge 5$</li>
+        <li>$w_k\ge 4$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把每一步的下界累加，得到 $w_{n+1}\ge 5-\sum_{k=1}^{n}2^{-k}>5-1=4$，
+          所以 $4$ 是能保证的那个下界。</p>
+        <p>A 的界太松，虽然也成立，却不是这段计算给出的结论。B 比 4 更强，保证不了。
+          C 明显不对，算法至少在往下走。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 6 章 6.1 节与 6.2 节。本课的定义 17.2、定义 17.6、定理 17.8 与两个反例的口径都取自这两节。</p>
+      <p>想补 RM 定理的其他证明路线，可读 V. S. Borkar,
+        <em>Stochastic Approximation: A Dynamical Systems Viewpoint</em>, 第 2 章。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把反例 17.12 的不等式再拆细一点讲一遍"，
+      或者 "为什么常数小步长在实践中反而比 1/k 更常用？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

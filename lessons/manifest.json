@@ -1,0 +1,307 @@
+{
+ "title": "强化学习的数学原理",
+ "subtitle": "对齐赵世钰《Mathematical Foundations of Reinforcement Learning》：31 课，含数学预备篇",
+ "lessonCount": 31,
+ "basedOn": "S. Zhao, Mathematical Foundations of Reinforcement Learning, Springer, 2025",
+ "parts": [
+  {
+   "id": "M1",
+   "name": "数学预备篇",
+   "lessons": [
+    "0001",
+    "0002",
+    "0003",
+    "0004"
+   ]
+  },
+  {
+   "id": "M2",
+   "name": "第一部分 · 基础工具",
+   "lessons": [
+    "0005",
+    "0006",
+    "0007",
+    "0008",
+    "0009",
+    "0010",
+    "0011",
+    "0012",
+    "0013",
+    "0014",
+    "0015",
+    "0016",
+    "0017",
+    "0018",
+    "0019"
+   ]
+  },
+  {
+   "id": "M3",
+   "name": "第二部分 · 算法",
+   "lessons": [
+    "0020",
+    "0021",
+    "0022",
+    "0023",
+    "0024",
+    "0025",
+    "0026",
+    "0027",
+    "0028",
+    "0029",
+    "0030",
+    "0031"
+   ]
+  }
+ ],
+ "lessons": [
+  {
+   "number": "0001",
+   "file": "0001-probability-basics.html",
+   "slug": "probability-basics",
+   "title": "概率论基础：随机变量、分布、期望、方差",
+   "part": "数学预备篇",
+   "source": "附录 A"
+  },
+  {
+   "number": "0002",
+   "file": "0002-conditional-expectation.html",
+   "slug": "conditional-expectation",
+   "title": "条件期望与全期望公式",
+   "part": "数学预备篇",
+   "source": "附录 A"
+  },
+  {
+   "number": "0003",
+   "file": "0003-linear-algebra.html",
+   "slug": "linear-algebra",
+   "title": "线性代数：向量、矩阵、范数与特征值",
+   "part": "数学预备篇",
+   "source": "附录 A"
+  },
+  {
+   "number": "0004",
+   "file": "0004-sequences-convergence.html",
+   "slug": "sequences-convergence",
+   "title": "序列与收敛：确定性序列与随机序列",
+   "part": "数学预备篇",
+   "source": "附录 C"
+  },
+  {
+   "number": "0005",
+   "file": "0005-mdp-elements.html",
+   "slug": "mdp-elements",
+   "title": "MDP 的五个要素：状态、动作、状态转移、策略",
+   "part": "第一部分 · 基础工具",
+   "source": "1.1–1.4"
+  },
+  {
+   "number": "0006",
+   "file": "0006-reward-return-mdp.html",
+   "slug": "reward-return-mdp",
+   "title": "奖励、回报、回合与 MDP 的定义",
+   "part": "第一部分 · 基础工具",
+   "source": "1.5–1.7"
+  },
+  {
+   "number": "0007",
+   "file": "0007-state-values.html",
+   "slug": "state-values",
+   "title": "状态值：为什么回报重要、怎么算回报",
+   "part": "第一部分 · 基础工具",
+   "source": "2.1–2.3"
+  },
+  {
+   "number": "0008",
+   "file": "0008-bellman-equation.html",
+   "slug": "bellman-equation",
+   "title": "贝尔曼方程：推导与实例",
+   "part": "第一部分 · 基础工具",
+   "source": "2.4–2.5"
+  },
+  {
+   "number": "0009",
+   "file": "0009-bellman-matrix-form.html",
+   "slug": "bellman-matrix-form",
+   "title": "贝尔曼方程的矩阵形式与求解；动作值",
+   "part": "第一部分 · 基础工具",
+   "source": "2.6–2.8"
+  },
+  {
+   "number": "0010",
+   "file": "0010-optimal-policy-boe.html",
+   "slug": "optimal-policy-boe",
+   "title": "最优策略与贝尔曼最优方程",
+   "part": "第一部分 · 基础工具",
+   "source": "3.1–3.3.2"
+  },
+  {
+   "number": "0011",
+   "file": "0011-contraction-mapping.html",
+   "slug": "contraction-mapping",
+   "title": "压缩映射定理及其证明",
+   "part": "第一部分 · 基础工具",
+   "source": "3.3.3–3.3.4"
+  },
+  {
+   "number": "0012",
+   "file": "0012-solve-boe.html",
+   "slug": "solve-boe",
+   "title": "从 BOE 求解最优策略；影响最优策略的因素",
+   "part": "第一部分 · 基础工具",
+   "source": "3.4–3.5"
+  },
+  {
+   "number": "0013",
+   "file": "0013-value-iteration.html",
+   "slug": "value-iteration",
+   "title": "值迭代：逐元素形式与实现",
+   "part": "第一部分 · 基础工具",
+   "source": "4.1"
+  },
+  {
+   "number": "0014",
+   "file": "0014-policy-iteration.html",
+   "slug": "policy-iteration",
+   "title": "策略迭代与截断策略迭代",
+   "part": "第一部分 · 基础工具",
+   "source": "4.2–4.3"
+  },
+  {
+   "number": "0015",
+   "file": "0015-mc-basic.html",
+   "slug": "mc-basic",
+   "title": "蒙特卡洛基础：均值估计与 MC Basic",
+   "part": "第一部分 · 基础工具",
+   "source": "5.1–5.2"
+  },
+  {
+   "number": "0016",
+   "file": "0016-mc-exploring-starts.html",
+   "slug": "mc-exploring-starts",
+   "title": "MC Exploring Starts、MC ε-Greedy 与探索-利用",
+   "part": "第一部分 · 基础工具",
+   "source": "5.3–5.5"
+  },
+  {
+   "number": "0017",
+   "file": "0017-robbins-monro.html",
+   "slug": "robbins-monro",
+   "title": "Robbins-Monro 算法及其收敛性",
+   "part": "第一部分 · 基础工具",
+   "source": "6.1–6.2"
+  },
+  {
+   "number": "0018",
+   "file": "0018-dvoretzky.html",
+   "slug": "dvoretzky",
+   "title": "Dvoretzky 收敛定理（含证明）",
+   "part": "第一部分 · 基础工具",
+   "source": "6.3"
+  },
+  {
+   "number": "0019",
+   "file": "0019-sgd.html",
+   "slug": "sgd",
+   "title": "随机梯度下降：BGD/SGD/mini-batch 与收敛性",
+   "part": "第一部分 · 基础工具",
+   "source": "6.4"
+  },
+  {
+   "number": "0020",
+   "file": "0020-td-state-values.html",
+   "slug": "td-state-values",
+   "title": "TD 学习状态值：算法、性质与收敛分析",
+   "part": "第二部分 · 算法",
+   "source": "7.1"
+  },
+  {
+   "number": "0021",
+   "file": "0021-sarsa-nstep.html",
+   "slug": "sarsa-nstep",
+   "title": "Sarsa 与 n-step Sarsa",
+   "part": "第二部分 · 算法",
+   "source": "7.2–7.3"
+  },
+  {
+   "number": "0022",
+   "file": "0022-q-learning-unified.html",
+   "slug": "q-learning-unified",
+   "title": "Q-learning、on/off-policy 与统一视角",
+   "part": "第二部分 · 算法",
+   "source": "7.4–7.5"
+  },
+  {
+   "number": "0023",
+   "file": "0023-function-approx-objective.html",
+   "slug": "function-approx-objective",
+   "title": "从表格到函数：目标函数与优化算法",
+   "part": "第二部分 · 算法",
+   "source": "8.1–8.2"
+  },
+  {
+   "number": "0024",
+   "file": "0024-sarsa-qlearning-fa.html",
+   "slug": "sarsa-qlearning-fa",
+   "title": "函数逼近下的 Sarsa 与 Q-learning",
+   "part": "第二部分 · 算法",
+   "source": "8.3"
+  },
+  {
+   "number": "0025",
+   "file": "0025-dqn.html",
+   "slug": "dqn",
+   "title": "DQN：基本思想与经验回放",
+   "part": "第二部分 · 算法",
+   "source": "8.4"
+  },
+  {
+   "number": "0026",
+   "file": "0026-policy-gradient-metrics.html",
+   "slug": "policy-gradient-metrics",
+   "title": "策略表示与两种度量：平均价值、平均奖励",
+   "part": "第二部分 · 算法",
+   "source": "9.1–9.2"
+  },
+  {
+   "number": "0027",
+   "file": "0027-policy-gradient-derivation.html",
+   "slug": "policy-gradient-derivation",
+   "title": "度量的梯度：折扣与非折扣情形的推导",
+   "part": "第二部分 · 算法",
+   "source": "9.3"
+  },
+  {
+   "number": "0028",
+   "file": "0028-reinforce.html",
+   "slug": "reinforce",
+   "title": "REINFORCE：蒙特卡洛策略梯度",
+   "part": "第二部分 · 算法",
+   "source": "9.4"
+  },
+  {
+   "number": "0029",
+   "file": "0029-qac-a2c.html",
+   "slug": "qac-a2c",
+   "title": "QAC 与 A2C：基线不变性",
+   "part": "第二部分 · 算法",
+   "source": "10.1–10.2"
+  },
+  {
+   "number": "0030",
+   "file": "0030-off-policy-ac.html",
+   "slug": "off-policy-ac",
+   "title": "Off-policy Actor-Critic 与重要性采样",
+   "part": "第二部分 · 算法",
+   "source": "10.3"
+  },
+  {
+   "number": "0031",
+   "file": "0031-deterministic-ac.html",
+   "slug": "deterministic-ac",
+   "title": "确定性 Actor-Critic 与 DPG 定理",
+   "part": "第二部分 · 算法",
+   "source": "10.4"
+  }
+ ]
+}

@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A20 · PPO：裁剪目标与工程实践 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A20" data-slug="ppo" data-part="进阶篇 · 第四部分 · 策略梯度与 Actor-Critic">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第四部分 · 策略梯度与 Actor-Critic</p>
+    <h1>PPO：裁剪目标与工程实践</h1>
+    <p class="lede">这一课解决一件事：怎么让每次更新都只挪一小步。
+      学完你能手写 PPO 那个"限速"的目标函数，按固定顺序调参，
+      并在训练崩掉时从 KL（Kullback–Leibler divergence，KL 散度）与裁剪比例看出病根。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出并读懂 <span class="math">min(r<sub>t</sub>(θ)（策略参数）A<sub>t</sub>, clip(·)A<sub>t</sub>)</span>，说清哪一侧梯度会被截断</li>
+        <li>能列出 PPO 的完整损失与工程细节，并知道每一项漏掉会出什么症状</li>
+        <li>能按"batch → 学习率 → ε（裁剪半径） → epoch → 系数"的顺序调参，并判断何时不该用 PPO</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>第一节：用限速代替硬约束</h2>
+    <p>先认两个词。<span class="term">策略（一套"看到什么状态就选什么动作"的规则）</span>就是那个决定动作的网络。
+      <span class="term">信赖域（规定这一步只允许在"离旧策略不太远"的范围内改，每次只许挪一小步）</span>
+      是上一课给更新幅度加的那道限速。</p>
+    <p><a href="A19-gae-trpo.html">0019 课</a>的 TRPO（trust region policy optimization，信赖域策略优化）
+      靠一个 KL 约束把更新限制在信赖域里，效果可靠，但每步都要 Fisher 向量积与线搜索，
+      实现和调试都很贵。<span class="term">PPO（proximal policy optimization，近端策略优化）</span>
+      换了个思路：不用显式约束，而把"更新太远就没有额外好处"直接写进目标函数。</p>
+    <p>铺垫两个概念。<span class="term">KL 散度（衡量两套概率分布差多远的指标）</span>在这里用来量"策略的行为变了多少"。
+      另一个是<span class="term">剪裁（把过大的更新幅度砍掉，不让这一步改得太狠，相当于限速）</span>，
+      它是 PPO 实现限速的手段。</p>
+    <p>再看它要用的<span class="term">概率比（新策略选中这个动作的概率，除以旧策略选中它的概率）</span>：</p>
+    <div class="eq">
+      <span class="eq-body">r<sub>t</sub>(θ) = π<sub>θ</sub>(a<sub>t</sub>|s<sub>t</sub>) / π<sub>old</sub>(a<sub>t</sub>|s<sub>t</sub>)</span>
+      <span class="eq-num">(20.1)</span>
+    </div>
+    <p>式中 θ 是策略参数，π 是策略分布，<var>a<sub>t</sub></var> 是第 t 步实际执行的动作。
+      比值为 1 表示新旧策略对这个动作的看法一样，大于 1 表示新策略更愿意选它。
+      φ 是价值网络（负责估计局面值多少分的那一方）的参数。</p>
+    <div class="eq">
+      <span class="eq-body">L<sup>CLIP</sup>(θ) = 𝔼<sub>t</sub>[ min( r<sub>t</sub>(θ)A<sub>t</sub>,
+        &nbsp; clip( r<sub>t</sub>(θ), 1−ε, 1+ε ) A<sub>t</sub> ) ]</span>
+      <span class="eq-num">(20.2)</span>
+    </div>
+    <p>式中 <var>ε</var> 是裁剪半径（概率比允许偏离 1 的范围，和被限制的步长直接相关），
+      上标 <span class="term">CLIP（clipped surrogate objective，裁剪代理目标）</span>只是在给这个目标起名字。
+      注意 <var>ε</var> 在这里是裁剪半径，不是
+      <span class="term">探索率（每次决策时，有多大比例的概率去做"随便试一个"）</span>，
+      跟"十次里有一次乱试"没有关系。</p>
+    <p>实践中常用 <span class="math">ε = 0.1 ~ 0.3</span>。
+      符号含义见 <a href="../reference/notation.html">符号表</a>（那里也提醒了
+      <var>ε</var> 在 ε-greedy 里是另一个意思）。</p>
+  </section>
+
+  <section>
+    <h2>第二节：这个 min 怎么读</h2>
+    <p>式子里 <span class="math">A<sub>t</sub></span> 是<span class="term">优势（在某个状态下，选这个动作比"平均水平"好多少，也就是你这一步比常规走法强多少）</span>。
+      先看 <span class="math">A<sub>t</sub> &gt; 0</span> 这一侧：这个动作比平均好，我们希望提高它的概率，
+      于是 <var>L</var> 随 <var>r<sub>t</sub></var> 线性上升。但一旦
+      <span class="math">r<sub>t</sub> &gt; 1+ε</span>，clip 把它压成常数
+      <span class="math">(1+ε)A<sub>t</sub></span>，min 选中这一项，梯度变成 0：
+      继续推高这个动作的概率不再获得任何奖励。</p>
+    <p>反过来 <span class="math">A<sub>t</sub> &lt; 0</span>：我们要降低概率，
+      <var>L</var> 随 <var>r<sub>t</sub></var> 下降；当
+      <span class="math">r<sub>t</sub> &lt; 1−ε</span> 时 min 选中的是那个更悲观的常数项，
+      梯度同样为 0。所以裁剪只掐掉"已经走太远还在往同方向使劲"的那些样本，
+      另一侧不管。</p>
+    <p>注意这只是一个近似做法：它并不是精确的 KL 约束，min 让它偏向悲观，样本量小时约束也不严格。
+      它买到的是"几乎不用额外代码就能多跑几个 <span class="term">epoch（把同一批数据完整过一遍）</span>"，
+      代价是对<span class="term">超参（需要你自己设定、而不是训练学出来的参数）</span>更敏感。</p>
+  </section>
+
+  <section>
+    <h2>第三节：完整损失与工程细节</h2>
+    <div class="eq">
+      <span class="eq-body">L<sup>total</sup> = L<sup>CLIP</sup> − c<sub>v</sub>( V<sub>φ</sub>(s) − V<sup>target</sup> )² + η H( π<sub>θ</sub>(·|s) )</span>
+      <span class="eq-num">(20.3)</span>
+    </div>
+    <p>式中 <var>c<sub>v</sub></var> 是价值系数，
+      H 就是熵（衡量"选择有多随机、多分散"；熵大代表还敢试），
+      η 是熵系数，控制熵那一项在目标里占的权重。
+      这一项的作用是强制留一点好奇心，别让策略过早锁死到一个动作上。</p>
+    <ul>
+      <li>优势归一化：每个 <span class="term">batch（一批样本）</span>内把 <var>A<sub>t</sub></var> 减均值除标准差。
+        这一项最容易漏，漏了几乎必崩，优势的尺度直接决定
+        <span class="term">策略梯度（不绕道去估价值，直接算参数往哪调能让拿到的总分更高）</span>的大小。</li>
+      <li>多 epoch：同一批数据复用 3 到 10 轮。这是剪裁买来的好处，
+        但复用过头会跑出信赖域，所以必须配下一项。</li>
+      <li>KL 早停：每个 epoch 结束算一次近似 KL，超过阈值
+        （常见 0.01–0.02）就提前结束这一批，不等跑满 epoch。</li>
+      <li>价值系数 <var>c<sub>v</sub></var> ≈ 0.5；熵（衡量"选择有多随机、多分散"；熵大代表还敢试）
+        那一项的系数 <var>η</var> ≈ 0.0–0.01（连续控制常用 0，靠动作分布自身的随机性探索）。</li>
+      <li><span class="term">学习率（每次更新时往新信息的方向挪多远）</span>线性衰减到 0；
+        梯度裁剪（如 0.5）；观测归一化、奖励缩放。</li>
+      <li>采样规模：并行环境数乘以 rollout（让程序跑一遍，把一路上遇到的经历收集起来）长度，决定每个 batch 有多少样本
+        （例如 8 × 2048）。样本太少时，同一份代码跑两次结果能差出好几倍。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>第四节：调参顺序与诊断</h2>
+    <p>超参多，但有先后：先定每个 batch 的样本量（太小学不动），
+      再调学习率，然后 <var>ε</var>，接着是 epoch 数与 KL 早停阈值，
+      最后才是 <var>c<sub>v</sub></var> 与 <var>η</var>。顺序对了，每次只动一个量就看得清效果。</p>
+    <table>
+      <thead><tr><th>症状</th><th>先查什么</th></tr></thead>
+      <tbody>
+        <tr><td>KL 迅速上升、剪裁比例 &gt; 0.3</td><td>步子太大：降学习率，或把 epoch 数、早停阈值收紧</td></tr>
+        <tr><td>熵很快掉到接近 0</td><td>提高 <var>η</var>，或降低学习率；也可能奖励尺度太大</td></tr>
+        <tr><td>价值损失不降、优势像噪声</td><td><var>c<sub>v</sub></var> 太小、观测没归一化，或 batch 太小</td></tr>
+        <tr><td>回报（从现在起一直到结束，把每一步奖励加起来的总分）曲线整体不涨、剪裁比例接近 0</td><td>步子太小：提高学习率或放宽 <var>ε</var></td></tr>
+        <tr><td>策略迟迟不收敛（数值不再稳定）</td><td>学习率太小，或 batch 里的样本太少</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>什么时候别用 PPO</h2>
+    <p><span class="term">基线（从回报里减掉的一个参照值，只降波动，不改平均方向）</span>是衡量好坏的参照。
+      PPO 的定位是"通用首选"，不是"永远最好"。它仍然是
+      on-policy（边学的那套策略，就是正在用来产生数据的那套）：每批数据用完就丢，
+      <span class="term">样本效率（拿到同样多的经验能学多好；效率高就是"更省数据"）</span>不高。
+      所以交互很贵时（真实业务、硬件在环），
+      <a href="A21-ddpg.html">0021 课</a>之后的
+      off-policy（边学的那套策略，不是产生数据的那套）方法更合适；
+      只需要模仿已有日志时，行为克隆又快又稳；奖励极稀疏时优势几乎全为 0，
+      应先改奖励而不是换算法。反过来说，<span class="term">动作空间（所有能选的动作组成的集合）</span>大、
+      连续、需要策略直接输出动作时，PPO 是默认答案。大模型的
+      RLHF（reinforcement learning from human feedback，基于人类反馈的强化学习）微调就属于这一类。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 式 (20.2) 里 min 的两个参数分别是什么？</p>
+      <ol class="mcq-options">
+        <li>裁剪后的概率比，以及裁剪前概率比与优势的乘积两项</li>
+        <li>新旧两套策略对同一个动作各自输出的<span class="term">对数概率（把概率取对数后的值）</span>的差值</li>
+        <li>未裁剪的概率比乘优势，以及裁剪后概率比乘同一个优势</li>
+        <li>优势的归一化值与未归一化值，取二者中较小的那一个</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：min 比较的是
+          <span class="math">r<sub>t</sub>(θ)A<sub>t</sub></span> 与
+          <span class="math">clip(r<sub>t</sub>(θ),1−ε,1+ε)A<sub>t</sub></span>：
+          同一个优势 <var>A<sub>t</sub></var>，区别只在概率比是否被裁剪，
+          取较悲观者。</p>
+        <p>A 把两项说混了，两项都乘了优势；B 描述的是计算概率比需要的量，不是 min 的参数；
+          D 与归一化无关，优势归一化是数据预处理，不进目标函数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 当 <span class="math">A<sub>t</sub> &gt; 0</span> 且
+        <span class="math">r<sub>t</sub> &gt; 1+ε</span> 时，这个样本对参数的梯度会怎样？</p>
+      <ol class="mcq-options">
+        <li>被截断为 0，因为 min 选中了压成常数的裁剪项</li>
+        <li>等于优势本身，因为概率比已被裁剪成常数 1+ε</li>
+        <li>被放大到 <span class="math">1+ε</span> 倍，等于奖励超范围的好动作</li>
+        <li>符号反转，把该动作的概率往相反方向压下去</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：clip 之后那一项与 <var>r<sub>t</sub></var> 无关，
+          是常数 <span class="math">(1+ε)A<sub>t</sub></span>；它比
+          <span class="math">r<sub>t</sub>A<sub>t</sub></span> 小，min 选中它，
+          于是对 <var>θ</var> 的梯度为 0，裁剪这个名字就是这么来的。</p>
+        <p>B 错在把目标值与梯度混为一谈：目标确实被固定住，梯度才是 0；
+          C 与裁剪的目的相反；D 不成立，PPO 不会把好动作的概率反向压低。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用）在 PPO 里怎么用？</p>
+      <ol class="mcq-options">
+        <li>它是 off-policy，能把旧数据存进回放缓冲区反复采样</li>
+        <li>它是 on-policy，同一批数据更新一次就必须丢弃</li>
+        <li>它靠剪裁稳定<span class="term">自举（用自己当前的估计去更新自己当前的估计）</span>目标，因此不需要再固定目标参数</li>
+        <li>它是 on-policy，但同一批数据可以安全地复用几轮</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：PPO 的数据仍来自当前策略，所以是 on-policy；
+          裁剪让代理目标在旧策略附近保持可信，因此同一批数据能跑多个 epoch。
+          它相对 REINFORCE 的样本效率提升就落在这里。</p>
+        <p>A 与事实相反，PPO 不用回放缓冲区；B 过于保守，忽略了裁剪带来的复用能力；
+          C 说的是<span class="term">目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次）</span>，
+          PPO 与目标网络是两件独立的事。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 训练时观察到 KL 迅速上升且裁剪比例超过 0.3，最该先动什么？</p>
+      <ol class="mcq-options">
+        <li>提高学习率让策略更快收敛到最优解，并放宽裁剪半径</li>
+        <li>降低学习率，并收紧 epoch 数或 KL 早停阈值</li>
+        <li>把优势归一化关掉，让不同样本的梯度尺度更接近</li>
+        <li>增大熵系数，用更多随机性抵消策略分布的快速移动</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：KL 大、裁剪比例高说明这一批数据被推得太远，
+          已经跑出代理目标可信的范围。直接手段是减小每步位移：降学习率、
+          少跑几个 epoch、把早停阈值收紧。</p>
+        <p>A 会火上浇油；C 与病因无关，关掉归一化通常让训练更不稳；
+          D 治的是"过早变确定"，不是"步子太大"，而且提高 <var>η</var> 也压不住 KL。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 下列哪种情形最不适合选 PPO？</p>
+      <ol class="mcq-options">
+        <li>动作连续、状态维度很高，需要策略直接输出动作向量</li>
+        <li>要在一个大语言模型上做奖励驱动的微调与对齐</li>
+        <li>每次与环境交互都极其昂贵，样本量被严格限制</li>
+        <li>需要一套公开实现多、容易对照复现的通用基线</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：PPO 是 on-policy，每批数据用完就丢，
+          样本效率天然吃亏。交互昂贵时应该优先 off-policy 方法（TD3）
+          或先用行为克隆拿到基线。</p>
+        <p>A、B、D 都是 PPO 的主场：连续高维动作、大模型 RLHF 微调、
+          需要通用可复现基线，公开实现最多。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0020-code-1">
+      <h3>代码题 1 · 算 PPO 的裁剪目标与梯度</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这个函数是 PPO 的核心一步：把这一步的更新幅度限制在一个范围内，不让策略被推得太远。训练循环在同一批数据上跑几个 <span class="term">epoch（把同一批数据完整过一遍）</span>，每个 minibatch 都调用它一次。返回的 <code>objective</code> 用来记录本轮的代理目标，返回的 <code>grad</code> 直接更新策略输出层的参数。两个对数概率（把概率取对数后的值）来自同一批样本上新旧两个策略，<code>clip_eps</code> 是裁剪半径 ε，限定概率比允许偏离 1 的范围，与探索率无关。</p>
+        <p>请实现 <code>ppo_clip_objective(new_log_probs, old_log_probs, advantages, clip_eps)</code>，只用标准库加 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>new_log_probs</code>：形状 <code>(B,)</code> 的 float 数组（<code>(B,)</code> 表示 B 个数的一维数组，下标从 0 开始），当前策略对这批所选动作的对数概率。</li>
+          <li><code>old_log_probs</code>：形状 <code>(B,)</code> 的 float 数组，采集这批数据时那个策略对同一批动作的对数概率。</li>
+          <li><code>advantages</code>：形状 <code>(B,)</code> 的 float 数组，第 i 项是 <span class="math">A<sub>i</sub></span>，也就是"这个动作比平均水平好多少"。</li>
+          <li><code>clip_eps</code>：Python float 标量 ε，裁剪半径，概率比被限制在 <code>[1−ε, 1+ε]</code> 内，工程上常用 0.1 到 0.3。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回二元组 <code>(objective, grad)</code>。<code>objective</code> 是 Python <code>float</code>，等于 <span class="math">mean( min( r·A, clip(r, 1−ε, 1+ε)·A ) )</span>，其中 <span class="math">r = exp(new_log_probs − old_log_probs)</span>。</li>
+          <li><code>grad</code> 是形状 <code>(B,)</code> 的 <code>np.ndarray</code>，逐分量给出 <code>objective</code> 对 <code>new_log_probs</code> 的偏导数。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会检查 r 落在裁剪区间内时梯度等于 A·r 再除以 B；A 为正、r 超过 1+ε 时梯度被截断为 0，同样位置 A 为负时梯度保持 A·r；A 为正、r 低于下界时目标取未裁剪项。还会用数值微分核对每个分量。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先算概率比 <code>r = np.exp(new_log_probs - old_log_probs)</code>
+            （<code>np.exp</code> 返回 e 的那么多次方，用来把对数概率的差还原成比值）。</li>
+          <li>再算 <code>unclipped = r * adv</code> 与
+            <code>clipped = np.clip(r, 1-eps, 1+eps) * adv</code>
+            （<code>np.clip</code> 把每个数夹在两个边界之间，超出的直接压到边界上）。
+            目标就是 <code>np.minimum(unclipped, clipped)</code> 的均值
+            （<code>np.minimum</code> 逐项取两个数组里较小的那个）。</li>
+          <li>哪一项被 min 选中，梯度就用哪一项的：未裁剪项对 <code>new_log_probs</code>
+            的导数是 <code>adv * r</code>，裁剪项是 <code>0</code>。</li>
+          <li>别忘了最后除以 <code>B</code>，因为目标用的是 <code>mean</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def ppo_clip_objective(new_log_probs, old_log_probs, advantages, clip_eps):
+    # TODO: r = exp(new - old)，目标 = mean(min(r*A, clip(r)*A))，并返回对 new_log_probs 的梯度
+    new_log_probs = np.asarray(new_log_probs, dtype=float)
+    return 0.0, np.zeros_like(new_log_probs)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+o, g = ppo_clip_objective(np.array([0.0]), np.array([0.0]), np.array([2.0]), 0.2)
+check(abs(o - 2.0) < 1e-12,
+      f"r=1、A=2 时目标就是 2.0，实际 {o:.6f}")
+check(np.asarray(g).shape == (1,), f"grad 形状应为 (1,)，实际 {np.asarray(g).shape}")
+check(abs(float(g[0]) - 2.0) < 1e-12,
+      f"r 正好在裁剪区间内，梯度应为 A*r = 2*1 = 2.0，实际 {float(g[0]):.6f}")
+
+o2, g2 = ppo_clip_objective(np.array([np.log(1.5)]), np.array([0.0]), np.array([2.0]), 0.2)
+check(abs(o2 - 2.4) < 1e-12,
+      f"A>0 且 r=1.5 > 1.2：目标被压成 1.2*2 = 2.4，实际 {o2:.6f}")
+check(abs(float(g2[0])) < 1e-12,
+      f"超出裁剪区间且 A>0 时梯度必须被截断为 0，实际 {float(g2[0]):.6f}")
+
+o3, g3 = ppo_clip_objective(np.array([np.log(1.5)]), np.array([0.0]), np.array([-2.0]), 0.2)
+check(abs(o3 - (-3.0)) < 1e-12,
+      f"A<0 且 r=1.5 时 min 选中未裁剪项：1.5*(-2) = -3.0，实际 {o3:.6f}")
+check(abs(float(g3[0]) - (-3.0)) < 1e-12,
+      f"A<0 时 r 偏大方向上不裁剪，梯度应为 A*r = -3.0，实际 {float(g3[0]):.6f}")
+
+o4, g4 = ppo_clip_objective(np.array([np.log(0.5)]), np.array([0.0]), np.array([2.0]), 0.2)
+check(abs(o4 - 1.0) < 1e-12 and abs(float(g4[0]) - 1.0) < 1e-12,
+      f"r=0.5 < 0.8 且 A>0：目标 min(1, 1.6) = 1.0，梯度 A*r = 1.0，实际 {o4:.6f} / {float(g4[0]):.6f}")
+
+n = np.array([0.0, np.log(1.5), np.log(0.5)])
+z = np.zeros(3)
+a = np.array([2.0, 2.0, 2.0])
+ob, gb = ppo_clip_objective(n, z, a, 0.2)
+check(abs(ob - (2.0 + 2.4 + 1.0) / 3.0) < 1e-12,
+      f"batch 目标 = mean(2.0, 2.4, 1.0) = 1.8，实际 {ob:.6f}")
+check(abs(float(gb[0]) - 2.0 / 3.0) < 1e-12 and abs(float(gb[1])) < 1e-12,
+      f"逐样本梯度应为 (2/3, 0, 1/3)，实际 {gb}")
+
+x = np.array([0.1, -0.1, 0.05])
+aa = np.array([1.0, 1.0, 1.0])
+_, ga = ppo_clip_objective(x, z, aa, 0.2)
+eps_fd = 1e-6
+for i in range(3):
+    up = x.copy(); up[i] += eps_fd
+    dn = x.copy(); dn[i] -= eps_fd
+    fd = (ppo_clip_objective(up, z, aa, 0.2)[0] - ppo_clip_objective(dn, z, aa, 0.2)[0]) / (2 * eps_fd)
+    check(abs(fd - float(ga[i])) < 1e-5,
+          f"grad[{i}] 与数值梯度不符：解析 {float(ga[i]):.8f}，数值 {fd:.8f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def ppo_clip_objective(new_log_probs, old_log_probs, advantages, clip_eps):
+    new_log_probs = np.asarray(new_log_probs, dtype=float)
+    old_log_probs = np.asarray(old_log_probs, dtype=float)
+    adv = np.asarray(advantages, dtype=float)
+
+    r = np.exp(new_log_probs - old_log_probs)
+    unclipped = r * adv
+    clipped = np.clip(r, 1.0 - clip_eps, 1.0 + clip_eps) * adv
+    use_unclipped = unclipped <= clipped
+
+    objective = float(np.mean(np.minimum(unclipped, clipped)))
+    grad = np.where(use_unclipped, adv * r, 0.0) / r.shape[0]
+    return objective, grad
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0020-code-2">
+      <h3>代码题 2 · 用数值轨迹验证梯度被截断</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这是一个诊断用的小实验，训练循环不会调用它。它把上一题的裁剪目标看成概率比 r 的一元函数，沿梯度上升一步步推 r 并记下轨迹，用来观察 r 走到哪里梯度会变成 0。写实验脚本或核对测试时可以用它验证裁剪的边界行为，<code>ratio0</code> 是初始概率比，<code>advantage</code> 是这批数据上的优势。</p>
+        <p>请实现 <code>clipped_ascent_trace(ratio0, advantage, clip_eps, lr, steps)</code>，只用标准库加 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>ratio0</code>：Python float，初始概率比，通常从 1.0 或某个已经偏离的值开始。</li>
+          <li><code>advantage</code>：Python float 标量 A，这份数据上的优势。</li>
+          <li><code>clip_eps</code>：Python float 标量 ε，裁剪半径，有效区间是 <code>[1−ε, 1+ε]</code>。</li>
+          <li><code>lr</code>：Python float 标量，每步的步长。</li>
+          <li><code>steps</code>：Python int，更新次数。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回长度 <code>steps+1</code> 的 Python <code>list</code>，元素都是 Python <code>float</code>：下标 0 是 <code>ratio0</code>，下标 k 是第 k 步更新后的 r。这里没有 batch 平均，不必除以任何数。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会检查返回长度等于 <code>steps+1</code>、首元素等于 <code>ratio0</code>；A 为正时轨迹单调不减，且不会越过 1+ε 一个步长以上；A 为负时单调不增。起点已越出上界且 A 为正、或已越出下界且 A 为负时，梯度为 0，轨迹原地不动。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>和上一题一样：先算 <code>unclipped = r*advantage</code> 与
+            <code>clipped = clip(r)*advantage</code>，比较两者决定梯度。</li>
+          <li><code>unclipped &lt;= clipped</code> 时用 <code>advantage</code>，
+            否则用 0。注意这里没有 batch 平均，不用除以任何数。</li>
+          <li>循环里每步结束后把新的 <var>r</var> 追加进列表。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def clipped_ascent_trace(ratio0, advantage, clip_eps, lr, steps):
+    # TODO: 逐步做梯度上升，返回每一步的 ratio（含初始值）
+    return [float(ratio0)] * (int(steps) + 1)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+t = clipped_ascent_trace(1.0, 1.0, 0.2, 0.07, 6)
+check(len(t) == 7, f"返回长度应为 steps+1 = 7，实际 {len(t)}")
+check(abs(t[0] - 1.0) < 1e-12, f"第 0 个元素必须是初始 ratio 1.0，实际 {t[0]}")
+check(all(b <= 1.2 + 0.07 + 1e-9 for b in t),
+      f"A>0 时 ratio 不应越过裁剪上界 1+eps = 1.2 一个步长以上，实际轨迹 {t}")
+check(t[-1] > 1.2 - 0.07 - 1e-9,
+      f"A>0 时梯度上升应把 ratio 推到上界附近（1.2 - lr = 1.13 以上），实际终点 {t[-1]:.6f}")
+check(all(t[i + 1] >= t[i] - 1e-12 for i in range(6)),
+      f"A>0 的轨迹应单调不减，实际 {t}")
+
+t2 = clipped_ascent_trace(1.5, 1.0, 0.2, 0.07, 3)
+check(all(abs(v - 1.5) < 1e-12 for v in t2),
+      f"起点已越过 1+eps，梯度为 0，轨迹必须原地不动，实际 {t2}")
+
+t3 = clipped_ascent_trace(1.0, -1.0, 0.2, 0.07, 6)
+check(all(b >= 0.8 - 0.07 - 1e-9 for b in t3),
+      f"A<0 时轨迹不应越过下界 1-eps = 0.8 太远，实际 {t3}")
+check(t3[-1] < 1.0 - 1e-6,
+      f"A<0 时策略应往下走（降低该动作概率），实际终点 {t3[-1]:.6f}")
+check(all(t3[i + 1] <= t3[i] + 1e-12 for i in range(6)),
+      f"A<0 的轨迹应单调不增，实际 {t3}")
+
+t4 = clipped_ascent_trace(0.5, -1.0, 0.2, 0.07, 4)
+check(all(abs(v - 0.5) < 1e-12 for v in t4),
+      f"起点已在下界之外，min 使目标变平，梯度为 0，轨迹必须不动，实际 {t4}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def clipped_ascent_trace(ratio0, advantage, clip_eps, lr, steps):
+    r = float(ratio0)
+    trace = [r]
+    for _ in range(int(steps)):
+        unclipped = r * advantage
+        clipped = float(np.clip(r, 1.0 - clip_eps, 1.0 + clip_eps)) * advantage
+        grad = advantage if unclipped <= clipped else 0.0
+        r = r + lr * grad
+        trace.append(r)
+    return trace
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>原始论文：Schulman et al., <em>Proximal Policy Optimization Algorithms</em>（arXiv 2017），
+        <a class="cite" href="https://arxiv.org/abs/1707.06347">1707.06347</a>。
+        式 (20.2) 与式 (20.3) 都出自它，第 5 节还给了裁剪目标与自适应 KL 版本的对比实验。</p>
+      <p>实现约定与超参默认值对照 Spinning Up 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/algorithms/ppo.html">PPO 章节</a>
+        （<a class="cite" href="https://spinningup.openai.com/en/latest/">spinningup.openai.com</a>）
+        与 Stable-Baselines3 文档中的
+        <a class="cite" href="https://stablebaselines3.readthedocs.io/en/master/">PPO 默认参数</a>。
+        两者对"多 epoch + KL 早停"的处理略有差别，值得对着读。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，把它当私教用。比如可以问：
+      "把我业务里的 PPO 超参按本课的调参顺序列成一张执行清单。"
+      或者 "我的裁剪比例一直在 0.5 左右，帮我判断是学习率问题还是 batch 太小。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

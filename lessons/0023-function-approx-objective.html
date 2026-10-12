@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0023 · 从表格到函数：目标函数与优化算法 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0023" data-slug="function-approx-objective" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法 4 ／ 第 23 课</p>
+    <h1>从表格到函数：目标函数与优化算法</h1>
+    <p class="lede">前面几课给每一个状态（此刻你能看到的信息，是你做决定的依据）都留了一个格子，
+      把状态价值（只看状态、不管具体选哪个动作的那个价值）写进格子里。状态一多，格子就装不下了。
+      这里改用带参数 $w$ 的函数 $\hat v(s;w)$ 来估价值，并把"怎么调 $w$"写成一个求最小化期望的问题。期望的意思是：同一件事重复很多次之后的平均结果，不是某一次的结果。</p>
+    <div class="objectives">
+      <h2>学完之后你会</h2>
+      <ul>
+        <li>能说清表格法在什么情况下会撑爆，以及函数逼近换来的是什么</li>
+        <li>能写出线性逼近、多项式逼近、神经网络逼近三种形式，并说出各自的适用场合</li>
+        <li>能写出真实值版与时序差分目标版两个目标函数，并指出它们的差别</li>
+        <li>能证明半梯度更新式为什么少了一项，并解释"不把目标里的 $w$ 当变量"这句话的意思</li>
+        <li>能判断一个函数逼近算法会不会因为三要素齐备而失去收敛保证</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 表格法什么时候会撑爆</h2>
+    <p>先把前面几课的算法摆出来。TD（temporal difference）。时序差分（用"走一步之后的新估计"来更新"走这一步之前的估计"）是这一族算法的总称。要学的对象是动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）。策略（一套"看到什么状态就选什么动作"的规则）分两个方向：同策略说的是边学的那套就是正在用来产生数据的那套，异策略说的是边学的那套不是产生数据的那套。Sarsa 属于前者，Q-learning 属于后者，它们的做法都是维护一张表，
+      每个状态或每个状态动作对占一格，走到哪个状态就改哪一格。这个方法能收敛（一轮轮算下去，数值不再明显变化，稳定下来了），
+      每一格的更新互不干扰，分析起来最干净。</p>
+    <p>格子数就是状态空间（所有可能状态的集合）的大小。围棋的合法局面大约有 $10^{170}$ 个，
+      一台机器存不下这么多格；就算存得下，绝大多数格子在训练中也永远走不到。
+      每一格又只从它自己收到的奖励里学习，走不到的状态就一直空着，经验也带不到新格子上，
+      这种在没见过的状态上也能给出靠谱估计的能力叫泛化，表格法不具备。</p>
+    <p>函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值）换一个思路：先找一组能描述状态的数字，再让这组数字经过带参数的函数算出价值。参数有限个，状态无限多也不怕。
+      代价是泛化不再免费：函数会把经验自动铺到相似状态上，铺对了是新状态上的准确估计，
+      铺错了就是系统性偏差（估计值总是往同一个方向偏离真值）。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="表格法格子数等于状态数，函数逼近的参数个数与状态数无关">
+        <text x="24" y="20" class="val-b">表格：一格一个状态</text>
+        <text x="24" y="40" class="lbl">格数 = 状态数</text>
+        <rect x="30" y="56" width="52" height="30" class="box"/><text x="48" y="76" class="val">0.1</text>
+        <rect x="94" y="56" width="52" height="30" class="box"/><text x="112" y="76" class="val">0.3</text>
+        <rect x="158" y="56" width="52" height="30" class="box"/><text x="176" y="76" class="val">?</text>
+        <rect x="30" y="92" width="52" height="30" class="box"/><text x="48" y="112" class="val">0.7</text>
+        <rect x="94" y="92" width="52" height="30" class="box"/><text x="112" y="112" class="val">?</text>
+        <rect x="158" y="92" width="52" height="30" class="box"/><text x="176" y="112" class="val">?</text>
+        <text x="30" y="146" class="lbl">右边还有 10 的 170 次方格</text>
+        <path d="M216 88 H246" class="arrow-a"/>
+        <path d="M240 84 l9 4 l-9 4" class="arrow-a"/>
+        <text x="252" y="86" class="val-b">走不到就空着</text>
+        <text x="252" y="104" class="lbl">经验带不过去</text>
+
+        <text x="24" y="180" class="val-b">函数逼近：一组参数算所有状态</text>
+        <rect x="248" y="152" width="164" height="50" class="box-a"/>
+        <text x="260" y="174" class="val">v(s; w) = w · φ(s)</text>
+        <text x="260" y="192" class="lbl">w 只要几十到几百万个数</text>
+        <path d="M420 176 H486" class="arrow"/>
+        <path d="M480 172 l9 4 l-9 4" class="arrow"/>
+        <text x="424" y="166" class="lbl">任一状态进来</text>
+        <text x="496" y="181" class="val-b">有值</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 23.1</span>
+        左边是表格法：每个状态一格，没走过的状态留在问号上。格子的数量跟着状态数量一起涨，
+        指数级的状态数就直接压垮存储。右边是函数逼近：只有一组参数，任何状态进来都能算出一个值，
+        代价是这些值互相牵制，改一个参数会改动很多状态上的估计。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 1.1（表格法是函数逼近的特例）</span>
+      <p>把状态用独热编码（只有对应的那一格是 1，其余全是 0）写成特征向量，配上线性函数就是表格法。
+        后面的结论在这个特例上都成立，只是退化成前面几课证过的定理，表格法因此是它的一个特例。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 三种逼近器</h2>
+    <p>这一节起，状态价值估计写成 $\hat v(s;w)$。式中 $s$ 是状态，
+      $w$ 是函数参数，也是唯一要调的东西。$\phi(s)$ 是特征向量，也就是把状态加工出来的一组数字，
+      $d$ 是特征个数。下面三种逼近器都写成这个形状，区别只在"用什么样的 $w$"。</p>
+    <div class="def">
+      <span class="label">定义 2.1（线性函数逼近）</span>
+      <p>取函数</p>
+      <div class="eq">
+        <span class="eq-body">$$\hat v(s;w)=\phi(s)^Tw=\sum_{i=1}^d\phi_i(s)\,w_i$$</span>
+        <span class="eq-num">(23.1)</span>
+      </div>
+      <p>就得到线性函数逼近，见式 (23.1)。式中 $\phi_i(s)$ 是特征向量的第 $i$ 个分量，$w_i$ 是对应权重。
+        它的梯度（往哪个方向调参数能让误差下降最快）有一个干净的形式：
+        $$\nabla_w\hat v(s;w)=\phi(s).$$
+        对每个状态动作对取值时，把特征换成 $\phi(s,a)$，参数 $w$ 仍共用一组。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 2.2（网格世界里的线性特征）</span>
+      <p>网格世界是一个方格棋盘，智能体（做决策的那一方，就是你写的程序）每步往上下左右走一格。
+        棋盘是 $5\times5$，状态用行列坐标 $(i,j)$ 表示。取三个特征
+        $\phi_1=1$、$\phi_2=i$、$\phi_3=j$，则 $\hat v(s;w)=w_1+w_2\,i+w_3\,j$，
+        相当于在棋盘上铺一张平面，$w_1$ 定高度，$w_2$ 与 $w_3$ 定倾斜方向。
+        真实价值离这张平面很远时，线性逼近就拟合不上。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 2.3（多项式函数逼近）</span>
+      <p>把状态写成实数向量 $s=(s_1,\dots,s_n)$，取特征为各分量的乘积项：
+        $$\phi(s)=\big(1,\;s_1,\;s_2,\;\dots,\;s_1^2,\;s_1s_2,\;\dots\big).$$
+        用一次项得到线性函数，加入二次项就能弯，加入更高次项就能模拟更复杂的曲面。
+        次数决定能拟合多复杂的形状，特征个数随次数上升。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 2.4（神经网络函数逼近）</span>
+      <p>把状态送进若干层线性与非线性变换的复合函数，最后一层输出一个数作为
+        $\hat v(s;w)$，$w$ 收集各层权重。它对 $w$ 非线性，梯度不再等于特征向量，要用反向传播（从输出端往回逐层套用链式法则）算出。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 580 210" role="img" aria-label="三种逼近器的结构与特点对比">
+        <text x="20" y="20" class="val-b">线性</text>
+        <rect x="20" y="60" width="34" height="24" class="box"/><text x="30" y="77" class="lbl">φ₁</text>
+        <rect x="20" y="94" width="34" height="24" class="box"/><text x="30" y="111" class="lbl">φ₂</text>
+        <rect x="20" y="128" width="34" height="24" class="box"/><text x="30" y="145" class="lbl">φ₃</text>
+        <text x="62" y="112" class="val">× w</text>
+        <path d="M96 106 H140" class="arrow"/>
+        <path d="M134 102 l9 4 l-9 4" class="arrow"/>
+        <rect x="144" y="88" width="52" height="40" class="box-a"/><text x="160" y="113" class="val">Σ</text>
+        <text x="20" y="180" class="lbl">一个平面，能直接解</text>
+        <text x="20" y="196" class="lbl">梯度就是 φ(s)</text>
+
+        <line x1="212" y1="30" x2="212" y2="196" class="grid"/>
+
+        <text x="232" y="20" class="val-b">多项式</text>
+        <rect x="232" y="52" width="40" height="22" class="box"/><text x="250" y="68" class="lbl">1</text>
+        <rect x="232" y="82" width="40" height="22" class="box"/><text x="244" y="98" class="lbl">s₁</text>
+        <rect x="232" y="112" width="40" height="22" class="box"/><text x="240" y="128" class="lbl">s₁²</text>
+        <rect x="232" y="142" width="40" height="22" class="box"/><text x="236" y="158" class="lbl">s₁s₂</text>
+        <text x="280" y="112" class="val">× w</text>
+        <path d="M312 106 H350" class="arrow"/>
+        <path d="M344 102 l9 4 l-9 4" class="arrow"/>
+        <rect x="354" y="88" width="46" height="40" class="box-a"/><text x="374" y="113" class="val">Σ</text>
+        <text x="232" y="180" class="lbl">能弯能起伏</text>
+        <text x="232" y="196" class="lbl">次数越高越容易震荡</text>
+
+        <line x1="416" y1="30" x2="416" y2="196" class="grid"/>
+
+        <text x="436" y="20" class="val-b">神经网络</text>
+        <circle cx="446" cy="66" r="9" class="dot"/><circle cx="446" cy="106" r="9" class="dot"/>
+        <circle cx="446" cy="146" r="9" class="dot"/>
+        <circle cx="500" cy="80" r="9" class="dot-a"/><circle cx="500" cy="126" r="9" class="dot-a"/>
+        <path d="M455 66 L491 78" class="arrow"/><path d="M455 106 L491 82" class="arrow"/>
+        <path d="M455 106 L491 124" class="arrow"/><path d="M455 146 L491 128" class="arrow"/>
+        <path d="M509 103 H556" class="arrow-a"/>
+        <path d="M550 99 l9 4 l-9 4" class="arrow-a"/>
+        <text x="436" y="180" class="lbl">特征自己学出来</text>
+        <text x="436" y="196" class="lbl">目标非凸，可能停在局部</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 23.2</span>
+        三种逼近器的结构差别。线性逼近把特征按权重加起来，形状最受限制但分析最完整；
+        多项式逼近靠增加高次项提高表达力，代价是数值范围拉大、更容易震荡；
+        神经网络自己从数据里学特征，表达力最强，但估计值对参数是非线性的，
+        目标函数不再只有一个谷底。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 2.5（怎么选）</span>
+      <p>三条线索可以拿来判断。第一，状态已经是结构化的向量时，手工特征加线性逼近常常够用，
+        收敛性还有完整结论。第二，状态是图像、声音这类原始信号时，人工写不出好特征，用神经网络。
+        第三，训练数据少的时候别上大网络，参数多过见过的状态数，泛化会先崩。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 目标函数：把预测问题写成一个最小化问题</h2>
+    <p>有了逼近器，接下来要问：哪一组 $w$ 最好？"最好"必须有判据，判据就是目标函数。</p>
+    <div class="def">
+      <span class="label">定义 3.1（真实值目标函数）</span>
+      <p>给定策略 $\pi$，记 $v_\pi(S)$ 为状态 $S$ 的真实状态价值，并记 $\gamma$ 为折扣因子（越往后的奖励，算进总分时权重越小）。定义</p>
+      <div class="eq">
+        <span class="eq-body">$$J(w)=\E\Big[\big(v_\pi(S)-\hat v(S;w)\big)^2\Big]$$</span>
+        <span class="eq-num">(23.2)</span>
+      </div>
+      <p>期望对状态分布取平均。让 $J(w)$ 最小的 $w$ 就是这一族函数里对 $v_\pi$ 拟合最好的那组。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 3.2（时序差分目标函数）</span>
+      <p>真实价值 $v_\pi$ 一般算不出来，但每一步交互都能给出一个样本。把式 (23.2) 里的真值换成
+        "走一步之后的估计"，定义</p>
+      <div class="eq">
+        <span class="eq-body">$$J(w)=\E\Big[\big(R+\gamma\,\hat v(S';w)-\hat v(S;w)\big)^2\Big]$$</span>
+        <span class="eq-num">(23.3)</span>
+      </div>
+      <p>式中 $S$ 是当前状态，$R$ 是这一步的奖励，$S'$ 是下一步状态；括号里那一项叫 TD 误差（时序差分误差，用走一步之后的新估计减去当前的估计）。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 230" role="img" aria-label="真实值目标里的参照物固定，时序差分目标里的参照物自己也在动">
+        <text x="20" y="20" class="val-b">真实值版</text>
+        <circle cx="60" cy="70" r="26" class="box"/><text x="34" y="75" class="val">v(s)</text>
+        <text x="30" y="112" class="lbl">固定的靶子</text>
+        <path d="M92 70 H196" class="arrow"/>
+        <path d="M190 66 l9 4 l-9 4" class="arrow"/>
+        <rect x="200" y="48" width="80" height="44" class="box-a"/>
+        <text x="208" y="68" class="val">v(s; w)</text>
+        <text x="208" y="84" class="lbl">预测</text>
+        <path d="M292 70 H336" class="arrow-a"/>
+        <path d="M330 66 l9 4 l-9 4" class="arrow-a"/>
+        <text x="346" y="66" class="val-b">误差平方</text>
+        <text x="346" y="84" class="lbl">只对预测求导</text>
+
+        <line x1="20" y1="126" x2="540" y2="126" class="grid"/>
+
+        <text x="20" y="152" class="val-b">时序差分目标版</text>
+        <circle cx="60" cy="192" r="26" class="box"/><text x="30" y="197" class="val">v(s; w)</text>
+        <text x="26" y="228" class="lbl">预测</text>
+        <path d="M92 192 H196" class="arrow"/>
+        <path d="M190 188 l9 4 l-9 4" class="arrow"/>
+        <rect x="200" y="168" width="104" height="44" class="box-a"/>
+        <text x="206" y="188" class="val">r + γ v(s'; w)</text>
+        <text x="206" y="204" class="lbl">目标</text>
+        <path d="M310 192 C346 192 344 116 250 104" class="arrow-a"/>
+        <path d="M256 99 l-10 2 l6 9" class="arrow-a"/>
+        <text x="316" y="180" class="lbl">同一个 w 也在目标里</text>
+        <text x="316" y="198" class="lbl">靶子跟着自己跑</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 23.3</span>
+        两版目标的差别在参照物。真实值版的参照物 v(s) 固定，误差纯粹由预测造成，
+        求导时只有一项带参数。时序差分目标版把参照物换成了奖励加上打折后的下一步估计，
+        它同样含参数，所以靶子会跟着当前估计一起移动。半梯度方法在这里选择不追靶子的移动。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 3.3（两版目标不是同一个东西）</span>
+      <p>把奖励写成 $R=r(S)+\eta$，其中 $\eta$ 的条件期望为零，且与参数无关。
+        代入式 (23.3) 并展开平方，交叉项的条件期望为零，于是目标变成
+        $$J_{\text{TD}}(w)=\E\Big[\big(r(S)+\gamma\hat v(S';w)-\hat v(S;w)\big)^2\Big]+\E[\eta^2].$$
+        第二项与参数无关。第一项要求 $\hat v(S;w)$ 逼近 $r(S)+\gamma\hat v(S';w)$ 的平均值，
+        式 (23.2) 却要求它逼近 $v_\pi(S)$：特征够用时答案相同，不够时一般不同。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.4（为什么要用带时序差分的目标）</span>
+      <p>真实值版需要 $v_\pi(S)$ 这个标准答案，而它就是要学的东西。带时序差分的版本只需要一段交互得到的
+        三元组 $(S,R,S')$，任何时刻都能取到样本。这与 0019 课讲 SGD（随机梯度下降）时一样：
+        目标里的期望拿不到，就用一个样本的梯度去顶替。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 梯度下降、半梯度下降与它们的差别</h2>
+    <p>目标函数写成期望的平方误差，接下来的常规动作是求梯度、沿负梯度方向走。
+      先看真实值版，它的梯度是干净的。</p>
+    <div class="thm">
+      <span class="label">定理 4.1（真实值目标的梯度）</span>
+      <p>若 $\hat v(s;w)$ 对 $w$ 可微，且期望与求导可以交换次序，则</p>
+      <div class="eq">
+        <span class="eq-body">$$\nabla_wJ(w)=-2\,\E\Big[\big(v_\pi(S)-\hat v(S;w)\big)\nabla_w\hat v(S;w)\Big]$$</span>
+        <span class="eq-num">(23.4)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记 $g(w,s)=\big(v_\pi(s)-\hat v(s;w)\big)^2$。期望是加权和，权重 $d_\pi(s)$ 与 $w$ 无关，
+        所以能逐项求导；对每项用链式法则得
+        $\nabla_wg(w,s)=-2\big(v_\pi(s)-\hat v(s;w)\big)\nabla_w\hat v(s;w)$，
+        写回期望即得式 (23.4)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>梯度下降就是把负梯度方向当步长方向。式中 $\alpha$ 是学习率（每次更新时，往新信息的方向挪多远），
+      太大会来回震荡，太小就学得慢。
+      $$w\leftarrow w+\alpha\,\E\Big[\big(v_\pi(S)-\hat v(S;w)\big)\nabla_w\hat v(S;w)\Big].$$
+      期望拿不到，就用一个样本顶替，单样本更新式就是 SGD 的做法。</p>
+    <p>带时序差分的目标版不能照抄这套，因为它的目标里也含 $w$。如果老老实实求梯度，会多出一项。</p>
+    <div class="thm">
+      <span class="label">定理 4.2（时序差分目标的真实梯度）</span>
+      <p>设 $\hat v$ 对 $w$ 可微，并记
+        $$\delta(w)=R+\gamma\hat v(S';w)-\hat v(S;w),$$
+        则</p>
+      <div class="eq">
+        <span class="eq-body">$$\nabla_wJ(w)=\E\Big[2\,\delta(w)\cdot\big(\gamma\nabla_w\hat v(S';w)-\nabla_w\hat v(S;w)\big)\Big]$$</span>
+        <span class="eq-num">(23.5)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>与定理 4.1 同路。记 $u(w)=r+\gamma\hat v(s';w)-\hat v(s;w)$，它就是要平方的量，于是
+        $\nabla_wu(w)=\gamma\nabla_w\hat v(s';w)-\nabla_w\hat v(s;w)$。乘上外层导数 $2u(w)$，
+        再对 $(S,R,S')$ 取期望即得式 (23.5)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="def">
+      <span class="label">定义 4.3（半梯度）</span>
+      <p>半梯度（更新时只对预测的那部分求梯度，对目标那部分当常数看）是一类更新方向。
+        把目标里的参数看成常数，这个动作记作停止梯度，则时序差分目标版的半梯度是</p>
+      <div class="eq">
+        <span class="eq-body">$$\widehat{\nabla}_wJ(w)=\E\Big[2\,\delta(w)\,\nabla_w\hat v(S;w)\Big]$$</span>
+        <span class="eq-num">(23.6)</span>
+      </div>
+      <p>
+        对应的更新式是</p>
+      <div class="eq">
+        <span class="eq-body">$$w\leftarrow w+\alpha\,\delta\,\nabla_w\hat v(S;w)$$</span>
+        <span class="eq-num">(23.7)</span>
+      </div>
+      <p>式中 $\delta$ 是这一步算出来的 TD 误差，$\alpha$ 是学习率。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（半梯度为什么不是任何目标的梯度）</span>
+      <p>思路：把式 (23.5) 拆成两项，看被丢掉的那一项能不能来自某个标量函数。
+        $$\nabla_wJ(w)=\underbrace{\E\big[-2\delta(w)\nabla_w\hat v(S;w)\big]}_{\text{半梯度}}
+          +\underbrace{2\gamma\,\E\big[\delta(w)\nabla_w\hat v(S';w)\big]}_{\text{被丢掉的一项}} .$$
+        记第二项的第 $j$ 个分量为 $g_j=2\gamma\,\E[\delta(w)\nabla_{w_j}\hat v(S';w)]$。
+        它若来自某个标量函数，就必须满足 $\partial_i g_j=\partial_j g_i$。算 $\partial_i g_j$：$\delta(w)$ 含 $\hat v(S;w)$，对 $w_i$ 求导给出 $-\nabla_{w_i}\hat v(S;w)$，
+        乘上 $\nabla_{w_j}\hat v(S';w)$；而 $\nabla_{w_j}\hat v(S';w)$ 也对 $w_i$ 求导，
+        给出 $-\nabla_{w_i}\nabla_{w_j}\hat v(S';w)$ 乘 $\delta(w)$。
+        把 $\partial_j g_i$ 照写并相减，含二阶导的项因求导次序可交换而抵消，只剩
+        $$2\gamma\,\E\Big[\nabla_{w_j}\hat v(S;w)\nabla_{w_i}\hat v(S';w)
+          -\nabla_{w_i}\hat v(S;w)\nabla_{w_j}\hat v(S';w)\Big].$$
+        两个期望梯度不成比例时它不为零，对称性不成立。线性逼近下看得最清楚：把两个期望梯度记作 $u$ 与 $v$，
+        差就是 $u_iv_j-u_jv_i$，只有 $u$ 与 $v$ 平行时才处处为零。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 240" role="img" aria-label="TD 误差到参数有两条梯度通路，半梯度只让其中一条通过">
+        <text x="96" y="24" class="val-b">误差 δ = r + γ v(s'; w) − v(s; w)</text>
+        <rect x="30" y="60" width="110" height="46" class="box-a"/>
+        <text x="46" y="80" class="val">v(s'; w)</text>
+        <text x="46" y="98" class="lbl">目标那一项</text>
+        <rect x="180" y="60" width="110" height="46" class="box-a"/>
+        <text x="196" y="80" class="val">v(s; w)</text>
+        <text x="196" y="98" class="lbl">预测那一项</text>
+
+        <path d="M85 106 V158" class="curve2"/>
+        <path d="M85 152 l-5 -9 l10 0" class="curve2"/>
+        <text x="96" y="140" class="lbl">γ 乘梯度</text>
+        <line x1="52" y1="122" x2="120" y2="122" class="mark"/>
+        <text x="26" y="176" class="lbl">被切断</text>
+
+        <path d="M235 106 V158" class="arrow-a"/>
+        <path d="M235 152 l-5 -9 l10 0" class="arrow-a"/>
+        <text x="246" y="140" class="lbl">梯度照常传</text>
+
+        <rect x="96" y="188" width="192" height="40" class="box-a"/>
+        <text x="108" y="213" class="val">w ← w + α δ ∇v(s; w)</text>
+        <path d="M235 164 V186" class="arrow-a"/>
+        <path d="M235 180 l-5 -9 l10 0" class="arrow-a"/>
+        <text x="304" y="204" class="lbl">只有右边这一条路</text>
+        <text x="304" y="222" class="lbl">进了参数更新式</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 23.4</span>
+        误差里有两个地方含参数，所以从误差回到参数有两条梯度通路。
+        左边那条来自目标里的下一步估计，右边那条来自预测里的当前估计。
+        半梯度把左边这条切断，只保留右边，于是更新式 (23.7) 里看不到目标那一项的导数。
+        误差本身照旧用两个估计来算，被丢掉的只是它对参数的那份导数。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 4.6（"不把目标里的 $w$ 当变量"是什么意思）</span>
+      <p>这句话说的是求导这一步的口径。写出 $\delta$ 时，下一步的估计照样用当前的 $w$ 算出来，
+        误差大小没有变；只有求 $\delta$ 对 $w$ 的导数时，才把 $\gamma\hat v(S';w)$ 看成常数。
+        换成操作上的话：先算数，再算导数，算数时用新参数，算导数时当它不动。
+        这与 0014 课讲目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次）时的做法是同一种思想。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 函数逼近下还收敛吗</h2>
+    <p>表格情形下前面几课的收敛证明都成立，换成函数逼近以后结论要弱很多。
+      先讲清"收敛到什么"。极限点也叫不动点（再迭代一次也不变的那种解）。</p>
+    <div class="thm">
+      <span class="label">定理 5.1（线性逼近下时差分不动点的一个刻画，引用）</span>
+      <p>设 $\hat v(s;w)=\phi(s)^Tw$。半梯度时差分方法的极限 $w^*$（若存在）满足
+        $$\E\Big[\phi(S)\big(R+\gamma\,\phi(S')^Tw^*-\phi(S)^Tw^*\big)\Big]=0 .$$
+        等价的说法是：$w^*$ 满足投影贝尔曼方程（把贝尔曼方程右端投影回特征能表示的子空间）。
+        当 $\phi(S)$ 的协方差矩阵可逆时，$w^*$ 唯一。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.2（为什么标成引用）</span>
+      <p>完整证明要先把贝尔曼算子与投影算子写成有界线性算子，再用无穷范数下的压缩性论证不动点存在且唯一，
+        属于原书第 8 章后面的内容；Tsitsiklis 与 Van Roy 在 1997 年给出了更一般的分析。
+        这里只用它说明一件事：投影会丢掉特征表达不出来的那部分，于是极限一般只是 $v_\pi$ 附近的一个点。
+        表格法里特征取独热向量，投影不丢东西，$w^*$ 才正好等于 $v_\pi$。</p>
+    </div>
+    <div class="thm">
+      <span class="label">命题 5.4（失去保证的原因）</span>
+      <p>把表格换成函数逼近之后，前面收敛证明的三根支柱都松了。</p>
+      <p>第一，压缩性不再直接可用。它在无穷范数下成立，而函数逼近只在加权二范数下测量误差，
+        两个范数不互相控制，压缩性传不到参数上。</p>
+      <p>第二，更新方向不再是梯度。半梯度丢掉了式 (23.5) 里的那一项，
+        更新可能长期沿着使目标函数上升的方向走，没有"每一步都下降"的保证。</p>
+      <p>第三，采样分布会随参数改变。改一个参数会同时改动很多状态的估计，进而改变之后访问哪些状态，
+        所需的数据分布（你手头这批数据是什么样的、偏向哪些情况）不再固定。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（第三点：为什么分布会跟着变）</span>
+      <p>思路：构造一个极小例子。设状态集合为 $\{A,B\}$，两者特征相同 $\phi(A)=\phi(B)=1$，估计值恒等。
+        采样分布起初各占一半，但从 $A$ 出发的真实价值是 $0$，从 $B$ 出发的是 $2$，于是更新把参数推向 $1$。
+        此后若行为策略朝估计值高的方向走，它更常去 $B$，分布偏到 $B$ 一侧；朝低的方向走则偏到 $A$ 一侧。
+        下一批样本的分布不再是一半一半，"固定分布下重复采样"这个前提保不住。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.5（把三个条件凑齐会出大事）</span>
+      <p>函数逼近、自举（用自己当前的估计去更新自己当前的估计）与异策略这三件事单独出现都还好，
+        同时出现就可能发散，这个组合在下一课有正式名字。前面几课的表格算法之所以稳，
+        靠的是表格这个特例带来的"每一格互不干扰"。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>表格法的格子数等于状态数，状态空间一大就存不下也用不上；函数逼近换成带参数的函数，换来泛化。</li>
+      <li>线性、多项式、神经网络各有取舍：线性好分析，多项式靠高次项弯曲，神经网络自造特征。</li>
+      <li>真实值目标是标准最小二乘；时序差分目标只需要交互样本，但目标里含参数。</li>
+      <li>半梯度的含义就是求导时把目标中的参数当常数，更新式用 TD 误差乘 $
+abla_w\hat v(S;w)$，少掉目标那一项。</li>
+      <li>函数逼近下压缩性、梯度方向、固定数据分布三根支柱都松了，收敛不再有一般保证。</li>
+    </ul>
+    <p>下一课把这里的目标函数落到具体算法上：写出函数逼近下的 Sarsa 与 Q-learning 更新式，
+      并解释那个会让算法发散的组合到底由哪几块拼成。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 关于线性函数逼近 $\hat v(s;w)=\phi(s)^Tw$，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>它比表格法表达力更强，因为参数可以取任意实数</li>
+        <li>它的梯度等于特征向量，能表示的函数族由特征选定</li>
+        <li>它不需要特征，网络会在训练里自动学出合适的特征</li>
+        <li>它的参数个数必须等于状态个数，否则覆盖不了状态</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：线性逼近的梯度是 $\nabla_w\hat v(s;w)=\phi(s)$，这一点让它的分析最干净。
+          它的表达力上限由特征决定：特征定下来，能表示的只是这些特征的线性组合。</p>
+        <p>A 错在混淆了参数的取值范围与表达力，能取任意实数并不等于函数形状更丰富。
+          C 描述的是神经网络逼近。D 错在正好说反：参数个数远小于状态个数才是用函数逼近的理由。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 真实值目标与时序差分目标的最主要差别是什么？</p>
+      <ol class="mcq-options">
+        <li>真实值目标不含期望，时序差分目标含有期望</li>
+        <li>真实值目标能用 SGD 优化，时序差分目标不能优化</li>
+        <li>真实值目标的极小值一定大于时序差分目标的极小值</li>
+        <li>时序差分目标里的参照物也含参数，求导时多出一项</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两个目标都是对期望求最小。差别在参照物：真实值版拿固定的 $v_\pi$ 当靶子，
+          时序差分版拿 $r+\gamma\hat v(s';w)$ 当靶子，后者同样含 $w$。</p>
+        <p>A 错在两者都含期望。B 错在时序差分目标可以用半梯度优化，只是这个方向不来自任何目标函数的梯度。
+          C 错在两个极小值之间没有这种大小关系，它们只是取了不同的最优点。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 从 $\nabla_w\E[\delta(w)^2]$ 推到半梯度更新式，丢掉了哪一项？</p>
+      <ol class="mcq-options">
+        <li>丢掉 $\gamma\nabla_w\hat v(S';w)$，也就是目标对参数的导数</li>
+        <li>丢掉 $\nabla_w\hat v(S;w)$，也就是预测对参数的导数</li>
+        <li>丢掉 $\delta(w)$ 前面的系数 $2$，因为它能并进学习率</li>
+        <li>丢掉折扣因子 $\gamma$，因为它与参数没有任何关系</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：真实梯度是 $2\delta(w)(\gamma\nabla_w\hat v(S';w)-\nabla_w\hat v(S;w))$，
+          半梯度把目标当常数，于是括号里第一项消失。</p>
+        <p>B 错在预测那一项必须保留，它决定参数往哪调。C 说的系数合并确实会发生，
+          但那只是把它吸收进学习率，不是半梯度的定义所在。D 错在 $\gamma$ 虽然与参数无关，
+          它乘的 $\nabla_w\hat v(S';w)$ 却与参数有关，被丢掉的恰好是整个乘积。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 为什么说半梯度一般不是任何目标函数的梯度？</p>
+      <ol class="mcq-options">
+        <li>因为学习率太小，更新量在数值上接近于零</li>
+        <li>因为期望无法精确计算，只能用样本去近似它</li>
+        <li>因为丢掉的那一项让更新方向的交叉偏导不再对称</li>
+        <li>因为估计值对参数不可微，梯度根本不存在</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：一个向量场要成为某个标量函数的梯度，交叉偏导必须相等。
+          半梯度丢掉的那一项破坏了这种对称性。</p>
+        <p>A 讲的是步长大小，和是不是梯度无关。B 讲的是估计误差，用样本近似梯度仍然是梯度。
+          D 错在估计值对参数可微，问题出在求导的口径上。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. 用线性逼近时把特征取成独热向量，半梯度时差分的极限会变成什么？</p>
+      <ol class="mcq-options">
+        <li>变成一个随机点，每次训练的极限都不同</li>
+        <li>变成特征向量的平均值，与真实价值没有关系</li>
+        <li>变成零向量，因为独热向量的分量只有 0 和 1</li>
+        <li>变成真实价值，因为投影不再丢掉任何分量</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：独热特征能精确表示任意一张表，投影到特征子空间这一步不损失信息，
+          所以投影贝尔曼方程的解就是 $v_\pi$，这与表格法收敛的那条定理一致。</p>
+        <p>A 错在极限点由方程唯一确定。B 错在把参数与特征搞混了。
+          C 错在独热特征本身不为零，零参数只是初始值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 状态空间是 $10^9$、特征个数是 $50$ 的问题里，下面哪种说法成立？</p>
+      <ol class="mcq-options">
+        <li>线性逼近需要 $10^9$ 个参数才能覆盖所有状态</li>
+        <li>参数只有 50 个，每个状态的估计都会被更新影响</li>
+        <li>参数只有 50 个，所以每步更新只影响一个状态</li>
+        <li>必须先跑完所有状态，参数才可能收敛到最优</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：参数个数由特征数决定，与状态数无关。改一个参数会同时改动许多状态上的估计，
+          这是泛化的来源，也是分析变难的原因。</p>
+        <p>A 描述的是表格法。C 描述的是表格法的局部性，函数逼近没有这种局部性。
+          D 错在不必走遍所有状态，代价是收敛保证会变弱。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 下面哪一组条件同时具备时，函数逼近下的学习可能发散？</p>
+      <ol class="mcq-options">
+        <li>函数逼近、自举与异策略同时出现</li>
+        <li>函数逼近、自举与同策略同时出现</li>
+        <li>表格法、自举与异策略同时出现</li>
+        <li>表格法、自举与同策略同时出现</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：可能发散的组合是函数逼近、自举与异策略。三者缺一，通常还有收敛结论可用。</p>
+        <p>B 把异策略换成了同策略，这时半梯度时差分有收敛结论。
+          C 用了表格法又没有自举，这两者历史上都稳。D 里没有自举，误差不会从估计本身回流，也就没有过估计（总取最大值导致估计系统性偏高）的机会。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 特征取 $\phi(s)=(1,i)^T$、参数 $w=(2,3)^T$，状态 $(i,j)=(4,7)$ 的估计值是多少？</p>
+      <ol class="mcq-options">
+        <li>把坐标乘起来，得 $2+84=86$</li>
+        <li>常数项也乘行号，得 $8+3=11$</li>
+        <li>按对应项乘再加，得 $2+12=14$</li>
+        <li>只把两个参数相加，得 $5$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：估计值是特征与参数的对应项相乘再求和，$1\times2+4\times3=14$。
+          只有行号 $i$ 进了特征，列号 $j$ 没有进。</p>
+        <p>A 错在把两个坐标相乘，而且把常数项也乘了进去。B 错在让常数项也乘了 $i$。
+          D 错在完全忽略了行号这一项。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 多项式逼近把次数从 1 提高到 5，最可能出现下面哪种情况？</p>
+      <ol class="mcq-options">
+        <li>能表示的函数族没有变化，因为参数仍然线性出现</li>
+        <li>梯度不再等于特征向量，必须改用反向传播计算</li>
+        <li>参数个数保持不变，只是每个参数的取值范围变大</li>
+        <li>在数据稀疏的地方出现激烈震荡，拟合变得不稳</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：提高次数会让特征数值范围迅速拉大，高次项在数据稀疏处轻易把估计值推到很远，
+          于是出现震荡。</p>
+        <p>A 错在函数族确实扩大了，虽然参数仍以线性方式进入估计值。
+          B 描述的是神经网络的情形，多项式逼近的梯度依旧是特征向量。
+          C 错在参数个数随次数上升，五次多项式的特征项数远多于一次。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 为什么要把目标函数写成期望的形式，而不只写单次误差？</p>
+      <ol class="mcq-options">
+        <li>因为单次误差带随机性，最小化它会挑中噪声最大的样本</li>
+        <li>因为期望一定存在，而单次误差在某些状态上不存在</li>
+        <li>因为期望形式才满足三角不等式，可以继续做压缩性论证</li>
+        <li>因为期望形式可以直接解析求解，不必使用迭代算法</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：一次采样里带奖励噪声和转移随机性，只把这一次的误差压到零，
+          学到的可能只是这次的偶然结果。对分布求平均才对应"在这批状态上普遍拟合得好"。</p>
+        <p>B 错在单次误差总是存在的。C 错在三角不等式与这里无关，压缩性论证用的是无穷范数下的算子性质。
+          D 错在除了少数线性的特例，期望形式一般没有解析解。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 8 章第 1 节与第 2 节。这里的目标函数、半梯度更新式与三种逼近器的口径与之一致。</p>
+      <p>半梯度这个名称与致命三元组（函数逼近、自举、异策略三者同时出现）的提法来自 R. Sutton 与 A. Barto,
+        <em>Reinforcement Learning: An Introduction</em> 第 2 版第 9、11 章。
+        线性逼近下时序差分方法的收敛性分析见 J. Tsitsiklis 与 B. Van Roy,
+        <em>An Analysis of Temporal-Difference Learning with Function Approximation</em>, 1997。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把半梯度和真实梯度的差别用一个两层状态的小例子再算一遍"，
+      或者 "投影贝尔曼方程带来的偏差有多大，怎么估？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

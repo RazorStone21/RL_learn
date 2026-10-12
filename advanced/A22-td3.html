@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A22 · TD3：双评论家与延迟更新 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A22" data-slug="td3" data-part="进阶篇 · 第五部分 · 连续控制与最大熵">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第五部分 · 连续控制与最大熵</p>
+    <h1>TD3：双评论家与延迟更新</h1>
+    <p class="lede">这一节讲一个改良算法，它的骨架来自第 21 课。
+      <span class="term">确定性策略（deterministic policy）</span>：每个状态只输出一个动作，不掷骰子。
+      <span class="term">策略梯度（policy gradient）</span>：这类方法不绕道去估价值，直接算"参数往哪调能让总分更高"。
+      这个算法叫 TD3（twin delayed deep deterministic policy gradient，双延迟深度确定性策略梯度），
+      基础是 DDPG（deep deterministic policy gradient，深度确定性策略梯度）。
+      它只在三个地方做了修正，就能稳很多。
+      读完你能写出它的目标函数，说清三处修正各治什么毛病，
+      也能在分数一路涨、动作抖个不停时，按症状找到该查哪一处。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出截断双 Q 的目标，并解释为什么取较小的那个而不是取最大</li>
+        <li>能说出延迟更新为什么能让训练更稳</li>
+        <li>能在 Q 值一路涨、策略抖动时，按症状定位到具体那一处修正</li>
+      </ul>
+    </div>
+  </header>
+
+    <section>
+    <h2>它要修的是什么毛病</h2>
+    <p>先回顾上一课。<span class="term">策略（一套"看到什么状态就选什么动作"的规则）</span>就是出招习惯。
+      DDPG 用两个网络互相配合：出动作的叫 actor（出招的那一方，负责决定这一步做什么动作，它也叫策略网络），
+      打分的叫 critic（打分的那一方，负责估计现在这个局面值多少分，所以也叫价值网络）。
+      critic 估计的分数叫<span class="term">价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）</span>。</p>
+    <p>这套骨架是对的，但它有一个会自己放大的漏洞。
+      critic 用自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）的方式学习：
+      拿估计去算目标，再用目标反过来改估计。算目标时又带了一个"取最大"的动作，
+      误差就被这个操作挑了出来：谁被高估得最狠，谁就被选中。于是 Q 整体偏高。
+      actor 又只看 Q 的梯度，它会把动作推向被高估最厉害的方向，错上加错。</p>
+    <p>这种系统性的偏高叫<span class="term">过估计（因为总是取最大值，估计出来的分数系统性地偏高）</span>，
+      比喻是每次都挑最好听的评价，越听越高。它是 DDPG 不稳的根子。</p>
+    <p>TD3 不改骨架，只做三处修正。三处修正各自对应一个看得见的症状，
+      所以训练不稳时，你能按症状找到该查哪一处。</p>
+    <p>术语与记号对照见 <a href="../reference/notation.html">符号表</a>
+      和 <a href="../reference/algorithms.html#alg-td3">算法速查表 · TD3</a>。</p>
+  </section>
+
+    <section>
+    <h2>修正一：两个评论家，取较小的那个</h2>
+    <p>第一处修正很直接：训练两个互相独立的 critic <span class="math">Q<sub>φ1</sub></span>（φ 是 critic 参数）
+      与 <span class="math">Q<sub>φ2</sub></span>，各自还配一份
+      <span class="term">目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑）</span>，
+      算目标时取两者中较小的那个：</p>
+    <div class="eq">
+      <span class="eq-body"><var>y</var> = <var>r</var> + <var>γ</var> min<sub><var>i</var>=1,2</sub> <var>Q</var><sub><var>φ</var><sup>−</sup><sub><var>i</var></sub></sub>( <var>s</var>′, <var>a</var>′ )</span>
+      <span class="eq-num">(22.1)</span>
+    </div>
+    <p>式中 γ 是折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折）。</p>
+    <p>为什么取小能让估计更接近真值？两个网络的误差方向不一样，
+      很少在同一处同时高估同一个动作。取小以后，被单独高估的那个值被另一个拉了回来。</p>
+    <p>这不是无偏估计，它引入一点偏保守的偏差，等于用轻微低估换训练稳定。
+      宁可保守，也不让 actor 追着一个幻觉跑，这就是 TD3 的设计取舍。</p>
+    <p>常见的误解是"两个网络取平均也能降噪声"。
+      平均确实能降方差（方差就是同一个做法重复很多次，结果的波动有多大），
+      但降不掉两个网络共有的上偏：它们被同一批数据带偏时误差同号，平均之后依然偏高。</p>
+  </section>
+
+    <section>
+    <h2>修正二：让评论家先学一会儿</h2>
+    <p>DDPG 每一步都用刚算出来的 critic 梯度去改 actor。可此时 critic 自己还很差，
+      actor 相当于在一个噪声很大的估计上做优化；actor 一动，critic 的回归目标又跟着变，
+      两个网络互相追，波动越来越大。</p>
+    <p>第二处修正叫<span class="term">延迟更新（让评论家先学一会儿，演员慢几拍再跟，比喻是先让裁判看清，再让选手改动作）</span>：
+      critic 每次都更新，actor 每 d 次才更新一次（论文取 d = 2），目标网络也在 actor 更新之后才同步。
+      代价是最前面几步 actor 完全不动，好处是每次更新 actor 时，它面对的是一个更可靠的 critic。</p>
+    <p>同步目标网络用的还是上一课的<span class="term">软更新（每次只把参数往新参数挪一点点，慢慢跟上，不要猛跳）</span>，
+      系数 τ（软更新系数）常取 0.005。</p>
+    <div class="note">
+      <p>工程细节：实现里常用一个全局步数计数器 <code>step</code>，在 <code>step % d == 0</code> 时才更新 actor 和目标网络。
+        写成先加 1 再取模、还是先取模再加 1，会让更新时刻差一步。
+        这类差一步的 bug 不会报错，只会让收敛（一轮轮算下去，数值不再明显变化，稳定下来了）慢一点，
+        所以必须在代码里写死并写测试。</p>
+    </div>
+  </section>
+
+    <section>
+    <h2>修正三：把目标动作抹平一点</h2>
+    <p>确定性策略容易学出一个尖峰：目标动作只要稍微变一点，Q 就掉很多。
+      于是 critic 被逼着在每个动作上拟合出一个很窄的峰，误差大又不稳。</p>
+    <p>第三处修正的做法，是在算目标时给动作加一点噪声，再裁剪到合法区间：</p>
+    <div class="eq">
+      <span class="eq-body"><var>a</var>′ = clip( <var>μ</var><sub><var>θ</var><sup>−</sup></sub>(<var>s</var>′) + <var>ξ</var>, −<var>c</var>, <var>c</var> ),&nbsp;&nbsp;<var>ξ</var> ~ <var>N</var>(0, <var>σ</var>)</span>
+      <span class="eq-num">(22.2)</span>
+    </div>
+    <p>式中 θ 是策略参数，μ 是确定性策略网络，ξ 是加在目标动作上的噪声，
+      σ（噪声标准差，衡量波动大小）取 0.2，c = 0.5。</p>
+    <p>这叫目标动作平滑（target policy smoothing）：它逼 critic 在动作的小邻域里给出相近的值，峰就被抹平了。
+      真实系统里智能体（做决策的那一方，就是你写的程序）执行动作总有误差，
+      策略在一个邻域内都差不多，就不容易因为一点偏差走样。</p>
+    <p>要记住一点：噪声只加在目标里。加到训练动作上就变成另一种算法了。</p>
+  </section>
+
+    <section>
+    <h2>TD3 与 DDPG 的实践差别</h2>
+    <ul>
+      <li>同一套环境上，TD3 通常不用逐环境调参就能跑；DDPG 常常要为一个任务单独调
+        学习率（每次更新时往新信息的方向挪多远）与噪声尺度。</li>
+      <li>三处修正都便宜：多一个 critic 只增加约一半的 critic 计算量，延迟更新反而减少了 actor 的更新次数。</li>
+      <li>策略仍然是确定性的，推理时不采样（按概率抽一个数），部署友好。
+        对手 SAC（soft actor-critic，软演员-评论家）学的是随机策略（每次给出一个动作的概率分布，靠采样挑一个），
+        推理必须采样。要确定性、便宜推理时选 TD3。</li>
+      <li>探索仍靠外部噪声：高斯分布（最常见的那个钟形分布）或 OU（Ornstein–Uhlenbeck noise，奥恩斯坦-乌伦贝克噪声）。
+        TD3 没解决这个问题，所以探索困难的任务上不如 SAC。SAC 会把熵（衡量"选择有多随机、多分散"，熵大代表还敢试）
+        写进目标，随机性自带，不用手调噪声。</li>
+      <li>TD3 是 off-policy（边学的那套策略不是产生数据的那套，等于看别人的录像学自己的打法），
+        同一条数据能反复用，样本效率（拿到同样多的经验能学多好，效率高就是"更省数据"）不低。</li>
+      <li>动作空间（所有可能动作组成的集合）只有连续维度时两者都能用；
+        要是既有连续维度又有离散维度，得换专门的方法。</li>
+    </ul>
+  </section>
+
+    <section>
+    <h2>训练不稳时先查什么</h2>
+    <table>
+      <thead><tr><th>症状</th><th>先查哪里</th></tr></thead>
+      <tbody>
+        <tr><td>Q 值一路涨、越训越大</td><td>是不是真的取了较小的那个；两个 critic 是不是同一份参数（常见笔误：共享网络）</td></tr>
+        <tr><td>策略抖动、回报（从现在起一直到结束，把每一步奖励加起来的总分）波动很大</td><td>延迟更新有没有生效；目标网络的 τ 是不是太大</td></tr>
+        <tr><td>Q 很快饱和成一个平台</td><td>目标平滑的噪声是不是加错了位置（加到了训练动作上），或者 σ 太大</td></tr>
+        <tr><td>策略早早卡在次优解</td><td>探索噪声太小；缓冲区太小让样本太相关</td></tr>
+      </tbody>
+    </table>
+    <p>还有一个问题没解决：双 Q（用两套估计分别负责挑动作和打分，压住总是高估的毛病）
+      只压制了目标里的过估计，Q 本身不一定可信。
+      如果奖励尺度没归一化、状态特征量纲差几个数量级，照样会发散，那是
+      <a href="A12-function-approximation.html">致命三元组</a>在提醒你，换算法解决不了。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. TD3 的目标里对两个 critic 取 min，主要原因是什么？</p>
+      <ol class="mcq-options">
+        <li>两个网络的参数被强制共享，取较小值只是数值稳定技巧</li>
+        <li>取较小值可以同时降低两个网络的方差，从而加快收敛速度</li>
+        <li>两个网络独立地高估不同动作，取较小值能压掉一部分上偏</li>
+        <li>取较小值让策略更倾向于选择保守的动作，避免动作超出范围</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：过估计来自自举目标里的取最大操作。两个 critic 的误差方向不同，
+          很少在同一处同时上偏，所以取较小值能把单独高估的那一个拉回来，代价是轻微偏低。
+          TD3 要的是稳定，不是无偏。</p>
+        <p>B 把"降方差"和"降上偏"混了：平均两个网络同样降方差，
+          但两个网络被同一批数据带偏时误差同号，平均之后依然偏高。
+          A 与实现相反：两个 critic 必须是独立初始化的两份参数，共享就等于退回单 Q。
+          D 把取较小值理解成了动作约束，而它只作用在目标值上，不改变动作的取值范围。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 如果去掉延迟更新，让 actor 每一步都跟着 critic 更新，会怎样？</p>
+      <ol class="mcq-options">
+        <li>actor 会在一个还很粗糙的 critic 上优化，训练方差明显变大</li>
+        <li>actor 会学到更好的策略，因为更新次数多等同于样本效率更高</li>
+        <li>critic 会因为目标分布变化太快而无法收敛，actor 不受影响</li>
+        <li>两个网络交替更新会互相抵消，最终两者都停在初始参数附近</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：延迟更新的赌注是"先让 critic 准一点，再让 actor 动"。
+          去掉它，actor 就是在一个刚起步、噪声很大的价值函数上做梯度上升，
+          而且 actor 一动，critic 的回归目标就跟着漂移，两边互相追，波动被放大。</p>
+        <p>B 把更新次数多当成质量高，但优化一个错的函数只会更快跑到错的地方。
+          C 说反了：延迟更新保护的对象是 actor，critic 那一侧不受影响。
+          D 说的现象不存在：两者不会互相抵消，只会让更新方向带上很大的噪声。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 目标动作平滑（式 22.2）在做什么？</p>
+      <ol class="mcq-options">
+        <li>给实际执行的动作加噪声，让智能体在真实环境里保持探索</li>
+        <li>把目标网络的动作限制在合法区间，防止动作溢出损坏环境</li>
+        <li>对目标 Q 值做加权平均，把相邻几个时间步的目标值抹平</li>
+        <li>给目标策略的输出加截断噪声，逼 critic 在邻域内拟合得更平滑</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：确定性策略容易形成尖峰，动作稍变 Q 就大幅变化，
+          critic 于是要去拟合一个很窄的峰，误差大又不稳。加噪声等于要求 critic
+          在一个动作邻域内给出相近的值，把峰抹平。</p>
+        <p>A 把"训练时扰动目标"和"执行时探索"混在一起：探索噪声加在训练用的动作上，
+          这里加噪声是为了让 critic 平滑。B 只说到裁剪的一半作用，
+          裁剪是为了不让扰动越界，不是平滑的目的。
+          C 说的是对 Q 值做平滑，而 TD3 平滑的对象是动作。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 关于 TD3 的工程成本，下列哪一项符合事实？</p>
+      <ol class="mcq-options">
+        <li>两个 critic 会把 critic 侧的计算量翻倍，因此显存占用也必然翻倍</li>
+        <li>多一个 critic 增加约一半计算量，延迟更新反而减少更新次数</li>
+        <li>延迟更新让 critic 每步都要多算一遍目标网络，总体计算量变大</li>
+        <li>三处修正都只是训练技巧，对单步的计算量没有任何可测量的影响</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：TD3 的卖点之一就是便宜。critic 从前向到反向大约多一半的工作量，
+          actor 每 d 步才更新一次，更新次数反而减少，总开销与 DDPG 同量级。</p>
+        <p>A 的"必然翻倍"忽略了共享特征层等做法，也忽略了 actor 侧减少的开销。
+          C 说反了方向：延迟更新减少的是 actor 与目标网络的同步次数。
+          D 走另一个极端，多一个网络的前向与反向是有确定开销的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 连续控制里，什么情况下更该选 TD3 而不是 SAC？</p>
+      <ol class="mcq-options">
+        <li>环境奖励特别稀疏，需要算法自己维持长期随机探索的时候</li>
+        <li>每次真实交互都极其昂贵，样本效率是第一优先级的时候</li>
+        <li>上线推理要求确定、便宜的动作，且不想引入随机策略的时候</li>
+        <li>动作空间既有连续维度又有离散维度，需要统一处理的时候</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：TD3 学的是确定性策略，推理时不采样、可重复、算一次就够，
+          在部署成本敏感的场景里这是实打实的长处。SAC 学随机策略，推理必须采样，
+          好处是探索自动、样本效率高。</p>
+        <p>B 是 SAC 的主场：熵项带来的探索让它在同样交互预算下通常学得更快。
+          A 也不利 TD3：它的探索靠外部噪声，稀疏奖励
+          （绝大多数步骤都拿不到奖励，只有极少数关键时刻有分）下更容易探索不足。
+          D 是另一类问题：SAC 有离散动作版本，但不能同时统一处理混合动作空间。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0022-code-1">
+      <h3>代码题 1 · 手写 TD3 的截断双 Q 目标（numpy）</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这两个函数服务 TD3 的一次 critic 更新。
+        critic 的损失要用目标网络在下一个状态给出的值，TD3 在这里取两个 critic 的较小值；
+        终止样本没有未来，要把自举那一项去掉。目标动作则要先加噪声再裁剪，
+        免得 critic 追着动作尖峰高估。输入是从回放池里抽出的一个 batch（一批样本）
+        与目标网络的输出，输出是逐样本的目标值和裁剪后的动作。</p>
+        <p>请实现 <code>td3_target(rewards, dones, next_q1, next_q2, gamma)</code> 与 <code>smooth_action(action, noise, c)</code>，两个函数都返回新的浮点数组，不改写入参。双 Q 目标逐样本按式 (22.1) 计算：</p>
+        <div class="eq">
+          <span class="eq-body"><var>y</var><sub><var>i</var></sub> = <var>r</var><sub><var>i</var></sub> + (1 − done<sub><var>i</var></sub>) · <var>γ</var> · min( <var>Q</var><sub>1</sub>(<var>s</var>′<sub><var>i</var></sub>, <var>a</var>′<sub><var>i</var></sub>), <var>Q</var><sub>2</sub>(<var>s</var>′<sub><var>i</var></sub>, <var>a</var>′<sub><var>i</var></sub>) )</span>
+        </div>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：长度 <code>B</code> 的浮点数组，即时奖励 r<sub>i</sub>。B 是这一批的样本条数。</li>
+          <li><code>dones</code>：长度 <code>B</code> 的布尔数组，表示这条样本是不是一局的最后一步。</li>
+          <li><code>next_q1</code>、<code>next_q2</code>：长度 <code>B</code> 的浮点数组，两个 critic 在目标动作 a′ 处已经取好的值，这里不用再做取最大。</li>
+          <li><code>gamma</code>：Python <code>float</code>，折扣因子。</li>
+          <li><code>action</code>、<code>noise</code>：形状相同的浮点数组，目标动作与叠加的噪声。</li>
+          <li><code>c</code>：Python <code>float</code>，按式 (22.2) 裁剪时的半径。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>td3_target</code> 返回形状 <code>(B,)</code> 的浮点数组，第 i 项就是上面的式子：
+              终止样本只留即时奖励，其余样本取两个 Q 的逐元素较小值，再加上折扣后的自举项。</li>
+          <li><code>smooth_action</code> 返回与 <code>action</code> 形状相同的数组，
+              也就是 <code>action + noise</code> 逐元素裁剪到 <code>[−c, c]</code> 之后的结果。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试检查终止样本不含自举项、双 Q 目标比单用 Q2 更保守，
+        以及噪声为 0 且动作本来就在区间内时结果等于原动作。只用标准库和 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>dones</code> 是布尔数组，<code>(~dones)</code> 是逐元素取反，可以直接当 0/1 乘上去。</li>
+          <li>两个数组逐元素取小用 <code>np.minimum(q1, q2)</code>，它返回一个新数组。
+              <code>np.min</code> 会沿某个轴归约成一个数，不是你要的。</li>
+          <li>裁剪用 <code>np.clip(x, -c, c)</code>，它返回新数组，同时处理上界与下界。</li>
+          <li>最后记得把各项乘起来再相加：<code>rewards + gamma * np.minimum(q1, q2) * (~dones)</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def td3_target(rewards, dones, next_q1, next_q2, gamma):
+    # TODO: y = r + (1 - done) * gamma * min(Q1, Q2)
+    return np.zeros(len(rewards))
+
+
+def smooth_action(action, noise, c):
+    # TODO: 返回 clip(action + noise, -c, c)
+    return np.asarray(action, dtype=float)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+r = np.array([1.0, 0.0, 2.0])
+done = np.array([True, False, False])
+q1 = np.array([100.0, 3.0, -1.0])
+q2 = np.array([50.0, 5.0, 4.0])
+y = np.asarray(td3_target(r, done, q1, q2, 0.9), dtype=float)
+check(y.shape == (3,), f"返回形状应为 (3,)，实际 {y.shape}")
+check(abs(y[0] - 1.0) < 1e-12,
+      f"终止转移的目标只有 r，实际 {y[0]:.4f}")
+check(abs(y[1] - 2.7) < 1e-12,
+      f"非终止应取较小值 min(3,5)=3，0 + 0.9*3 = 2.7，实际 {y[1]:.4f}")
+check(abs(y[2] - 1.1) < 1e-12,
+      f"非终止应取较小值 min(-1,4)=-1，2 + 0.9*(-1) = 1.1，实际 {y[2]:.4f}")
+check(y[1] < 0.9 * 5.0,
+      "双 Q 目标必须比用 Q2 那一路更保守（取 min 就是为了这个）")
+
+q1b = np.array([[1.0, 9.0]])
+q2b = np.array([2.0])
+yb = np.asarray(td3_target(np.array([0.0]), np.array([False]),
+                           np.full((1,), 1.0), np.array([5.0]), 0.5), dtype=float)
+check(abs(yb[0] - 0.5) < 1e-12,
+      f"取 min 后应为 0 + 0.5*min(1,5) = 0.5，实际 {yb[0]:.4f}")
+
+a = np.array([0.2, -0.9, 0.0])
+n = np.array([0.4, -0.4, 10.0])
+sa = np.asarray(smooth_action(a, n, 0.5), dtype=float)
+check(np.allclose(sa, [0.5, -0.5, 0.5]),
+      f"应裁剪到 [-0.5, 0.5]：期望 [0.5, -0.5, 0.5]，实际 {sa}")
+a_in = np.array([0.2, -0.3, 0.0])
+check(np.allclose(smooth_action(a_in, np.zeros(3), 0.5), a_in),
+      "噪声为 0 且动作本来就在区间内时，平滑后应当等于原动作")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def td3_target(rewards, dones, next_q1, next_q2, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    q1 = np.asarray(next_q1, dtype=float)
+    q2 = np.asarray(next_q2, dtype=float)
+    twin_min = np.minimum(q1, q2)
+    return rewards + gamma * twin_min * (~dones)
+
+
+def smooth_action(action, noise, c):
+    action = np.asarray(action, dtype=float)
+    noise = np.asarray(noise, dtype=float)
+    return np.clip(action + noise, -c, c)
+</script>
+    </div>
+
+<div class="code-ex" data-code="0022-code-2">
+      <h3>代码题 2 · 写延迟更新调度并检验双 Q 保守性</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>TD3 比 DDPG 多一条约束：critic 每步都更新，actor 只隔若干步更新一次，
+        好让价值估计先稳下来。这段代码写这张更新时刻表，并在一串模拟步上按表累加参数；
+        训练循环会用它决定这一步要不要更新 actor。
+        输入是步数与延迟系数，输出是逐步的布尔掩码和模拟结束后的参数。</p>
+        <p>请实现 <code>actor_update_mask(n_steps, policy_delay)</code> 与 <code>actor_params_after(w0, steps, policy_delay, lr, grad_value)</code>。第三个函数 <code>twin_min_target</code> 已在 starter 里给出，不用你写，测试用它验证两个 critic 一致时双 Q 目标与单 Q 数值相同。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>n_steps</code>（<code>actor_update_mask</code>）：整数，总步数。</li>
+          <li><code>policy_delay</code>：整数，每做多少次 critic 更新才更新一次 actor，两个函数共用。</li>
+          <li><code>w0</code>（<code>actor_params_after</code>）：初始参数，一个标量。</li>
+          <li><code>steps</code>：模拟的总步数，整数。</li>
+          <li><code>lr</code>：学习率标量；<code>grad_value</code>：每步的梯度标量。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>actor_update_mask</code> 返回长度 <code>n_steps</code> 的布尔 numpy 数组，第 k 步（k 从 0 开始）
+              当且仅当 <code>(k + 1) % policy_delay == 0</code> 时为 <code>True</code>。</li>
+          <li><code>actor_params_after</code> 返回更新后的参数标量：只在掩码为 <code>True</code> 的步上做一次
+              <code>w -= lr * grad_value</code>，一步都没轮到时保持 <code>w0</code> 不变。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试检查掩码的 dtype、取模边界与更新次数（100 步、每 4 步一次共 25 次），
+        以及 <code>policy_delay = 1</code> 时退化成每步更新。只用标准库和 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>下标 k 从 0 开始，用 <code>np.arange(n_steps)</code> 生成，
+              它返回 <code>0, 1, …, n_steps-1</code> 的整数数组。</li>
+          <li>取模后与 0 比较：<code>(np.arange(n_steps) + 1) % policy_delay == 0</code>，
+              得到的直接就是布尔数组。</li>
+          <li>数一共更新了几次用 <code>int(np.sum(mask))</code>，
+              <code>np.sum</code> 会把布尔数组里的 <code>True</code> 当 1 加起来。</li>
+          <li>逐参数更新就写循环：<code>for k in range(int(steps)): if mask[k]: w = w - lr * grad_value</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def twin_min_target(rewards, dones, next_q1, next_q2, gamma):
+    """TD3 目标：y = r + (1-done) * gamma * min(Q1, Q2)。本题直接给出，不用你写。"""
+    rewards = np.asarray(rewards, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    q1 = np.asarray(next_q1, dtype=float)
+    q2 = np.asarray(next_q2, dtype=float)
+    return rewards + gamma * np.minimum(q1, q2) * (~dones)
+
+
+def actor_update_mask(n_steps, policy_delay):
+    # TODO: 第 k 步当且仅当 (k+1) % policy_delay == 0 时更新 actor
+    return np.zeros(int(n_steps), dtype=bool)
+
+
+def actor_params_after(w0, steps, policy_delay, lr, grad_value):
+    # TODO: 只在被 mask 选中的那些步上做 w -= lr * grad_value
+    return np.float64(w0)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+m = np.asarray(actor_update_mask(6, 2))
+check(m.dtype == np.bool_, f"应返回布尔数组，实际 dtype={m.dtype}")
+check(np.array_equal(m, [False, True, False, True, False, True]),
+      f"policy_delay=2 的调度应为 [F,T,F,T,F,T]，实际 {m}")
+
+m1 = np.asarray(actor_update_mask(4, 1))
+check(np.array_equal(m1, [True, True, True, True]),
+      "policy_delay=1 时每一步都应更新 actor（退化成 DDPG）")
+
+m3 = np.asarray(actor_update_mask(7, 3))
+check(np.array_equal(m3, [False, False, True, False, False, True, False]),
+      f"policy_delay=3 时应在第 3、6 步更新，实际 {m3}")
+
+w = actor_params_after(0.0, steps=6, policy_delay=2, lr=0.1, grad_value=1.0)
+check(abs(float(w) - (-0.3)) < 1e-12,
+      f"6 步里更新 3 次，w = 0 - 3*0.1*1 = -0.3，实际 {float(w):.4f}")
+w_idle = actor_params_after(1.0, steps=3, policy_delay=10, lr=0.1, grad_value=1.0)
+check(abs(float(w_idle) - 1.0) < 1e-12,
+      f"还没轮到任何一次 actor 更新时，参数不应变化，实际 {float(w_idle):.4f}")
+w_ddpg = actor_params_after(0.0, steps=5, policy_delay=1, lr=0.5, grad_value=2.0)
+check(abs(float(w_ddpg) - (-5.0)) < 1e-12,
+      f"policy_delay=1 等价于每步更新，w = 0 - 5*0.5*2 = -5，实际 {float(w_ddpg):.4f}")
+
+same = np.asarray(twin_min_target(np.array([1.0]), np.array([False]),
+                                  np.array([5.0]), np.array([5.0]), 0.9), dtype=float)
+check(abs(same[0] - 5.5) < 1e-12,
+      f"两个 critic 一致时目标应与单 Q 相同：1 + 0.9*5 = 5.5，实际 {same[0]:.4f}")
+
+count = int(np.sum(actor_update_mask(100, 4)))
+check(count == 25, f"100 步、每 4 步更新一次应更新 25 次，实际 {count}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def twin_min_target(rewards, dones, next_q1, next_q2, gamma):
+    """TD3 目标：y = r + (1-done) * gamma * min(Q1, Q2)。本题直接给出，不用你写。"""
+    rewards = np.asarray(rewards, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    q1 = np.asarray(next_q1, dtype=float)
+    q2 = np.asarray(next_q2, dtype=float)
+    return rewards + gamma * np.minimum(q1, q2) * (~dones)
+
+
+def actor_update_mask(n_steps, policy_delay):
+    k = np.arange(int(n_steps))
+    return ((k + 1) % int(policy_delay)) == 0
+
+
+def actor_params_after(w0, steps, policy_delay, lr, grad_value):
+    w = np.float64(w0)
+    mask = actor_update_mask(steps, policy_delay)
+    for k in range(int(steps)):
+        if bool(mask[k]):
+            w = w - np.float64(lr) * np.float64(grad_value)
+    return np.float64(w)
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>原始论文：Fujimoto, van Hoof, Meger, <em>Addressing Function Approximation Error in
+        Actor-Critic Methods</em>（TD3, ICML 2018），
+        <a class="cite" href="https://arxiv.org/abs/1802.09477">arXiv 1802.09477</a>
+        给出式 (22.1)(22.2) 的完整形式、σ 与 c 的取值，以及三处修正的消融实验，
+        那张消融表就是「哪一处修正最值钱」的直接答案。</p>
+      <p>强化学习（RL）的工程约定与实现细节对照
+        <a class="cite" href="https://spinningup.openai.com/en/latest/algorithms/td3.html">Spinning Up in Deep RL · TD3</a>，
+        它把这套算法写成了可以直接照抄的伪代码。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把式 (22.1) 和 (22.2) 展开成一个完整的 numpy 训练循环给我看。"
+      或者 "我的 TD3 在机器人抓取任务上回报方差很大，按这课的症状表帮我逐条排查。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

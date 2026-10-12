@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0021 · Sarsa 与 n-step Sarsa — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0021" data-slug="sarsa-nstep" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法 2</p>
+    <h1>Sarsa 与 n-step Sarsa</h1>
+    <p class="lede">0020 课估的是状态价值（只看状态、不管具体选哪个动作的那个价值）。要拿它改进策略（一套"看到什么状态就选什么动作"的规则），
+      还得知道转移概率（这个跳转不是百分之百确定的，只是一组可能性），没有模型就走不通。
+      本课改估动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）：每个动作存一个数，比较大小不需要模型。
+      这条更新式叫 Sarsa，它的 n 步版本与期望版本也在这里讲。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出动作价值的贝尔曼方程，并说清它比状态价值多解决了什么问题</li>
+        <li>能写出 Sarsa 更新式，并解释 Sarsa 这个名字的来历</li>
+        <li>能证明 n 步贝尔曼展开，并由它推出 n 步目标的偏差按折扣因子的 n 次方收缩</li>
+        <li>能用全方差公式证明 Expected Sarsa 的目标方差不超过 Sarsa</li>
+        <li>能说清 n 变大时偏差、方差与实现代价各往哪边走</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 从状态价值到动作价值</h2>
+    <p>拿 $v_\pi(s)$ 做策略改进（根据算出的分数，把策略里明显吃亏的选择换掉），要比较的是"在 $s$ 做 $a_1$ 还是做 $a_2$ 更好"。
+      这需要算 $\sum_{s'}p(s'\mid s,a)\big[r(s,a)+\gamma v_\pi(s')\big]$，而 $p$ 与 $r$ 都在环境手里，
+      没有模型就算不出来。把每个动作单独存一个数，比较就只是比大小。</p>
+    <p>贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）对动作价值同样成立，推导只多带一个动作。</p>
+    <div class="def">
+      <span class="label">定义 1.1（动作价值）</span>
+      <p>策略 $\pi$ 下的动作价值 $q_\pi(s,a)$ 定义为式 (21.1)。
+        式中 $G_t$ 是从第 $t$ 步起的回报（从现在起一直到结束，把每一步奖励加起来的总分），
+        $\gamma$ 是折扣因子（越往后的奖励，算进总分时权重越小）。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_\pi(s,a)=\E_\pi[G_t\mid S_t=s,A_t=a].$$</span>
+        <span class="eq-num">(21.1)</span>
+      </div>
+    </div>
+    <div class="thm">
+      <span class="label">引理 1.2（动作价值的贝尔曼方程）</span>
+      <p>对每个状态动作对 $(s,a)$ 有式 (21.2)。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_\pi(s,a)=\E_\pi\big[R_{t+1}+\gamma q_\pi(S_{t+1},A_{t+1})\mid S_t=s,A_t=a\big].$$</span>
+        <span class="eq-num">(21.2)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>按 (21.1)，$q_\pi(s,a)=\E_\pi[G_t\mid S_t=s,A_t=a]$。拆出回报的第一项 $G_t=R_{t+1}+\gamma G_{t+1}$，
+        由期望的线性性得 $\E_\pi[R_{t+1}\mid S_t=s,A_t=a]+\gamma\,\E_\pi[G_{t+1}\mid S_t=s,A_t=a]$。</p>
+      <p>第二项用全期望公式：先固定 $(S_{t+1},A_{t+1})$ 求平均，再对它求平均。再由马尔可夫性
+        （下一个状态只取决于当前状态和动作，与更早的历史无关），内层就是 $q_\pi(S_{t+1},A_{t+1})$。
+        两项合起来即得 (21.2)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 200" role="img" aria-label="左：只有状态价值时比较动作要靠转移概率；右：有动作价值时直接比较两个数">
+        <text x="30" y="24" class="val-b">只有 v(s)</text>
+        <rect x="30" y="76" width="54" height="34" rx="4" class="box"/><text x="52" y="99" class="val">s</text>
+        <path d="M84 88 H160" class="arrow"/><path d="M152 84 l9 4 l-9 4" class="arrow"/>
+        <path d="M84 104 H160" class="arrow"/><path d="M152 100 l9 4 l-9 4" class="arrow"/>
+        <rect x="164" y="70" width="76" height="30" rx="4" class="box"/><text x="176" y="90" class="val">a1 值 ?</text>
+        <rect x="164" y="112" width="76" height="30" rx="4" class="box"/><text x="176" y="132" class="val">a2 值 ?</text>
+        <text x="30" y="168" class="lbl">要先知道转移概率，才算得出两个 ?</text>
+        <line x1="258" y1="20" x2="258" y2="180" class="grid"/>
+        <text x="286" y="24" class="val-b">有 q(s,a)</text>
+        <rect x="286" y="76" width="54" height="34" rx="4" class="box"/><text x="308" y="99" class="val">s</text>
+        <path d="M340 88 H416" class="arrow"/><path d="M408 84 l9 4 l-9 4" class="arrow"/>
+        <path d="M340 104 H416" class="arrow"/><path d="M408 100 l9 4 l-9 4" class="arrow"/>
+        <rect x="420" y="70" width="80" height="30" rx="4" class="box-a"/><text x="430" y="90" class="val">a1: 0.8</text>
+        <rect x="420" y="112" width="80" height="30" rx="4" class="box-a"/><text x="430" y="132" class="val">a2: 0.4</text>
+        <text x="286" y="168" class="lbl">直接比大小，大的那支就是改进方向</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 21.1</span>
+        左边只有状态价值：它按策略把两个动作平均成了一个数，要拆开必须知道环境会怎么跳。
+        右边有动作价值：每个动作一个数，不需要模型就能排出好坏。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 1.3（v 与 q 互相换算）</span>
+      <p>把 (21.2) 两边按 $\pi(a\mid s)$ 加权平均，就回到状态价值的贝尔曼方程；
+        反过来也有 $v_\pi(s)=\sum_a\pi(a\mid s)q_\pi(s,a)$。有 $q$ 就能算出 $v$，反推则需要模型。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Sarsa：把 TD 搬到状态动作对上</h2>
+    <p>0020 课把贝尔曼方程写成求根问题，再交给 Robbins-Monro。把未知量从 $v(s)$ 换成 $q(s,a)$，
+      同一套推导原样成立，得到的更新式叫 Sarsa。它与 0020 课同属 TD（temporal difference）这一族做法，
+      中文名是时序差分（不用等到一局结束，用"走一步之后的新估计"来更新"走这一步之前的估计"），只是把要估的量从状态换成了状态动作对。</p>
+    <div class="def">
+      <span class="label">定义 2.1（Sarsa 更新）</span>
+      <p>维护一张表 $q(s,a)$，每对存一个数。走一步拿到五个量 $(s_t,a_t,r_{t+1},s_{t+1},a_{t+1})$ 后，
+        只改被访问的那一对，见式 (21.3)，其余不变。式中 $\alpha$ 是学习率（每次更新时，往新信息的方向挪多远）。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_{t+1}(s_t,a_t)=q_t(s_t,a_t)+\alpha_t\big[r_{t+1}+\gamma q_t(s_{t+1},a_{t+1})-q_t(s_t,a_t)\big].$$</span>
+        <span class="eq-num">(21.3)</span>
+      </div>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.2（名字的来历）</span>
+      <p>更新式里出现了五个量：$s_t$、$a_t$、$r_{t+1}$、$s_{t+1}$、$a_{t+1}$。取首字母得 S、A、R、S、A，
+        连起来读就是 Sarsa。</p>
+    </div>
+    <div class="thm">
+      <span class="label">命题 2.3（Sarsa 也是 Robbins-Monro 的应用）</span>
+      <p>把 (21.3) 写成求根问题
+        $g_{s,a}(w)=w-\E_\pi\big[R_{t+1}+\gamma q_\pi(S_{t+1},A_{t+1})\mid S_t=s,A_t=a\big]$，
+        它的根就是 $q_\pi(s,a)$；代入 Robbins-Monro 并把真值换成估计，即得 (21.3)。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>与 0020 课命题 2.2、定理 2.4 的推导逐字对应，只把状态 $s$ 换成状态动作对 $(s,a)$。
+        期望项不含 $w$，故 $g_{s,a}(w)=w-c$ 严格递增，根至多一个；由 (21.2)，$w=q_\pi(s,a)$ 就是那个根。
+        把带噪观测 $w-\big(r_{t+1}+\gamma q_t(s_{t+1},a_{t+1})\big)$ 代入步长项，再把 $w$ 取成 $q_t(s_t,a_t)$，
+        即得 (21.3)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">算法 2.4（ε-greedy Sarsa 一轮）</span>
+      <ol>
+        <li>初始化 $q(s,a)$（比如全取 0），给定学习率 $\alpha$ 与探索率（每次决策时，有多大比例的概率去做"随便试一个"）$\varepsilon$。</li>
+        <li>在 $s_t$ 用 ε-greedy 选 $a_t$：以概率 $\varepsilon$ 随机试一个动作，其余时候挑 $q(s_t,\cdot)$ 最大的那个。</li>
+        <li>执行 $a_t$，从环境得到 $r_{t+1}$ 与 $s_{t+1}$，再用同一个 ε-greedy 选出 $a_{t+1}$。</li>
+        <li>按 (21.3) 更新 $q(s_t,a_t)$。</li>
+        <li>令 $t\leftarrow t+1$，沿用第 3 步已经选好的 $a_{t+1}$，回到第 3 步。</li>
+      </ol>
+      <p>更新要用到一个还没执行的下一动作 $a_{t+1}$，所以动作得先选出来再更新，这也是名字里有两个 A 的原因。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 150" role="img" aria-label="Sarsa 更新用到的五个量按时间排成一列：状态、动作、奖励、下一个状态、下一个动作">
+        <rect x="18" y="44" width="82" height="38" rx="4" class="box-a"/><text x="38" y="68" class="val">s(t)</text>
+        <rect x="118" y="44" width="82" height="38" rx="4" class="box-a"/><text x="138" y="68" class="val">a(t)</text>
+        <rect x="218" y="44" width="82" height="38" rx="4" class="box"/><text x="232" y="68" class="val">r(t+1)</text>
+        <rect x="318" y="44" width="82" height="38" rx="4" class="box-a"/><text x="336" y="68" class="val">s(t+1)</text>
+        <rect x="418" y="44" width="84" height="38" rx="4" class="box-a"/><text x="436" y="68" class="val">a(t+1)</text>
+        <path d="M100 63 H116" class="arrow"/><path d="M110 59 l8 4 l-8 4" class="arrow"/>
+        <path d="M200 63 H216" class="arrow"/><path d="M210 59 l8 4 l-8 4" class="arrow"/>
+        <path d="M300 63 H316" class="arrow"/><path d="M310 59 l8 4 l-8 4" class="arrow"/>
+        <path d="M400 63 H416" class="arrow"/><path d="M410 59 l8 4 l-8 4" class="arrow"/>
+        <text x="18" y="112" class="lbl">五个量的首字母 S A R S A 连起来就是 Sarsa</text>
+        <text x="18" y="134" class="lbl">a(t+1) 要先选出来，更新才算得出来</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 21.2</span>
+        一次 Sarsa 更新要等第五个量到位：先按当前策略选出下一个动作，才能算出目标并回头改出发的那一对。
+        这和 0020 课的状态价值更新只差一步，但多了"动作也要选"这件事。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 2.5（手算一步）</span>
+      <p>取 $\gamma=0.9$、$\alpha=0.1$。样本是 $(s_1,a_右,r=1,s_2,a_左)$，
+        当前 $q(s_1,a_右)=0.4$、$q(s_2,a_左)=0.6$。</p>
+      <p>目标 $=1+0.9\times0.6=1.54$，误差 $=1.54-0.4=1.14$，
+        故 $q(s_1,a_右)\leftarrow0.4+0.1\times1.14=0.514$，其他 $q$ 一点不动。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 用 Sarsa 学最优策略</h2>
+    <p>上面几步都假定策略 $\pi$ 已给定，只做策略评估（给定一套策略，算出它到底值多少分）。
+      要让策略变好，就把策略改进接上去：每隔若干步，把 $\pi$ 换成关于当前 $q$ 的贪心（在当前估计里挑看起来最好的那个）策略。</p>
+    <p>贪心策略有个毛病：它只走当前看起来最好的动作，别的动作永远试不到，$q$ 也就估不准。
+      所以实际用的是 ε-greedy，以概率 $\varepsilon$ 随机试一个，其余时候贪心。</p>
+    <div class="thm">
+      <span class="label">定理 3.1（引用：ε-greedy Sarsa 的长期行为）</span>
+      <p>设状态动作对有限，学习率满足 0020 课式 (20.8) 那两条，且每个 $(s,a)$ 被访问无穷多次。
+        若 $\varepsilon$ 固定，$q$ 收敛（一轮轮算下去，数值不再明显变化，稳定下来了）到该 ε-greedy 策略的动作价值；若 $\varepsilon$ 递减到 0，
+        则 $q$ 收敛到最优动作价值，贪心策略收敛到最优策略。后一个条件通常叫 GLIE（极限贪心且无限探索）。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.2（这条定理是引用）</span>
+      <p>本课不证明它。证明路线与 0020 课注记 6.2 一样：把更新写成 0018 课 Dvoretzky 定理要求的形状，
+        再核对步长、噪声条件与"每个状态动作对被访问无穷多次"。ε 递减是为了让"贪心"最终压住"探索"。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.3（ε 固定会留下什么）</span>
+      <p>$\varepsilon=0.1$ 一直不变时，策略里有 10% 的动作是随机挑的，学到的是这个带随机动作的策略的价值，它是另一个策略。把 $\varepsilon$ 按 $1/t$ 递减，随机动作越来越少，策略才逼向最优。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. n-step Sarsa</h2>
+    <p>Sarsa 的目标是一步真实奖励加一个估计。往前多看几步真实奖励，估计的成分就少一些。</p>
+    <div class="def">
+      <span class="label">定义 4.1（n 步回报）</span>
+      <p>给定 $n\ge1$，沿轨迹取前 $n$ 步真实奖励，末尾接上对更远处的一步估计，见式 (21.4)。
+        这就是 n 步回报（先往前看 n 步拿真实奖励，剩下的用估计补上）。</p>
+      <div class="eq">
+        <span class="eq-body">$$G_t^{(n)}=R_{t+1}+\gamma R_{t+2}+\cdots+\gamma^{n-1}R_{t+n}+\gamma^n q_t(S_{t+n},A_{t+n}).$$</span>
+        <span class="eq-num">(21.4)</span>
+      </div>
+    </div>
+    <div class="thm">
+      <span class="label">引理 4.2（n 步贝尔曼展开）</span>
+      <p>对每个 $n\ge1$ 与每对 $(s,a)$ 有式 (21.5)：把 (21.2) 的代换重复 $n$ 次，
+        前 $n$ 步是真实奖励，末尾仍是真值 $q_\pi$。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_\pi(s,a)=\E_\pi\Big[\sum_{k=0}^{n-1}\gamma^kR_{t+k+1}+\gamma^n q_\pi(S_{t+n},A_{t+n})\mid S_t=s,A_t=a\Big].$$</span>
+        <span class="eq-num">(21.5)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明（对 $n$ 归纳）</span>
+      <p>$n=1$ 时 (21.5) 就是 (21.2)。设 $n$ 的情形成立，要证 $n+1$ 的情形。把 $n+1$ 的括号里那一串写成</p>
+      <p>$R_{t+1}+\gamma\Big[\sum_{k=0}^{n-1}\gamma^kR_{t+k+2}+\gamma^nq_\pi(S_{t+n+1},A_{t+n+1})\Big]$，</p>
+      <p>中括号里的表达式就是 (21.5) 在时刻 $t+1$ 的形状。先固定 $(S_{t+1},A_{t+1})$ 求平均，
+        由归纳假设它等于 $q_\pi(S_{t+1},A_{t+1})$；再对 $(S_{t+1},A_{t+1})$ 求平均，
+        整个期望就变成 $\E_\pi\big[R_{t+1}+\gamma q_\pi(S_{t+1},A_{t+1})\mid S_t=s,A_t=a\big]$，
+        由 (21.2) 等于 $q_\pi(s,a)$。归纳完成。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">命题 4.3（n 步目标的偏差按折扣因子收缩）</span>
+      <p>固定一个估计 $q_t$。用 $q_t$ 代替 (21.5) 末尾的真值 $q_\pi$，得到的 n 步目标对 $q_\pi(s,a)$ 的偏差是</p>
+      <p>$\gamma^n\,\E_\pi\big[q_t(S_{t+n},A_{t+n})-q_\pi(S_{t+n},A_{t+n})\mid S_t=s,A_t=a\big]$，</p>
+      <p>绝对值不超过 $\gamma^n\|q_t-q_\pi\|_\infty$，其中 $\|\cdot\|_\infty$ 取各对绝对值的最大者。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>把 (21.5) 里的 $q_\pi$ 换成 $q_t$ 再与原式相减：前 $n$ 项真实奖励在两边完全相同，一起消掉，
+        只剩末尾那一项，系数是 $\gamma^n$。取绝对值，把每个 $|q_t-q_\pi|$ 放大到最大值
+        $\|q_t-q_\pi\|_\infty$，再用 $\gamma^n$ 乘出来即得上界。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>所以 $n$ 越大偏差越小：$n\to\infty$ 时偏差趋于 0，那就是蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）。
+      反过来，$n$ 越大，目标里累积的随机奖励越多，方差越大。$n=1$ 的做法拿一步估计补上后面所有步，
+      这叫自举（用自己当前的估计去更新自己当前的估计）。</p>
+    <div class="def">
+      <span class="label">定义 4.4（n 步 Sarsa 更新）</span>
+      <p>先沿轨迹走 $n$ 步拿到 $G_t^{(n)}$，再回头更新出发的那一对，见式 (21.6)，其余不变。
+        $n=1$ 就是 (21.3) 的标准 Sarsa。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_{t+1}(s_t,a_t)=q_t(s_t,a_t)+\alpha_t\big[G_t^{(n)}-q_t(s_t,a_t)\big].$$</span>
+        <span class="eq-num">(21.6)</span>
+      </div>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.5（n 的取舍与实现代价）</span>
+      <p>更新要等 $n$ 步才发生，所以得暂存最近 $n$ 步的 $(s_t,a_t)$，一次轨迹上只补 $n$ 步之前的那一对。
+        $n$ 越大，学得越准（偏差小），但每步的更新来得越晚、方差越大。</p>
+    </div>
+    <table>
+      <thead><tr><th>取法</th><th>偏差</th><th>方差</th><th>更新延迟</th></tr></thead>
+      <tbody>
+        <tr><td>$n=1$（Sarsa）</td><td>最大</td><td>最小</td><td>一步</td></tr>
+        <tr><td>中间大小的 $n$</td><td>居中</td><td>居中</td><td>$n$ 步</td></tr>
+        <tr><td>$n\to\infty$（蒙特卡洛）</td><td>0</td><td>最大</td><td>到回合结束</td></tr>
+      </tbody>
+    </table>
+    <figure class="fig">
+      <svg viewBox="0 0 520 200" role="img" aria-label="n 步回报的组成：n 越大，真实奖励占的比例越大，用估计补的那一段越短">
+        <text x="24" y="46" class="val">n = 1</text>
+        <rect x="100" y="28" width="50" height="26" class="bar-hi"/>
+        <rect x="150" y="28" width="320" height="26" class="bar"/>
+        <text x="24" y="96" class="val">n = 3</text>
+        <rect x="100" y="78" width="150" height="26" class="bar-hi"/>
+        <rect x="250" y="78" width="220" height="26" class="bar"/>
+        <text x="24" y="146" class="val">n = ∞</text>
+        <rect x="100" y="128" width="370" height="26" class="bar-hi"/>
+        <text x="112" y="46" class="lbl">r</text>
+        <text x="270" y="46" class="lbl">用估计补</text>
+        <text x="112" y="96" class="lbl">三步真实奖励</text>
+        <text x="330" y="96" class="lbl">用估计补</text>
+        <text x="112" y="146" class="lbl">整局真实奖励，不再需要估计</text>
+        <line x1="100" y1="172" x2="470" y2="172" class="axis-b"/>
+        <text x="100" y="192" class="lbl">深色是真花掉的时间，浅色是用估计顶上的一段</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 21.3</span>
+        同一段轨迹上，n 决定了真实奖励与估计各占多少。n 变大就是往蒙特卡洛挪，
+        n 变小就是回到一步更新。</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg viewBox="0 0 520 230" role="img" aria-label="偏差随 n 增大而下降，方差随 n 增大而上升，两者在中间某处交叉">
+        <line x1="70" y1="40" x2="70" y2="180" class="axis-b"/>
+        <line x1="70" y1="180" x2="480" y2="180" class="axis-b"/>
+        <text x="40" y="34" class="lbl">大小</text>
+        <text x="440" y="200" class="lbl">n 增大</text>
+        <path d="M90 56 C160 90 240 150 460 172" class="curve"/>
+        <path d="M90 172 C220 158 330 108 460 60" class="curve2"/>
+        <text x="96" y="48" class="val">偏差</text>
+        <text x="392" y="48" class="val">方差</text>
+        <line x1="250" y1="46" x2="250" y2="180" class="mark"/>
+        <text x="200" y="216" class="lbl">n = 1：Sarsa</text>
+        <text x="368" y="216" class="lbl">n → ∞：蒙特卡洛</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 21.4</span>
+        两条曲线方向相反。n 太小则偏差大，n 太大则方差大，
+        中间某个 n 把两者折中得最好。虚线是常见的折中点，具体取值要靠实验挑。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. Expected Sarsa：把下一动作换成加权平均</h2>
+    <p>Sarsa 的目标里还有一层随机性：$a_{t+1}$ 是按策略抽出来的。把它换成对 $a_{t+1}$ 的条件期望，
+      随机性就少一层。</p>
+    <div class="def">
+      <span class="label">定义 5.1（Expected Sarsa）</span>
+      <p>更新式见 (21.7)。它与 (21.3) 的差别只在目标：把采到的 $q_t(s_{t+1},a_{t+1})$ 换成
+        $\sum_a\pi(a\mid s_{t+1})q_t(s_{t+1},a)$，也就是对下一个状态处所有动作的加权平均。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_{t+1}(s_t,a_t)=q_t(s_t,a_t)+\alpha_t\Big[r_{t+1}+\gamma\sum_a\pi(a\mid s_{t+1})q_t(s_{t+1},a)-q_t(s_t,a_t)\Big].$$</span>
+        <span class="eq-num">(21.7)</span>
+      </div>
+    </div>
+    <div class="thm">
+      <span class="label">命题 5.2（它的目标方差更小）</span>
+      <p>记 $Y=r_{t+1}+\gamma q_t(S_{t+1},A_{t+1})$ 为 Sarsa 的目标，
+        $X=\E[Y\mid S_t=s,A_t=a,S_{t+1}]$ 为 Expected Sarsa 的目标，它等于
+        $r_{t+1}+\gamma\sum_a\pi(a\mid S_{t+1})q_t(S_{t+1},a)$。则 $\var(Y)\ge\var(X)$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>由全方差公式（把总方差拆成条件方差的期望与条件期望的方差两部分），
+        $\var(Y)=\E\big[\var(Y\mid S_{t+1})\big]+\var\big(\E[Y\mid S_{t+1}]\big)$。两项都非负，
+        所以 $\var(Y)\ge\var\big(\E[Y\mid S_{t+1}]\big)=\var(X)$。</p>
+      <p>把 $X$ 认成条件期望时用到马尔可夫性：给定 $S_{t+1}$ 后，$A_{t+1}$ 的分布就是 $\pi(\cdot\mid S_{t+1})$，
+        与更早的历史无关。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 210" role="img" aria-label="Expected Sarsa 把下一个状态处的多个动作分支按概率加权合并成一个数">
+        <rect x="20" y="84" width="86" height="38" rx="4" class="box"/><text x="36" y="108" class="val">s(t+1)</text>
+        <path d="M106 96 H170" class="arrow"/><path d="M162 92 l9 4 l-9 4" class="arrow"/>
+        <path d="M106 112 H170" class="arrow"/><path d="M162 108 l9 4 l-9 4" class="arrow"/>
+        <rect x="174" y="36" width="150" height="34" rx="4" class="box-a"/><text x="186" y="58" class="val">a1：权重 0.7，q = 0.8</text>
+        <rect x="174" y="140" width="150" height="34" rx="4" class="box-a"/><text x="186" y="162" class="val">a2：权重 0.3，q = 0.4</text>
+        <path d="M324 53 H390" class="arrow"/><path d="M382 49 l9 4 l-9 4" class="arrow"/>
+        <path d="M324 157 H390" class="arrow"/><path d="M382 153 l9 4 l-9 4" class="arrow"/>
+        <rect x="382" y="82" width="118" height="42" rx="4" class="box"/><text x="400" y="108" class="val">加权平均 = 0.68</text>
+        <text x="20" y="200" class="lbl">Sarsa 只走一支；Expected Sarsa 把两支按权重合成一个数</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 21.5</span>
+        下一个状态处有多个动作时，Sarsa 只看采样到的那一支，Expected Sarsa 把全部支路按策略概率加权平均。
+        这里 0.7 × 0.8 + 0.3 × 0.4 = 0.68。平均掉的那一层随机性就是它方差更小的来源。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 5.3（代价与 on-policy 的身份）</span>
+      <p>代价是每次更新都要对 $s_{t+1}$ 的所有动作求一次加权和，动作多时比 Sarsa 贵。
+        它仍然用同一个 $\pi$ 既产生数据又算目标，所以还是 on-policy（边学的那套策略，就是正在用来产生数据的那套）的做法。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.4（与 Q-learning 的关系）</span>
+      <p>把 (21.7) 里的 $\pi$ 换成贪心策略，加权平均就退化成取最大值：
+        $\sum_a\pi(a\mid s')q(s',a)=\max_aq(s',a)$。下一课的 Q-learning 就是这个特例，
+        到那时目标里用的策略与产生数据的策略会分开。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>动作价值 (21.1) 每个动作存一个数，做策略改进不再需要模型。</li>
+      <li>把 0020 课的求根推导搬到状态动作对上，得到 Sarsa 更新 (21.3)；五个量 $(s_t,a_t,r_{t+1},s_{t+1},a_{t+1})$ 给出它的名字。</li>
+      <li>n 步回报 (21.4) 前 n 步用真实奖励、末尾用估计；n 步贝尔曼展开 (21.5) 由归纳法证明。</li>
+      <li>由展开式得到偏差不超过 $\gamma^n\|q_t-q_\pi\|_\infty$：n 越大偏差越小，方差越大，更新也来得越晚。</li>
+      <li>Expected Sarsa (21.7) 把采样动作换成一整组加权平均，由全方差公式，目标方差只会变小。</li>
+    </ul>
+    <p>下一课把 Expected Sarsa 的目标从加权平均换成最大值。这一个符号的改动会带来一个新身份：
+      策略不再需要与数据来源相同。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 名字 Sarsa 来自更新式里出现的五个量，这五个量是什么？</p>
+      <ol class="mcq-options">
+        <li>状态、动作、奖励、折扣因子、学习率</li>
+        <li>状态、奖励、状态、奖励、状态</li>
+        <li>状态、动作、奖励、下一个状态、下一个动作</li>
+        <li>策略、动作、回报、状态、动作价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：更新式 (21.3) 里依次出现 $s_t$、$a_t$、$r_{t+1}$、$s_{t+1}$、$a_{t+1}$，
+          取首字母就是 S、A、R、S、A。</p>
+        <p>A 里的折扣因子与学习率虽然也出现在式子里，但它们不是"这一步走出来的经验"。
+          B 把动作换成了奖励，那样只有三个不同的量。D 里的策略与回报都不是这五个量之一。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 关于动作价值 $q_\pi(s,a)$ 与状态价值 $v_\pi(s)$ 的分工，正确的是哪一句？</p>
+      <ol class="mcq-options">
+        <li>有 $q$ 就能比较动作，不需要转移概率；有 $v$ 做不到</li>
+        <li>有 $v$ 就能比较动作，不需要转移概率；有 $q$ 做不到</li>
+        <li>两者相等，因为它们都等于从 $s$ 出发的回报期望</li>
+        <li>$v$ 一定大于 $q$，因为 $q$ 还要先执行一个动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：比较动作要问"在 $s$ 先做这个动作值多少分"，这就是 $q$ 的定义；
+          而 $v_\pi(s)=\sum_a\pi(a\mid s)q_\pi(s,a)$ 已经把动作按策略平均掉了，
+          想从 $v$ 拆出单个动作的好坏必须知道 $r$ 与 $p$。</p>
+        <p>B 说反了。C 错在把平均与单个动作混为一谈。D 不成立：$q$ 可以大于 $v$，也可以小于 $v$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 证明 (21.2) 时，把 $\E_\pi[G_{t+1}\mid S_t=s,A_t=a]$ 换成
+        $\E_\pi[q_\pi(S_{t+1},A_{t+1})\mid S_t=s,A_t=a]$ 用到了什么？</p>
+      <ol class="mcq-options">
+        <li>期望的线性性</li>
+        <li>独立同分布假设</li>
+        <li>学习率的平方可和条件</li>
+        <li>全期望公式与马尔可夫性</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：全期望公式允许"先固定 $(S_{t+1},A_{t+1})$ 再求平均"；
+          马尔可夫性保证固定之后内层就是 $q_\pi(S_{t+1},A_{t+1})$，与更早的历史无关。</p>
+        <p>A 用在这一步之前拆回报 $G_t=R_{t+1}+\gamma G_{t+1}$。B 不成立，同一条轨迹上各步高度相关。
+          C 是收敛定理的条件，与这一步的换元无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 证明 n 步贝尔曼展开 (21.5) 的归纳步骤里，中括号那一串靠什么变成
+        $q_\pi(S_{t+1},A_{t+1})$？</p>
+      <ol class="mcq-options">
+        <li>未来的奖励与当前动作相互独立，可以直接拆开</li>
+        <li>$n$ 步的情形成立，也就是归纳假设</li>
+        <li>折扣因子必须等于 1，级数才收敛</li>
+        <li>奖励必须非负，期望才可以交换次序</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：归纳步骤把 $n+1$ 的表达式写成 $R_{t+1}+\gamma$ 乘以一个 n 步形状的括号（起点挪到 $t+1$），
+          对那个括号用"n 步情形成立"这条假设，再回到 $n=1$ 的 (21.2)。</p>
+        <p>A 不成立：同一条轨迹上各步奖励并不独立。C 与 $\gamma\lt1$ 的设定相反。
+          D 也不对，奖励可以为负，而这一步交换次序与符号无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 证明 Expected Sarsa 的目标方差更小，用的是哪一条公式？</p>
+      <ol class="mcq-options">
+        <li>期望的线性性：把两项期望拆开再相加</li>
+        <li>马尔可夫性：下一步只取决于当前的状态与动作</li>
+        <li>全方差公式：总方差等于条件方差的期望加条件期望的方差</li>
+        <li>贝尔曼方程：把价值写成即时奖励加折扣后的下一步价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：全方差公式把 $\var(Y)$ 拆成两项，第二项就是 $\var(X)$，第一项非负，
+          于是 $\var(Y)\ge\var(X)$。</p>
+        <p>A 只能拆期望，说明不了方差的大小。B 是用在"把 $X$ 认成条件期望"上的前提，
+          它是证明的一环，但不是给出不等式的那条公式。D 是价值的递推式，与方差无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 在 n 步 Sarsa 里把 $n$ 取得比整条回合还长，会得到什么？</p>
+      <ol class="mcq-options">
+        <li>会报错，因为第 $n$ 步的状态不存在</li>
+        <li>回报只剩真实奖励，等于蒙特卡洛的做法</li>
+        <li>偏差变成无穷大，估计再也收不回来</li>
+        <li>方差降到 0，因为不再需要任何估计</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：回合结束后没有奖励与状态可看，$G_t^{(n)}$ 末尾那一项自然取 0，
+          整串就退化成整局的真实回报，也就是蒙特卡洛。</p>
+        <p>A 错在实现上只要把回合末尾的估计当成 0 即可。C 说反了：由命题 4.3，偏差随 $n$ 收缩。
+          D 错在真实奖励本身就是随机的，方差不会变成 0。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 探索率一直固定在 $\varepsilon=0.1$，Sarsa 学出来的东西是什么？</p>
+      <ol class="mcq-options">
+        <li>最优动作价值，因为一直有探索的样本</li>
+        <li>什么也学不到，因为数据里全是噪声</li>
+        <li>状态价值，而不是动作价值</li>
+        <li>该 ε-greedy 策略的动作价值，一般不是最优的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Sarsa 评估的就是那个用来产生数据的策略。$\varepsilon=0.1$ 意味着有一成动作是随机挑的，
+          学出来的是这个带随机动作的策略的价值，见定理 3.1。</p>
+        <p>A 只有把 $\varepsilon$ 递减到 0，才逼向最优。B 错在 TD 学习在噪声下照样收敛。
+          C 混淆了表里存的量：更新式改的是 $q(s,a)$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 已知 $q(s_1,a_右)=0.4$、$q(s_2,a_左)=0.6$，样本给出的 $r=1$，$\gamma=0.9$、$\alpha=0.1$，
+        一步 Sarsa 更新后 $q(s_1,a_右)$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>0.514（按 (21.3) 一步步算出来）</li>
+        <li>0.4（学习率取 0，估计不动）</li>
+        <li>0.532（目标用了 $s_2$ 里最大的 $q$）</li>
+        <li>1.54（只算到目标，忘了乘学习率）</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：目标 $=1+0.9\times0.6=1.54$，误差 $=1.54-0.4=1.14$，
+          于是 $q\leftarrow0.4+0.1\times1.14=0.514$。</p>
+        <p>B 相当于学习率取 0。C 把 $a_{t+1}$ 换成了 $s_2$ 处最大的动作
+          （目标变成 $1+0.9\times0.8=1.72$，得 0.532），那是下一课 Q-learning 的算法。
+          D 算的是目标本身，既没减当前估计，也没乘学习率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 沿轨迹拿到 $r_{t+1}=1$、$r_{t+2}=2$，$q(s_{t+2},a_{t+2})=0.5$，$\gamma=0.9$，
+        取 $n=2$ 时 $G_t^{(2)}$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>2.8（漏掉末尾的 $\gamma^2q$ 项）</li>
+        <li>3.025（把 $\gamma^2$ 也乘到了第二步奖励上）</li>
+        <li>3.205（按 (21.4) 逐项相加）</li>
+        <li>3.5（把 $\gamma$ 当成 1 用）</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$G_t^{(2)}=r_{t+1}+\gamma r_{t+2}+\gamma^2q(s_{t+2},a_{t+2})
+          =1+0.9\times2+0.81\times0.5=3.205$。</p>
+        <p>A 只把两步奖励加起来，那不是 n 步回报。B 把第二步奖励也打了个折上折。
+          D 相当于取 $\gamma=1$，折扣因子被丢掉了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. Expected Sarsa 为什么要把采样出来的 $a_{t+1}$ 换成一个加权平均？</p>
+      <ol class="mcq-options">
+        <li>因为加权平均算起来比采样更快</li>
+        <li>因为加权平均能让估计变成无偏</li>
+        <li>因为采样得到的那个动作一定是错的</li>
+        <li>因为把 $a_{t+1}$ 的随机性平均掉之后，方差更小</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Sarsa 的目标里有一层来自 $a_{t+1}$ 的随机性，取条件期望就把它消掉了，
+          由命题 5.2，目标方差只会变小。</p>
+        <p>A 恰好说反了：加权平均要遍历所有动作，通常更慢。B 错在偏差来自用当前估计当目标，与这一步取平均无关。C 错在采样出的动作是一个合法样本，并不是错的。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 7 章第 7.2 节「Sarsa」与第 7.3 节「n-step Sarsa」。
+        本课的 Sarsa 更新式、n 步回报、Expected Sarsa 与 n 的偏差方差取舍都对齐这两节。</p>
+      <p>经典教材里对应的是 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em>
+        (2nd ed.) 第 6 章（时序差分学习）与第 7 章（n 步自举法）。</p>
+      <p>Sarsa 的收敛性结论属于随机近似的引用结果（GLIE 条件由 Singh、Jaakkola、Littman、Szepesvári 在 2000 年给出），
+        本课只引用路线，证明见 0018 课。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 Sarsa 的一步更新用我熟悉的迷宫例子走一遍"，
+      或者 "n 步回报里那个 $n$ 到底该怎么挑，有没有经验规则？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

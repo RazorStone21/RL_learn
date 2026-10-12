@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A19 · 优势估计 GAE 与 TRPO — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A19" data-slug="gae-trpo" data-part="进阶篇 · 第四部分 · 策略梯度与 Actor-Critic">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第四部分 · 策略梯度与 Actor-Critic</p>
+    <h1>优势估计 GAE 与 TRPO</h1>
+    <p class="lede">这一节有两个落点：用一段倒序循环算出一组优势（在某个状态下，选这个动作比"平均水平"好多少，也就是你这一步比常规走法强多少），再给更新幅度加一道限速。
+      限速这件事在<span class="term">策略梯度（不绕道去估价值，直接算参数往哪调能让拿到的总分更高）</span>里必须做，
+      不做就可能一次把整套做法推废。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 GAE 的反向递推，并说出 λ（GAE 衰减参数）=0 与 λ=1 各退化成什么</li>
+        <li>能解释 GAE 的 λ 如何在偏差与方差之间滑动</li>
+        <li>能说清 TRPO 的代理目标与 KL 约束，以及它为什么昂贵</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>第一步：把 n-step 的两端一次平均掉</h2>
+    <p><a href="A18-actor-critic.html">0018 课</a>留下一个选择题。策略（一套"看到什么状态就选什么动作"的规则）
+      每往前走一步，都想知道"这一步走得好不好"。δ（TD 误差）是只往前看一步的估计，
+      偏差大。用整条回报（从现在起一直到结束，把每一步奖励加起来的总分）是另一端，方差大。
+      中间还有 2 步、3 步、10 步，每个 <var>n</var> 都是一组不同的偏差与方差配比。</p>
+    <p>挨个试太笨。<span class="term">广义优势估计（generalized advantage estimation, GAE）</span>
+      的办法是把这些档位一次性加权求和：越近的误差权重越大，越远的权重按比例缩小。
+      写成式子就是：</p>
+    <div class="eq">
+      <span class="eq-body">A<sub>t</sub><sup>GAE(γ,λ)</sup> = Σ<sub>l=0</sub><sup>∞</sup> (γλ)<sup>l</sup> δ<sub>t+l</sub>,
+        &nbsp;&nbsp; δ<sub>t</sub> = R<sub>t+1</sub> + γV<sub>φ</sub>(S<sub>t+1</sub>) − V<sub>φ</sub>(S<sub>t</sub>)</span>
+      <span class="eq-num">(19.1)</span>
+    </div>
+    <p>式中 <var>V<sub>φ</sub></var> 是 critic（打分的那一方，负责估计局面值多少分）给出的价值估计，
+      也就是<span class="term">状态价值（只看状态、不管具体选哪个动作的那个价值）</span>，
+      而它是<span class="term">价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）</span>本身。
+      <var>γ</var> 是<span class="term">折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折）</span>，
+      <var>λ</var> 是 GAE 的衰减参数，控制"往前看多远"。下标表示"第几步"：
+      <var>δ<sub>t+l</sub></var> 是第 <var>t+l</var> 步的 TD 误差。</p>
+    <p>思路不算新：<a href="A11-nstep-td-lambda.html">0011 课</a>的
+      <span class="term">TD(λ)（用同样的加权方式平均各档 n-step 回报）</span>
+      做的就是这件事，GAE 只是把它搬到优势上。注意两个端点：</p>
+    <ul>
+      <li><span class="math">λ = 0</span>：只剩第一项，<var>A<sub>t</sub> = δ<sub>t</sub></var>，
+        低方差、高偏差，就是 0018 的一步 actor-critic。</li>
+      <li><span class="math">λ = 1</span>：无穷项相加会望远镜式相消，得到
+        <span class="math">A<sub>t</sub> = G<sub>t</sub> − V<sub>φ</sub>(S<sub>t</sub>)</span>，
+        即<span class="term">蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）</span>优势，
+        偏差小但方差大。</li>
+    </ul>
+    <p>实践中 <span class="math">λ ≈ 0.95</span> 是常见折中：把远期项压掉大部分方差，
+      又保留足够的真实奖励信息。<var>λ</var> 和 <var>γ</var> 是乘在一起的，调参时别只动一个。</p>
+  </section>
+
+  <section>
+    <h2>第二步：用一遍倒序循环算出来</h2>
+    <p>先认一个词。<span class="term">自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）</span>
+      指的是 TD 误差里那一项 critic 自己的预测。</p>
+    <p>直接按定义求和，工作量随轨迹长度平方增长，记作 <span class="math">O(T²)</span>（T 是这一段的步数）。
+      把 (19.1) 写成递推，工作量只随长度线性增长，记作 <span class="math">O(T)</span>：</p>
+    <div class="eq">
+      <span class="eq-body">A<sub>t</sub> = δ<sub>t</sub> + γλ(1 − done<sub>t</sub>) A<sub>t+1</sub></span>
+      <span class="eq-num">(19.2)</span>
+    </div>
+    <p>从轨迹末尾往前扫一遍即可，这就是"倒序"的来历。两个实现要点：<code>done</code> 为真时要同时
+      切断 <var>δ<sub>t</sub></var> 里的自举和 (19.2) 的递推，只切一处是最常见的 bug；
+      轨迹末尾那一步需要环境的 bootstrap 值 <span class="math">V<sub>φ</sub>(S<sub>T</sub>)</span>，
+      bootstrap 就是刚才说的自举，这里指"拿 critic 的预测把最后一段补齐"。</p>
+  </section>
+
+  <section>
+    <h2>第三步：为什么一步走太大就废了</h2>
+    <p>策略梯度是 on-policy（边学的那套策略，就是正在用来产生数据的那套）的：数据来自当前策略。
+      如果一步更新太大，策略可能被推进一个动作分布完全不同、回报极差的区域，
+      于是接下来采到的全是坏数据，再也爬不回来。</p>
+    <p>问题不在<span class="term">收敛（一轮轮算下去，数值不再明显变化，稳定下来了）</span>慢。
+      策略塌缩之后无法自愈，这才是 TRPO 存在的理由。</p>
+    <p><span class="term">信赖域（规定这一步只允许在"离旧策略不太远"的范围内改，每次只许挪一小步）</span>
+      这一类方法把"更新别太大"写成一个约束。
+      它优化的是一个只在旧策略附近才可信的
+      <span class="term">代理目标（surrogate objective）</span>，那个真实目标只能被它近似：</p>
+    <div class="eq">
+      <span class="eq-body">max<sub>θ</sub> 𝔼[ ( π<sub>θ</sub>(a|s) / π<sub>old</sub>(a|s) ) A<sub>t</sub> ]
+        &nbsp; s.t. &nbsp; 𝔼[ KL( π<sub>old</sub> ‖ π<sub>θ</sub> ) ] ≤ δ<sub>KL</sub></span>
+      <span class="eq-num">(19.3)</span>
+    </div>
+    <p>式中 π 是策略分布，θ 是策略参数。<span class="math">π<sub>θ</sub>/π<sub>old</sub></span> 这一项叫
+      <span class="term">概率比（新策略选中这个动作的概率，除以旧策略选中它的概率）</span>。
+      它来自<span class="term">重要性采样（用另一套策略产生的数据，来估计当前策略的表现，需要按概率比例做修正）</span>：
+      数据是旧策略采的，要拿它估新策略，就得乘上这个比值。
+      比值离 1 太远时估计就不可信，所以约束必须存在。</p>
+    <p>为什么要用 <span class="term">KL 散度（Kullback–Leibler divergence, KL）</span>
+      而不是参数空间的距离？决定行为的本来就是策略输出的分布：
+      同一个参数步长，在 logits（神经网络输出的、还没变成概率的那组原始分数）很小的时候
+      几乎不改变动作概率，在 logits 很大的时候能让策略整体换掉。
+      KL 直接度量"行为变了多少"，比参数范数贴近问题。</p>
+  </section>
+
+  <section>
+    <h2>TRPO 的代价，以及该不该用它</h2>
+    <p><span class="term">TRPO（trust region policy optimization）</span>把 (19.3) 的约束做成
+      二阶近似：用 <span class="term">Fisher 向量积（Fisher-vector product）</span> +
+      <span class="term">共轭梯度（conjugate gradient）</span>求出更新方向，
+      再做 <span class="term">线搜索（line search）</span>，逐步缩小步长直到约束满足且代理目标真的提升。
+      正确，但每一步都要多算几次 Fisher 向量积，且和 dropout（训练时随机关掉一部分神经元）、参数共享这类实现细节冲突。</p>
+    <p>工程上的结论很干脆：GAE 几乎总值得单独拿来用，即使你最后选
+      <a href="A20-ppo.html">0020 课</a>的 PPO（proximal policy optimization，近端策略优化）。而 TRPO 本身只在"你确实需要更新不会变差这个强保证、
+      并且不在意实现复杂度"时才选。想让每批数据多跑几轮又不想写二阶优化，PPO 用裁剪买到了近似效果。</p>
+    <table>
+      <thead><tr><th>症状</th><th>先查什么</th></tr></thead>
+      <tbody>
+        <tr><td>优势量级随轨迹长度暴涨</td><td>λ 太接近 1，或 <var>γ</var> 太接近 1 又没做优势归一化</td></tr>
+        <tr><td>KL 很快超过上限</td><td><span class="term">学习率（每次更新时往新信息的方向挪多远）</span>太大</td></tr>
+        <tr><td>KL 每轮都超阈值、线搜索几乎总在缩步</td><td><var>δ<sub>KL</sub></var> 设得太小，或学习率本身过大</td></tr>
+        <tr><td>优势看起来正常但策略不涨</td><td>critic 太差：自举项 V(s′) 有固定偏移</td></tr>
+        <tr><td>回合中段优势莫名跳变</td><td>done 只切断了自举，没切断 (19.2) 的递推</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. GAE 中 λ=0 与 λ=1 分别退化为什么？</p>
+      <ol class="mcq-options">
+        <li>前者退化为蒙特卡洛优势，后者退化为单步 TD 误差</li>
+        <li>前者退化为单步 TD 误差，后者退化为回报减去状态价值</li>
+        <li>前者与后者都退化为单步 TD 误差，只是相差一个常数倍</li>
+        <li>前者与后者都退化为蒙特卡洛优势，只是相差一个常数倍</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：λ=0 时 (19.1) 只剩 <var>l</var>=0 一项，就是
+          <var>δ<sub>t</sub></var>；λ=1 时无穷级数望远镜相消，得到
+          <span class="math">G<sub>t</sub> − V<sub>φ</sub>(S<sub>t</sub>)</span>，
+          即蒙特卡洛优势。</p>
+        <p>A 把两端说反了；C 与 D 都错在"只差常数倍"：两端是两种不同的估计量，
+          不只是尺度不同。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 关于 GAE 的 λ 与偏差-方差权衡，下列说法正确的是？</p>
+      <ol class="mcq-options">
+        <li>λ 越大越接近蒙特卡洛：偏差更小、方差更大</li>
+        <li>λ 越大越接近单步 TD：偏差更小、方差更大</li>
+        <li>λ 越大越接近蒙特卡洛：偏差更大、方差更小</li>
+        <li>λ 越大越接近单步 TD：偏差更大、方差更小</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：λ 越大，远处 TD 误差的权重保留得越多，
+          自举的成分越少，估出来的优势越像真实回报减价值，偏差下降、方差上升。
+          常用 λ≈0.95 就是在往方差那一端稍微让一点。</p>
+        <p>B 与 D 把方向说反：λ 大是远离单步 TD 而不是靠近它。
+          C 把代价说反：更接近蒙特卡洛意味着方差更大，不是更小。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. TRPO 用 KL 约束而不是限制参数更新的欧氏距离，主要理由是？</p>
+      <ol class="mcq-options">
+        <li>KL 的计算比参数范数便宜，能省下大量反向传播开销</li>
+        <li>参数范数在这种情况下根本无法定义，因为参数量太大</li>
+        <li>KL 直接度量策略行为的改变，同样步长可能改变很多</li>
+        <li>KL 约束能保证每次更新都精确提升真实目标无需近似</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：决定采样分布的是策略输出的概率，不是参数的数值。
+          同样的参数步长，在输出很尖时会把动作概率整体改写，在输出很平时几乎没变化；
+          KL 度量的就是概率分布移动了多少。</p>
+        <p>A 说反了，KL 的二阶近似反而更贵；B 不成立，参数范数当然可以定义，
+          只是它与行为变化不成比例；D 过度承诺，代理目标与 KL 都只是近似，
+          单调改进只是理论结论而非精确保证。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 为什么策略梯度必须关心"一步更新走多大"？</p>
+      <ol class="mcq-options">
+        <li>因为学习率必须严格小于 1，否则梯度上升在数学上不收敛</li>
+        <li>因为采样分布随策略变化，坏更新之后很难再采到好数据</li>
+        <li>因为价值函数的估计误差会随步长指数增长，最终导致自举发散</li>
+        <li>因为概率比在数值上必须始终等于 1，否则重要性采样失效</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：on-policy 方法只能从当前策略诱导的分布里采样。
+          一步过大把策略推进低回报区域后，采到的数据都来自这个坏策略，
+          梯度里再也没有"好行为"的信号，于是无法自愈。</p>
+        <p>A 没有依据，学习率小于 1 既非充分也非必要；C 把策略问题说成了价值问题；
+          D 与事实相反：概率比本来就会偏离 1，约束它别偏太远才是重点。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. 关于 TRPO 的实现成本与选用，下列哪一项符合本课结论？</p>
+      <ol class="mcq-options">
+        <li>它只需要一阶梯度，因此比 PPO 更容易实现和调参</li>
+        <li>它完全不需要线搜索，因为 KL 约束已保证目标提升</li>
+        <li>它适用于任何情况，包括参数共享与 dropout 的结构</li>
+        <li>它需要共轭梯度与线搜索，成本高；多数场景用 GAE 加 PPO</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：TRPO 要用 Fisher 向量积与共轭梯度构造二阶方向，
+          再靠线搜索把步子缩进信赖域；实现复杂、每步都贵。
+          所以常见组合是"GAE 估优势 + PPO 做更新"。</p>
+        <p>A 说反了，TRPO 的麻烦之处在于它不止一阶；B 错在线搜索是它的必需品；
+          C 与事实相反，TRPO 与 dropout、参数共享等实现细节冲突。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0019-code-1">
+      <h3>代码题 1 · 反向递推算 GAE 优势</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>GAE 把每一步的单步 TD 误差按指数权重混合起来，给 actor 一个偏差与方差都能调的优势估计。它接在 critic 算出价值之后、actor 更新之前被调用一次，用一段轨迹上全部的 δ 从末尾往前递推，于是后面几步的信息会以衰减的权重传回前面。返回的 <span class="math">A<sub>t</sub></span> 就是策略梯度里乘在 <span class="math">∇log π</span> 上的那个权重。</p>
+        <p>请实现 <code>compute_gae(rewards, values, next_values, dones, gamma, lam)</code>，只用标准库加 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：形状 <code>(T,)</code> 的 float 数组（形状指这个数组有几行几列，<code>(T,)</code> 就是 T 个数的一维数组，下标从 0 开始），第 t 项是奖励 <span class="math">r<sub>t</sub></span>。</li>
+          <li><code>values</code>：形状 <code>(T,)</code> 的 float 数组，第 t 项是 <span class="math">V(s<sub>t</sub>)</span>。</li>
+          <li><code>next_values</code>：形状 <code>(T,)</code> 的 float 数组，第 t 项是 <span class="math">V(s<sub>t+1</sub>)</span>。</li>
+          <li><code>dones</code>：形状 <code>(T,)</code> 的布尔数组，第 t 项为 True 表示回合在 t 结束，递推在这里切断。</li>
+          <li><code>gamma</code>：Python float 标量，折扣因子 γ（越往后的奖励，算进总分时权重越小，等于给它打了个折）。</li>
+          <li><code>lam</code>：Python float 标量，GAE 的 λ，取值 0 到 1：取 0 只看一步，取 1 接近看完整局。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回形状 <code>(T,)</code> 的 <code>np.ndarray</code>：第 t 项是式 (19.4) 的 <span class="math">A<sub>t</sub> = δ<sub>t</sub> + γλ(1 − done<sub>t</sub>)A<sub>t+1</sub></span>，递推从最后一步往前，超出末尾的 <span class="math">A</span> 按 0 计。</li>
+        </ul>
+        <div class="eq">
+          <span class="eq-body">A<sub>t</sub> = δ<sub>t</sub> + γλ(1 − done<sub>t</sub>) A<sub>t+1</sub>,
+            &nbsp;&nbsp; δ<sub>t</sub> = r<sub>t</sub> + γ(1 − done<sub>t</sub>) V(s<sub>t+1</sub>) − V(s<sub>t</sub>)</span>
+          <span class="eq-num">(19.4)</span>
+        </div>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会检查 <code>lam=0</code> 时逐项等于 δ、<code>lam=1</code> 时等于蒙特卡洛优势 <span class="math">G<sub>t</sub> − V(s<sub>t</sub>)</span>、中间取值等于 <span class="math">Σ<sub>l</sub>(γλ)<sup>l</sup>δ<sub>t+l</sub></span>；还会用一段带 done 的短轨迹检查终止步切断递推，优势不跨终止步往后传。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先取 <code>T = len(rewards)</code>，再准备一个长度为 T 的数组 <code>adv = np.zeros(T)</code>（<code>np.zeros(T)</code> 返回一个装了 T 个 0 的数组），以及一个变量 <code>last = 0.0</code> 记 <code>A_{t+1}</code>。</li>
+          <li>用 <code>for t in range(T - 1, -1, -1)</code> 从最后一步倒着扫到第 0 步。</li>
+          <li>先算 <code>delta</code>，再写 <code>A[t] = delta + gamma*lam*(1-done)*last</code>。</li>
+          <li>终止那一步既要让 <code>delta</code> 不含自举，也要让递推不再往回合外延伸。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def compute_gae(rewards, values, next_values, dones, gamma, lam):
+    # TODO: delta_t = r_t + gamma*(1-done_t)*V(s_{t+1}) - V(s_t)
+    #       A_t = delta_t + gamma*lam*(1-done_t)*A_{t+1}，从末尾往前扫
+    return np.zeros(len(rewards))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+r = np.array([1.0, 0.0, 2.0, -1.0, 0.5])
+V = np.array([0.5, 1.0, 0.0, 2.0, -0.5])
+NV = V.copy()
+NV[:4] = V[1:]
+NV[4] = 0.3
+D = np.array([False, False, False, False, True])
+g = 0.9
+delta = r + g * NV * (~D) - V
+
+a0 = np.asarray(compute_gae(r, V, NV, D, g, 0.0), dtype=float)
+check(a0.shape == (5,), f"返回形状应为 (5,)，实际 {a0.shape}")
+check(np.allclose(a0, delta, atol=1e-9),
+      f"lam=0 时 A_t 必须逐项等于 TD 误差 delta，实际 {a0} vs {delta}")
+
+def mc_adv(t):
+    tot = 0.0
+    for l in range(t, len(r)):
+        tot += (g ** (l - t)) * r[l]
+        if D[l]:
+            return tot - V[t]
+    return tot + (g ** (len(r) - t)) * NV[-1] - V[t]
+
+a1 = np.asarray(compute_gae(r, V, NV, D, g, 1.0), dtype=float)
+want1 = np.array([mc_adv(t) for t in range(5)])
+check(np.allclose(a1, want1, atol=1e-9),
+      f"lam=1 时应等于蒙特卡洛优势 G_t - V(s_t)，实际 {a1} vs {want1}")
+
+for lam in (0.3, 0.7, 0.95):
+    a = np.asarray(compute_gae(r, V, NV, D, g, lam), dtype=float)
+    bf = np.zeros(5)
+    for t in range(5):
+        s = 0.0
+        for l in range(5 - t):
+            s += (g * lam) ** l * delta[t + l]
+        bf[t] = s
+    check(np.allclose(a, bf, atol=1e-9),
+          f"lam={lam} 时结果应等于 sum_l (gamma*lam)^l delta_(t+l)，实际 {a} vs {bf}")
+
+r2 = np.array([1.0, 1.0, 5.0])
+V2 = np.zeros(3)
+NV2 = np.zeros(3)
+D2 = np.array([False, True, False])
+a2 = np.asarray(compute_gae(r2, V2, NV2, D2, 0.9, 1.0), dtype=float)
+check(abs(a2[0] - 1.9) < 1e-9,
+      f"每一步的 done 都要切断递推：A[0] = 1 + 0.9*1 = 1.9，实际 {a2[0]:.6f}")
+check(abs(a2[1] - 1.0) < 1e-9 and abs(a2[2] - 5.0) < 1e-9,
+      f"终止处之后的优势不应泄漏到终止步：A[1]=1、A[2]=5，实际 {a2}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def compute_gae(rewards, values, next_values, dones, gamma, lam):
+    rewards = np.asarray(rewards, dtype=float)
+    values = np.asarray(values, dtype=float)
+    next_values = np.asarray(next_values, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    T = len(rewards)
+    adv = np.zeros(T)
+    last = 0.0
+    for t in range(T - 1, -1, -1):
+        alive = 0.0 if dones[t] else 1.0
+        delta = rewards[t] + gamma * next_values[t] * alive - values[t]
+        adv[t] = delta + gamma * lam * alive * last
+        last = adv[t]
+    return adv
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0019-code-2">
+      <h3>代码题 2 · 算 TRPO 的代理目标、KL 与线搜索</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>TRPO 每轮更新要在旧策略附近挑一步：代理目标要涨，同时别离旧策略太远。训练循环先用 <code>surrogate_objective</code> 估目标，再用 <code>mean_kl</code> 与 <code>trpo_line_search</code> 挑出可接受的候选。<code>old_probs</code> 是采集这批数据时用的行为策略。</p>
+        <p>请实现三个函数，只用标准库加 numpy：<code>surrogate_objective(old_probs, new_probs, advantages)</code>、<code>mean_kl(old_probs, new_probs)</code> 与 <code>trpo_line_search(old_probs, candidates, advantages, delta_kl)</code>。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>old_probs</code>：形状 <code>(N, n_actions)</code> 的 float 数组，每行和为 1，是旧策略 <span class="math">π<sub>old</sub></span>。</li>
+          <li><code>new_probs</code>：形状 <code>(N, n_actions)</code> 的 float 数组，每行和为 1，是待评估的新策略。</li>
+          <li><code>advantages</code>：形状 <code>(N, n_actions)</code> 的 float 数组，第 (i, a) 项是状态 i 上动作 a 的优势。</li>
+          <li><code>candidates</code>（<code>trpo_line_search</code>）：形状 <code>(K, N, n_actions)</code> 的 float 数组，每行和为 1，是 K 个按步长递增的候选。</li>
+          <li><code>delta_kl</code>（<code>trpo_line_search</code>）：Python float 标量，本轮允许的平均 KL 上限。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>surrogate_objective</code> 返回 Python <code>float</code>：式 (19.3) 的代理目标 <span class="math">mean<sub>i</sub>Σ<sub>a</sub>(π<sub>new</sub>/π<sub>old</sub>)·A·π<sub>old</sub></span>。</li>
+          <li><code>mean_kl</code> 返回 Python <code>float</code>：<span class="math">mean<sub>i</sub>Σ<sub>a</sub>π<sub>old</sub>log(π<sub>old</sub>/π<sub>new</sub>)</span>，按 N 取平均。</li>
+          <li><code>trpo_line_search</code> 返回 Python <code>int</code>：第一个 KL 不超过 <code>delta_kl</code> 且代理目标不下降的候选下标；没有合格候选返回 <code>-1</code>。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会核对旧策略对自身时的代理目标、相同分布的 KL 为 0、交换参数后 KL 不相等，KL 按 N 取平均；线搜索在阈值 0.02 时跳过前两个候选返回 2，阈值 1e-9 或候选目标都更差时返回 -1。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>① 里 <span class="math">π<sub>old</sub></span> 会被约掉，实现时可以直接算
+            <code>mean(sum(new_probs * advantages, axis=-1))</code>；但请按比值写一遍，理解它从哪来。</li>
+          <li>旧策略自身的代理目标就是 <code>mean(sum(old_probs * advantages, axis=-1))</code>。</li>
+          <li>KL 与代理目标都对样本取平均（<code>axis=-1</code> 求和后再 <code>mean</code>）。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def surrogate_objective(old_probs, new_probs, advantages):
+    # TODO: mean_i sum_a (new/old) * A * old
+    return 0.0
+
+
+def mean_kl(old_probs, new_probs):
+    # TODO: mean_i sum_a old * log(old / new)
+    return 0.0
+
+
+def trpo_line_search(old_probs, candidates, advantages, delta_kl):
+    # TODO: 返回第一个满足 KL 约束且代理目标不下降的候选下标，否则 -1
+    return -1
+</script>
+
+      <script type="text/x-python" data-role="tests">
+old = np.array([[0.6, 0.3, 0.1]])
+adv = np.array([1.0, 0.0, -1.0])
+
+base = surrogate_objective(old, old, adv)
+check(abs(base - 0.5) < 1e-9,
+      f"旧策略自身的代理目标应等于 mean(sum(old*A)) = 0.5，实际 {base:.6f}")
+
+cands = np.array([
+    [[0.1, 0.1, 0.8]],
+    [[0.7, 0.2, 0.1]],
+    [[0.65, 0.25, 0.10]],
+])
+s1 = surrogate_objective(old, cands[1], adv)
+check(abs(s1 - 0.6) < 1e-9,
+      f"候选 1 的代理目标 = 0.7*1 + 0.2*0 + 0.1*(-1) = 0.6，实际 {s1:.6f}")
+
+check(abs(mean_kl(old, old)) < 1e-12,
+      f"两个相同分布的 KL 必须是 0，实际 {mean_kl(old, old):.3e}")
+kl_known = mean_kl(np.array([[0.5, 0.5]]), np.array([[0.9, 0.1]]))
+check(abs(kl_known - 0.5108256237659907) < 1e-9,
+      f"KL([0.5,0.5]||[0.9,0.1]) = 0.5108256，实际 {kl_known:.9f}")
+check(mean_kl(np.array([[0.9, 0.1]]), np.array([[0.5, 0.5]])) < kl_known - 0.1,
+      "KL 不对称：KL(old||new) 与 KL(new||old) 不应相等")
+
+k1 = mean_kl(old, cands[1])
+check(abs(k1 - 0.029149124536094334) < 1e-9,
+      f"候选 1 的 KL 应为 0.0291491，实际 {k1:.9f}")
+
+k0 = mean_kl(old, cands[0])
+check(k0 > 1.0, f"候选 0 偏离过远，KL 应大于 1，实际 {k0:.6f}")
+check(surrogate_objective(old, cands[0], adv) < base,
+      "候选 0 的代理目标低于旧策略，属于应被拒绝的坏步")
+
+check(trpo_line_search(old, cands, adv, 0.02) == 2,
+      f"KL 阈值 0.02 时，候选 0（KL 太大）与候选 1（KL 0.029 超限）都应被拒，"
+      f"第一个可接受的是下标 2，实际 {trpo_line_search(old, cands, adv, 0.02)}")
+check(trpo_line_search(old, cands, adv, 1e-9) == -1,
+      f"KL 阈值取到 1e-9 时没有任何候选合格，应返回 -1，"
+      f"实际 {trpo_line_search(old, cands, adv, 1e-9)}")
+worse = np.array([[[0.5, 0.3, 0.2]], [[0.2, 0.3, 0.5]]])
+check(trpo_line_search(old, worse, adv, 10.0) == -1,
+      "KL 阈值很宽松但所有候选的代理目标都更差时，也必须返回 -1，不能接受坏步")
+
+o2 = np.array([[0.5, 0.5], [0.25, 0.75]])
+n2 = np.array([[0.5, 0.5], [0.5, 0.5]])
+a2 = np.array([[1.0, -1.0], [1.0, -1.0]])
+check(abs(surrogate_objective(o2, n2, a2)) < 1e-12,
+      f"第二行从 [0.25,0.75] 移到 [0.5,0.5] 时期望优势为 0，实际 {surrogate_objective(o2, n2, a2):.3e}")
+check(abs(mean_kl(o2, n2) - 0.06540601797056848) < 1e-9,
+      f"KL 要在样本上取平均：第一行为 0、第二行 0.1308，均值 0.0654060，"
+      f"实际 {mean_kl(o2, n2):.9f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def surrogate_objective(old_probs, new_probs, advantages):
+    old = np.asarray(old_probs, dtype=float)
+    new = np.asarray(new_probs, dtype=float)
+    adv = np.asarray(advantages, dtype=float)
+    ratio = new / old
+    return float(np.mean(np.sum(ratio * adv * old, axis=-1)))
+
+
+def mean_kl(old_probs, new_probs):
+    old = np.asarray(old_probs, dtype=float)
+    new = np.asarray(new_probs, dtype=float)
+    return float(np.mean(np.sum(old * np.log(old / new), axis=-1)))
+
+
+def trpo_line_search(old_probs, candidates, advantages, delta_kl):
+    old = np.asarray(old_probs, dtype=float)
+    cand = np.asarray(candidates, dtype=float)
+    adv = np.asarray(advantages, dtype=float)
+    base = surrogate_objective(old, old, adv)
+    for k in range(cand.shape[0]):
+        if mean_kl(old, cand[k]) <= delta_kl and surrogate_objective(old, cand[k], adv) >= base - 1e-12:
+            return k
+    return -1
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>GAE 与 TRPO 的原始论文：Schulman et al., <em>High-Dimensional Continuous Control Using
+        Generalized Advantage Estimation</em>（ICLR 2016），
+        arXiv <a class="cite" href="https://arxiv.org/abs/1506.02438">1506.02438</a> 给出式 (19.1) 与实验对比；
+        <em>Trust Region Policy Optimization</em>（ICML 2015），
+        arXiv <a class="cite" href="https://arxiv.org/abs/1502.05477">1502.05477</a>
+        给出式 (19.3) 的推导与共轭梯度求解细节。</p>
+      <p>想直接看实现约定，读 Spinning Up in Deep RL（reinforcement learning，强化学习） 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/algorithms/trpo.html">TRPO 章节</a>
+        与其中的 Generalized Advantage Estimation 小节
+        （<a class="cite" href="https://spinningup.openai.com/en/latest/">spinningup.openai.com</a>）。</p>
+      <p>TD(λ) 的教科书推导在 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em>
+        (2nd ed.) 第 7 章与第 12 章。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，把它当私教用。比如可以问：
+      "帮我把 λ=0.95 的 GAE 接到自己的训练循环上，并说明每个张量的形状。"
+      或者 "我的 KL 每轮都超阈值，按本课的表帮我判断是步长问题还是 δ_KL 设小了。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

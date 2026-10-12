@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0022 · Q-learning、on/off-policy 与统一视角 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0022" data-slug="q-learning-unified" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法 3</p>
+    <h1>Q-learning、on/off-policy 与统一视角</h1>
+    <p class="lede">0021 课的最后一条更新式里，目标是"对下一个动作按策略（一套"看到什么状态就选什么动作"的规则）做加权平均"。把那个平均换成取最大值，
+      就得到 Q-learning，见式 (22.1)。这一个符号的改动会带来一个新身份：目标里的策略与产生数据的策略不必是同一套。
+      本课把这两种身份立清楚，再把前面所有算法收进同一句话里。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出 Q-learning 更新式，并说清它与 Sarsa 只差哪一项</li>
+        <li>能区分行为策略与目标策略，并据此判断一个算法是 on-policy 还是 off-policy</li>
+        <li>能证明 Q-learning 就是在解贝尔曼最优方程的 Robbins-Monro 形式</li>
+        <li>能说出 off-policy 的三个好处，以及为什么表格型 Q-learning 不需要重要性采样</li>
+        <li>能把前面几课的更新式与蒙特卡洛写成同一个更新骨架</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. Q-learning：把目标换成最大值</h2>
+    <p>0021 课 Expected Sarsa 的目标是 $r_{t+1}+\gamma\sum_a\pi(a\mid s_{t+1})q_t(s_{t+1},a)$，其中 $\pi$ 是行为策略。
+      把 $\pi$ 换成贪心（在当前估计里挑看起来最好的那个），加权平均就退化成取最大值，
+      更新的对象也从"当前这套策略的价值"变成"最好那套策略的价值"。</p>
+    <div class="def">
+      <span class="label">定义 1.1（Q-learning 更新）</span>
+      <p>维护一张表 $q(s,a)$。每走一步拿到 $(s_t,a_t,r_{t+1},s_{t+1})$ 后，只改被访问的那一对，见式 (22.1)，
+        其余不变。式中 $\alpha_t$ 是学习率（每次更新时，往新信息的方向挪多远），$\gamma$ 是折扣因子（越往后的奖励，算进总分时权重越小）。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_{t+1}(s_t,a_t)=q_t(s_t,a_t)+\alpha_t\big[r_{t+1}+\gamma\max_a q_t(s_{t+1},a)-q_t(s_t,a_t)\big].$$</span>
+        <span class="eq-num">(22.1)</span>
+      </div>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.2（用 max 而不是 a 的下标）</span>
+      <p>Sarsa 的目标里有一项 $q_t(s_{t+1},a_{t+1})$，$a_{t+1}$ 是策略刚选出来的下一个动作。Q-learning 把它换成
+        $\max_aq_t(s_{t+1},a)$：不再问"我接下来真的会走哪一步"，而是问"从这个状态出发，最好的走法值多少分"。
+        这一处替换就是 on-policy 与 off-policy 的分水岭，§2 展开。</p>
+    </div>
+    <div class="thm">
+      <span class="label">引理 1.3（引用：最优价值满足的等式）</span>
+      <p>记从 $(s,a)$ 出发、按最好的走法能拿到的回报（从现在起一直到结束，把每一步奖励加起来的总分）
+        的期望为最优动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）
+        $q_*(s,a)=\max_\pi q_\pi(s,a)$。它满足的方程叫贝尔曼最优方程，就是把所有动作里最好的那个写进
+        贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式），见式 (22.2)。
+        这条等式是 0010 课的结论，本课引用，不重证。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_*(s,a)=\E\Big[R_{t+1}+\gamma\max_a q_*(S_{t+1},a)\mid S_t=s,A_t=a\Big].$$</span>
+        <span class="eq-num">(22.2)</span>
+      </div>
+    </div>
+    <div class="thm">
+      <span class="label">命题 1.4（Q-learning 是它的 Robbins-Monro 形式）</span>
+      <p>把 (22.2) 写成求根问题 (22.3)，它的根就是 $q_*(s,a)$；交给 Robbins-Monro 并用一次采样代替期望，
+        即得 (22.1)。</p>
+      <div class="eq">
+        <span class="eq-body">$$g_{s,a}(w)=w-\E\Big[R_{t+1}+\gamma\max_a q_*(S_{t+1},a)\mid S_t=s,A_t=a\Big].$$</span>
+        <span class="eq-num">(22.3)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>存在性：取 $w=q_*(s,a)$，由 (22.2) 期望项正好等于 $q_*(s,a)$，故 $g_{s,a}(w)=0$。
+        唯一性：期望项不含 $w$，记它为 $c$，则 $g_{s,a}(w)=w-c$ 严格递增，根至多一个。</p>
+      <p>Robbins-Monro 每步减去带噪观测 $w-\big(r_{t+1}+\gamma\max_aq_t(s_{t+1},a)\big)$，
+        取 $w=q_t(s_t,a_t)$ 并与 $\alpha_t$ 相乘加回，即得 (22.1)。最后一步把真值 $q_*$ 换成了估计 $q_t$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.5（$q_*$ 本身的存在与唯一）</span>
+      <p>上面证明的是"$q_*$ 是这个 $g$ 的根，且这个 $g$ 的根唯一"。$q_*$ 本身存在且唯一，
+        来自 0010 课与 0011 课的结论，那里用压缩映射（每迭代一次，两个估计之间的差距就缩小一点）证明了解的唯一性。本课引用，不重证。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 1.6（同一个样本，两种目标）</span>
+      <p>沿用 0021 课例 2.5 的样本：$\gamma=0.9$、$\alpha=0.1$，$q(s_1,a_右)=0.4$、$q(s_2,a_左)=0.6$、
+        $q(s_2,a_右)=0.8$，奖励 $r=1$。</p>
+      <p>Q-learning 的目标 $=1+0.9\times\max(0.6,0.8)=1.72$，误差 $=1.72-0.4=1.32$，
+        故 $q(s_1,a_右)\leftarrow0.4+0.1\times1.32=0.532$。
+        Sarsa 用同一个样本得到 0.514，差别全在那一下取最大值。</p>
+    </div>
+    <div class="rem">
+      <span class="label">算法 1.7（表格型 Q-learning 一轮）</span>
+      <ol>
+        <li>初始化 $q(s,a)$（比如全取 0），给定学习率 $\alpha$ 与探索率（每次决策时，有多大比例的概率去做"随便试一个"）$\varepsilon$。</li>
+        <li>在 $s_t$ 用 $\varepsilon$-greedy 选 $a_t$ 并执行，从环境得到 $r_{t+1}$ 与 $s_{t+1}$。</li>
+        <li>按 (22.1) 更新：目标是 $r_{t+1}+\gamma\max_aq_t(s_{t+1},a)$。</li>
+        <li>令 $t\leftarrow t+1$，回到第 2 步。</li>
+      </ol>
+      <p>第 3 步不需要 $a_{t+1}$，所以更新可以立刻做，不必等下一个动作选出来。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 220" role="img" aria-label="同一个样本下，Sarsa 的目标用采样到的下一个动作，Q-learning 的目标取所有动作里最大的那个">
+        <rect x="24" y="20" width="120" height="34" rx="4" class="box"/><text x="40" y="42" class="val">样本 r = 1</text>
+        <text x="24" y="86" class="val-b">Sarsa</text>
+        <rect x="120" y="66" width="150" height="34" rx="4" class="box-a"/><text x="132" y="88" class="val">用 a′：q(s′,a′) = 0.6</text>
+        <rect x="300" y="66" width="190" height="34" rx="4" class="box"/><text x="312" y="88" class="val">目标 = 1 + 0.9 × 0.6 = 1.54</text>
+        <text x="24" y="156" class="val-b">Q-learning</text>
+        <rect x="120" y="136" width="150" height="34" rx="4" class="box-a"/><text x="132" y="158" class="val">取 max：0.8（另一支）</text>
+        <rect x="300" y="136" width="190" height="34" rx="4" class="box"/><text x="312" y="158" class="val">目标 = 1 + 0.9 × 0.8 = 1.72</text>
+        <text x="24" y="200" class="lbl">同一份数据，目标不同，更新出来的数就不同</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 22.1</span>
+        两条更新式只差目标里那一项：Sarsa 用策略实际选中的那个动作，Q-learning 用全部动作里最大的那个。
+        下面会看到，这一点差别决定了它们各自在学谁的账。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. on-policy 与 off-policy</h2>
+    <p>更新式里可能同时出现两套策略，先给它们起名字：产生数据的那一套叫行为策略，
+      被评估、被改进的那一套叫目标策略。</p>
+    <div class="def">
+      <span class="label">定义 2.1（on-policy 与 off-policy）</span>
+      <p>on-policy（边学的那套策略，就是正在用来产生数据的那套）；
+        off-policy（边学的那套策略，不是产生数据的那套，数据来自另一套旧策略）。
+        判别方法很直接：看更新目标里出现的策略是不是行为策略。</p>
+    </div>
+    <p>Sarsa 的目标是 $r_{t+1}+\gamma q(s_{t+1},a_{t+1})$，其中 $a_{t+1}$ 就是行为策略选出来的，所以它是 on-policy。
+      Expected Sarsa 的目标是 $r_{t+1}+\gamma\sum_a\pi(a\mid s')q(s',a)$，那个 $\pi$ 也是行为策略，所以它也是 on-policy。
+      Q-learning 的目标是 $r_{t+1}+\gamma\max_aq(s',a)$：取最大值等价于用一个贪心策略当目标策略。
+      就算行为策略是 $\varepsilon$-greedy、一直在随机试动作，目标策略也一直是贪心的，两套策略不同，所以它是 off-policy。</p>
+    <div class="rem">
+      <span class="label">注记 2.2（常见的混淆）</span>
+      <p>行为策略探索得多不多，与 on/off-policy 无关。Q-learning 常用 $\varepsilon$-greedy 产生数据，
+        但目标里是贪心，它仍然是 off-policy。判别只看目标里用的是哪套策略。</p>
+    </div>
+    <p>off-policy 带来三个好处：数据可以存进池子反复抽着训练，这就是经验回放
+      （把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用）；
+      可以一边随机探索、一边学最优策略；也可以直接拿别人产生的数据来学。</p>
+    <div class="rem">
+      <span class="label">注记 2.3（为什么不需要重要性采样）</span>
+      <p>拿旧数据训练时，如果目标里含有行为策略的概率，就得用重要性采样
+        （用另一套策略产生的数据估计当前策略的表现，要按概率比例修正）。
+        Q-learning 的目标是 $\max_a$，里面没有行为策略的概率，所以表格型 Q-learning 可以直接用旧数据。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 268" role="img" aria-label="on-policy 的数据与目标来自同一套策略，off-policy 的数据来自行为策略而目标是另一套策略">
+        <text x="26" y="26" class="val-b">on-policy</text>
+        <rect x="30" y="46" width="130" height="40" rx="4" class="box"/><text x="48" y="71" class="val">一套策略</text>
+        <rect x="30" y="112" width="130" height="40" rx="4" class="box-a"/><text x="44" y="137" class="val">产生数据</text>
+        <rect x="30" y="178" width="130" height="40" rx="4" class="box-a"/><text x="44" y="203" class="val">算更新目标</text>
+        <path d="M95 86 V106" class="arrow"/><path d="M91 99 l4 9 l4 -9" class="arrow"/>
+        <path d="M95 152 V172" class="arrow"/><path d="M91 165 l4 9 l4 -9" class="arrow"/>
+        <text x="30" y="248" class="lbl">左边是同一套策略：Sarsa、Expected Sarsa</text>
+        <line x1="262" y1="20" x2="262" y2="258" class="grid"/>
+        <text x="288" y="26" class="val-b">off-policy</text>
+        <rect x="292" y="46" width="140" height="40" rx="4" class="box-a"/><text x="306" y="71" class="val">行为策略</text>
+        <rect x="292" y="112" width="140" height="40" rx="4" class="box"/><text x="306" y="137" class="val">产生数据</text>
+        <rect x="292" y="178" width="140" height="40" rx="4" class="box-a"/><text x="300" y="203" class="val">目标策略（贪心）</text>
+        <path d="M362 86 V106" class="arrow"/><path d="M358 99 l4 9 l4 -9" class="arrow"/>
+        <path d="M362 152 V172" class="arrow"/><path d="M358 165 l4 9 l4 -9" class="arrow"/>
+        <text x="446" y="140" class="lbl">两套</text>
+        <text x="288" y="234" class="lbl">Q-learning</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 22.2</span>
+        左边一条线走到底：数据与目标出自同一套策略。右边分成两条线：数据由行为策略产生，
+        目标用的是另一套（贪心）策略。分不分家，就是 on-policy 与 off-policy 的全部区别。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. Q-learning 的收敛性</h2>
+    <div class="thm">
+      <span class="label">定理 3.1（引用：Q-learning 的长期行为）</span>
+      <p>设状态动作对有限，奖励有界，$\gamma\in[0,1)$。学习率对每一对 $(s,a)$ 满足 0020 课式 (20.8) 那两条，
+        并且每个 $(s,a)$ 都被访问无穷多次。则 $q_t(s,a)$ 收敛（一轮轮算下去，数值不再明显变化，稳定下来了）
+        到 $q_*(s,a)$，几乎必然成立（意思是概率为 1）；由 $q_t$ 取贪心得到的策略收敛到最优策略。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.2（这条定理是引用，以及它与 Sarsa 的差别）</span>
+      <p>本课引用这条定理，最初的完整论证来自 Watkins 与 Dayan 在 1992 年的工作。
+        证明路线与 0020 课注记 6.2 相同：把更新写成 0018 课 Dvoretzky 定理要求的形状，
+        再核对步长、条件零均值噪声与二阶矩有界这三件事，数据条件用"每个状态动作对被访问无穷多次"。</p>
+      <p>与 Sarsa 的差别在收敛目标：$\varepsilon$ 固定时 Sarsa 收敛到该 $\varepsilon$-greedy 策略的价值，
+        而 Q-learning 仍然收敛到 $q_*$，只要求 $\varepsilon$ 保持正数、访问足够多次。这就是 off-policy 换来的东西。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.3（ε 固定时的两种结局）</span>
+      <p>取 $\varepsilon=0.1$ 一直不变。Sarsa 会停在那个带随机动作的策略的价值上；
+        Q-learning 的目标里没有这一层随机性，它继续逼向 $q_*$，
+        最后从表里取贪心得到的策略就是最优策略。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 230" role="img" aria-label="探索率固定时，Sarsa 的估计停在一个带随机的策略的价值上，Q-learning 继续收敛到最优价值">
+        <line x1="70" y1="40" x2="70" y2="180" class="axis-b"/>
+        <line x1="70" y1="180" x2="490" y2="180" class="axis-b"/>
+        <text x="46" y="34" class="lbl">估计值</text>
+        <text x="432" y="200" class="lbl">更新次数</text>
+        <line x1="70" y1="76" x2="456" y2="76" class="mark"/>
+        <text x="462" y="80" class="val-b">最优值</text>
+        <line x1="70" y1="124" x2="456" y2="124" class="mark"/>
+        <text x="462" y="128" class="val-b">ε 策略值</text>
+        <path d="M78 46 L120 96 L160 108 L210 116 L270 120 L340 122 L420 123 L480 123" class="curve2"/>
+        <path d="M78 46 L120 92 L160 84 L210 78 L270 76 L340 76 L420 76 L480 76" class="curve"/>
+        <text x="150" y="106" class="lbl">虚线：Sarsa 停在上面那条线</text>
+        <text x="150" y="66" class="lbl">实线：Q-learning 继续下探到最优值</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 22.3</span>
+        同一个探索率下，两种估计的终点不同。Sarsa 学的是"带着一成随机动作的策略"值多少分，
+        Q-learning 学的是"最好的策略"值多少分。目标里的策略是谁，决定了收敛到哪里。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4. 统一视角：差别只在目标怎么算</h2>
+    <p>回头看，前面所有算法都写成同一句话，见式 (22.4)。真正需要设计的只有一个东西：目标怎么算。</p>
+    <div class="eq">
+      <span class="eq-body">$$q_{t+1}(s_t,a_t)=q_t(s_t,a_t)+\alpha_t\big[\text{目标}_t-q_t(s_t,a_t)\big].$$</span>
+      <span class="eq-num">(22.4)</span>
+    </div>
+    <p>前两行来自更早的课，把它们塞进这个骨架时，把 $q$ 换成 $v$、把动作拿掉即可。
+      表中最后一列问的是自举（用自己当前的估计去更新自己当前的估计）：
+      目标里有没有用自己当前的估计。</p>
+    <table>
+      <thead><tr><th>算法</th><th>目标怎么算</th><th>是否自举</th><th>策略身份</th></tr></thead>
+      <tbody>
+        <tr><td>状态值 TD（temporal difference，0020 课）</td><td>$r_{t+1}+\gamma v(s_{t+1})$</td><td>是</td><td>评估给定策略</td></tr>
+        <tr><td>蒙特卡洛（0015 课）</td><td>一整局的真实回报 $G_t$</td><td>否</td><td>评估给定策略</td></tr>
+        <tr><td>Sarsa（0021 课）</td><td>$r_{t+1}+\gamma q(s_{t+1},a_{t+1})$</td><td>是</td><td>on-policy</td></tr>
+        <tr><td>n 步 Sarsa（0021 课）</td><td>n 步回报 $G_t^{(n)}$</td><td>是</td><td>on-policy</td></tr>
+        <tr><td>Expected Sarsa（0021 课）</td><td>$r_{t+1}+\gamma\sum_a\pi(a\mid s_{t+1})q(s_{t+1},a)$</td><td>是</td><td>on-policy</td></tr>
+        <tr><td>Q-learning（本课）</td><td>$r_{t+1}+\gamma\max_aq(s_{t+1},a)$</td><td>是</td><td>off-policy</td></tr>
+      </tbody>
+    </table>
+    <div class="rem">
+      <span class="label">注记 4.1（三把尺子互不绑定）</span>
+      <p>目标怎么算同时决定三件事。偏差：目标里带着估计就有偏（自举），全是真实奖励就无偏。
+        方差：目标往前看得越远，累积的随机奖励越多，方差越大。
+        策略身份：目标里是行为策略就是 on-policy，用的是另一套就是 off-policy。
+        三者可以自由组合，所以"方差小"与"学最优策略"并不是同一件事。</p>
+    </div>
+    <p>把旋钮拧一圈：目标用一整局真实回报、完全不用估计，是蒙特卡洛；用一步真实奖励加一个估计，是 TD 与 Sarsa；
+      往前多看几步，是 n 步 Sarsa；把采样动作换成加权平均，是 Expected Sarsa；换成最大值，是 Q-learning。
+      再进一步，把采样换成对所有下一状态求期望，就回到 DP（dynamic programming，动态规划），代价是需要模型。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 520 240" role="img" aria-label="所有算法共用同一个更新骨架，唯一可换的零件是目标怎么算">
+        <rect x="24" y="40" width="104" height="40" rx="4" class="box"/><text x="40" y="65" class="val">采样一份</text>
+        <path d="M128 60 H162" class="arrow"/><path d="M154 56 l9 4 l-9 4" class="arrow"/>
+        <rect x="166" y="30" width="120" height="60" rx="4" class="box-a"/><text x="182" y="56" class="val">目标</text>
+        <text x="176" y="78" class="lbl">唯一的旋钮</text>
+        <path d="M286 60 H318" class="arrow"/><path d="M310 56 l9 4 l-9 4" class="arrow"/>
+        <rect x="322" y="40" width="120" height="40" rx="4" class="box"/><text x="332" y="65" class="val">目标 − 当前估计</text>
+        <path d="M442 60 H470" class="arrow"/><path d="M462 56 l9 4 l-9 4" class="arrow"/>
+        <rect x="24" y="130" width="470" height="94" rx="4" class="box"/>
+        <text x="36" y="152" class="val">旋钮的五个档位</text>
+        <text x="36" y="174" class="lbl">整局真实回报 → 蒙特卡洛　　一步奖励加估计 → TD / Sarsa</text>
+        <text x="36" y="194" class="lbl">多看几步 → n 步 Sarsa　　采样动作换加权平均 → Expected Sarsa</text>
+        <text x="36" y="214" class="lbl">换成最大值 → Q-learning（也把策略身份从 on 换成 off）</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 22.4</span>
+        骨架只有三块：采样、算目标、按误差改估计。零件可以换的只有中间那块。
+        每换一个档位，就得到前面某一课里的算法。</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg viewBox="0 0 520 190" role="img" aria-label="按目标里真实奖励的多少排成一条轴，从蒙特卡洛到一步自举，各算法落在不同位置">
+        <line x1="60" y1="96" x2="480" y2="96" class="axis-b"/>
+        <path d="M470 92 l10 4 l-10 4" class="arrow-a"/>
+        <text x="60" y="130" class="lbl">目标里真实奖励多（不自举）</text>
+        <text x="330" y="130" class="lbl">目标里估计多（全自举）</text>
+        <circle cx="80" cy="96" r="5" class="dot-a"/><text x="40" y="82" class="val">蒙特卡洛</text>
+        <circle cx="200" cy="96" r="5" class="dot-a"/><text x="172" y="82" class="val">n 步 Sarsa</text>
+        <circle cx="320" cy="96" r="5" class="dot-a"/><text x="298" y="82" class="val">Sarsa</text>
+        <circle cx="400" cy="96" r="5" class="dot-a"/><text x="330" y="64" class="val">Expected Sarsa</text>
+        <circle cx="460" cy="96" r="5" class="dot-a"/><text x="426" y="82" class="val">Q-learning</text>
+        <text x="60" y="166" class="lbl">越往右：偏差越大、方差越小、更新来得越快</text>
+        <text x="60" y="184" class="lbl">左右位置管的是自举程度，策略身份是另一把尺子</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 22.5</span>
+        按"目标里真实奖励占多少"把算法排成一条轴。这条轴管偏差与方差，
+        它管不到策略身份：最右边的 Q-learning 之所以是 off-policy，是因为目标里用了 max，而不是因为它自举得最厉害。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>Q-learning 更新 (22.1) 与 Sarsa 只差目标里那一项：采样的 $q(s',a')$ 换成 $\max_aq(s',a)$。</li>
+      <li>它是贝尔曼最优方程 (22.2) 的求根问题 (22.3) 交给 Robbins-Monro 的结果；$q_*$ 的唯一性引自 0010 与 0011 课。</li>
+      <li>行为策略产生数据，目标策略被评估。两者相同是 on-policy，不同是 off-policy；Q-learning 属于后者。</li>
+      <li>off-policy 可以用旧数据、可以边探索边学最优；目标里没有行为策略的概率，所以表格型 Q-learning 不用重要性采样。</li>
+      <li>所有算法都是 $q\leftarrow q+\alpha(\text{目标}-q)$，只在目标怎么算上分家。</li>
+    </ul>
+    <p>下一课开始处理"状态太多、表格装不下"的问题：把表换成一个带参数的函数，
+      目标与更新式都不变，变的是"更新谁"。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. Q-learning 与 Sarsa 的更新式只差一处，是哪一处？</p>
+      <ol class="mcq-options">
+        <li>一个的奖励项用 $r_{t+1}$，另一个不用奖励项</li>
+        <li>一个用采样得到的 $q(s',a')$，另一个用 $\max_aq(s',a)$</li>
+        <li>一个带学习率 $\alpha$，另一个不带学习率</li>
+        <li>一个带折扣因子 $\gamma$，另一个不带折扣因子</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两条式子的奖励项、学习率、折扣因子完全一样，只有目标里那一项不同，
+          见 (22.1) 与 0021 课 (21.3)。</p>
+        <p>A、C、D 说的三样都是两条式子共有的。把目标里的动作换掉，才会连带改变它学的是谁的账。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 关于 on-policy 与 off-policy，下面哪一句是对的？</p>
+      <ol class="mcq-options">
+        <li>on-policy 指行为策略是贪心的，off-policy 指行为策略带随机</li>
+        <li>on-policy 指不用折扣因子，off-policy 指使用折扣因子</li>
+        <li>on-policy 只用旧数据，off-policy 只用刚采到的新数据</li>
+        <li>on-policy 边学的策略就是产生数据的策略，off-policy 不是</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：判别只看目标里出现的策略是不是行为策略，见定义 2.1。</p>
+        <p>A 把探索的多少当成了判据，见注记 2.2。B 与折扣因子无关。
+          C 说反了：能用旧数据恰好是 off-policy 的好处。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 从 Expected Sarsa 走到 Q-learning，改动了哪一步？</p>
+      <ol class="mcq-options">
+        <li>把目标里的加权平均换成取最大值</li>
+        <li>把折扣因子 $\gamma$ 改成 1</li>
+        <li>把学习率改成一条递减的序列</li>
+        <li>把表格换成带参数的函数</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：当 $\pi$ 取贪心时，$\sum_a\pi(a\mid s')q(s',a)$ 恰好等于 $\max_aq(s',a)$，
+          加权平均退化成取最大值，见 0021 课注记 5.4。</p>
+        <p>B 会让回报发散，不是这一步改动。C 是收敛条件的一种取法，与本课改动无关。
+          D 是 0023 课之后的事，本课的 Q-learning 仍然是表格型的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 在 Q-learning 里，代替 (22.3) 期望的那个带噪观测是哪一个？</p>
+      <ol class="mcq-options">
+        <li>$\tilde g=r_{t+1}+\gamma\max_aq_t(s_{t+1},a)$</li>
+        <li>$\tilde g=q_t(s_t,a_t)-r_{t+1}$，只减去奖励</li>
+        <li>$\tilde g=q_t(s_t,a_t)-\big[r_{t+1}+\gamma\max_aq_t(s_{t+1},a)\big]$</li>
+        <li>$\tilde g=\max_aq_t(s_{t+1},a)-r_{t+1}$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$g_{s,a}(w)=w-c$，取 $w=q_t(s_t,a_t)$，再把期望 $c$ 用一次采样代替，
+          就得到第三项，见命题 1.4 的证明。</p>
+        <p>A 只取了常数那一半，丢掉了 $w$。B 丢掉了折扣后的那一项。
+          D 把两部分的符号都挪错了，用它更新会朝根的反方向走。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 要断言 (22.3) 的根就是 $q_*(s,a)$，必须先接受下面哪一条？</p>
+      <ol class="mcq-options">
+        <li>每一回合的奖励都必须非负，否则期望不存在</li>
+        <li>贝尔曼最优方程有唯一解 $q_*$，这条由 0010 与 0011 课给出</li>
+        <li>学习率必须取 $1/t$，否则估计停不下来</li>
+        <li>行为策略必须是贪心策略，否则样本会带偏</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：本课把 (22.2) 当成引用结论，只证明"$q_*$ 是这个 $g$ 的根，并且这个 $g$ 的根唯一"，
+          见注记 1.5。$q_*$ 本身的存在与唯一性由 0010、0011 课负责。</p>
+        <p>A 与奖励的符号无关。C 是收敛条件里的一种可选取法，不是前提。
+          D 说反了：Q-learning 的行为策略通常是 $\varepsilon$-greedy，不是贪心。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 如果某个状态动作对在行为策略下从来不会被访问，Q-learning 对它的估计会怎样？</p>
+      <ol class="mcq-options">
+        <li>自动收敛到最优值，因为目标里取的是最大值</li>
+        <li>收敛到 0，因为没有奖励进入这一对</li>
+        <li>收敛到相邻几个动作价值的平均值</li>
+        <li>停在初始值，因为一次更新都没有发生</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Q-learning 每次只改被访问的那一对，见 (22.1)。没被访问过就没有更新，
+          估计只能停在初始值上，这也是收敛定理要求"每个状态动作对被访问无穷多次"的原因。</p>
+        <p>A 是常见的想当然：取最大值也救不了一个从未被更新的格子。B、C 都假设了某种自动补齐机制，
+          而表格型算法没有这种机制。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">7. 探索率固定为 $0.1$ 不变时，下面哪一句对？</p>
+      <ol class="mcq-options">
+        <li>Sarsa 与 Q-learning 都会收敛到最优动作价值</li>
+        <li>Sarsa 与 Q-learning 都停在同一个带随机的价值上</li>
+        <li>Q-learning 收敛到最优动作价值，Sarsa 停在带随机的价值上</li>
+        <li>Q-learning 停在带随机的价值上，Sarsa 收敛到最优动作价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Sarsa 评估的是产生数据的那个 $\varepsilon$-greedy 策略，所以它停在那套策略的价值上；
+          Q-learning 的目标里是贪心，与行为策略无关，所以它继续逼向最优值，见定理 3.1 与例 3.3。</p>
+        <p>A 错在 Sarsa 这一半。B 错在把两者混为一谈。D 把两者调了个位置。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 已知 $q(s_1,a_右)=0.4$、$q(s_2,a_左)=0.6$、$q(s_2,a_右)=0.8$，$r=1$，
+        $\gamma=0.9$、$\alpha=0.1$，一步 Q-learning 更新后 $q(s_1,a_右)$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>0.532（目标取 $s_2$ 处最大的那个 $q$）</li>
+        <li>0.514（目标用采样到的 $q(s_2,a_左)$）</li>
+        <li>0.4（学习率取 0，估计不动）</li>
+        <li>1.72（只算到目标，忘了乘学习率）</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：目标 $=1+0.9\times0.8=1.72$，误差 $=1.72-0.4=1.32$，
+          于是 $q\leftarrow0.4+0.1\times1.32=0.532$。</p>
+        <p>B 用的是 Sarsa 的目标（$1.54$），得 0.514，那是 0021 课的算法。
+          C 相当于学习率取 0。D 算的是目标本身。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 某算法的目标是 $r_{t+1}+\gamma\sum_a\pi(a\mid s_{t+1})q(s_{t+1},a)$，
+        其中 $\pi$ 是正在产生数据的 $\varepsilon$-greedy 策略。它是哪一类，理由是什么？</p>
+      <ol class="mcq-options">
+        <li>off-policy，因为目标里出现了对所有动作的求和</li>
+        <li>off-policy，因为 $\varepsilon$-greedy 的行为策略带随机</li>
+        <li>on-policy，因为加权平均相当于取最大值</li>
+        <li>on-policy，因为目标里的策略就是行为策略</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Expected Sarsa 把行为策略的概率原样写进目标，所以它评估的就是行为策略，
+          属于 on-policy，见定义 2.1。</p>
+        <p>A 与 B 都拿"目标里有求和"或"行为策略带随机"当 off-policy 的理由，这两条都不是判据。
+          C 说错了：加权平均一般不等于最大值，只有 $\pi$ 变成贪心时两者才相等，那时算法就是 Q-learning。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. 为什么要专门区分行为策略与目标策略？</p>
+      <ol class="mcq-options">
+        <li>因为不区分就无法写出折扣因子</li>
+        <li>因为分开之后可以用旧数据、边探索边学最优</li>
+        <li>因为不区分就无法保证奖励有界</li>
+        <li>因为分开之后目标方差一定会变成 0</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两套策略分开，数据可以由一套带探索的策略产生，目标却按另一套策略算，
+          于是旧数据能反复用、探索与学最优可以同时进行。</p>
+        <p>A、C 与折扣因子和奖励的界都无关，那是问题设定里的东西。D 说反了：方差由目标往前看多远决定，
+          与策略身份是两把尺子，见注记 4.1。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 7 章第 7.4 节「Q-learning」与第 7.5 节「A Unified Viewpoint」。
+        本课的 Q-learning 更新式、on/off-policy 的判别与统一视角都对齐这两节。</p>
+      <p>经典教材里对应的是 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em>
+        (2nd ed.) 第 6 章，Q-learning 的收敛性见 C. Watkins &amp; P. Dayan,
+        "Q-learning", <em>Machine Learning</em>, 1992。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "用一个两状态的玩具例子把 on-policy 与 off-policy 的差别演一遍"，
+      或者 "为什么 Q-learning 可以直接用旧数据，而 Sarsa 不行？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A25 · 离线 RL 与模仿学习 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A25" data-slug="offline-imitation" data-part="进阶篇 · 第六部分 · 模型基、离线与对齐">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第六部分 · 模型基、离线与对齐</p>
+    <h1>离线 RL 与模仿学习</h1>
+    <p class="lede">这一节的场景很窄：你手上只有一份过去攒下来的记录，不能拿真实系统做实验。
+      这种"不能与真实环境交互，只能用已经攒下来的历史数据学"的做法叫离线，
+      下面统一叫离线 RL。在这个约束下，照着别人的做法学能走多远、什么时候会崩、
+      什么条件下才值得上离线 RL，下面逐个回答。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能用一句话说清分布偏移，以及它为什么让 <var>Q</var> 不可信</li>
+        <li>能解释复合误差为什么让行为克隆越走越偏，并给出一条诊断方法</li>
+        <li>能判断日志够不够做离线 RL，以及该先跑什么基线</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>设定：只有日志，没有实验</h2>
+        <p>前面所有算法都假设你能反复与环境交互：试、失败、召回、再试。
+      真实业务里这几乎从不成立：生产线不能停下来陪你探索，用户也不能被随机发优惠券。
+      先交代几个这一节反复要用的词。</p>
+    <p>监督学习（拿"题目 + 标准答案"来学的机器学习方式，像做一本有答案的练习册）。
+      策略（一套"看到什么状态就选什么动作"的规则）。
+      回报（从现在起一直到结束，把每一步奖励加起来的总分）。
+      价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）。
+      自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）。
+      函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去"猜"值）。
+      基线（打分时先减掉的一个参照值，只用来压住波动，不改变平均方向）。</p>
+    <p>再看这一节另外几个词。动作空间（一个状态下所有能选的动作合起来有多大）。
+      动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）。
+      经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用，像个错题本）。
+      过估计（因为总是取最大值，估计出来的分数会偏高）。
+      双 Q（用两套估计分别负责"挑动作"和"打分"，压住总是高估的毛病）。
+      超参（需要你自己设定、而不是训练学出来的参数，像火候）。
+      收敛（一轮轮算下去，数值不再明显变化，稳定下来了）。
+      人类偏好（只告诉你"这两个里我更喜欢哪一个"，不给绝对分数），
+      这样叫是为了和 0002 课那种"每个臂一个打分"的偏好区分开。
+      交叉熵（衡量两套概率分布差多远的一个常用指标）。
+      重要性采样（用另一套策略产生的数据来估计当前策略的表现，需要按概率比例做修正）。
+      这两个词这一节不展开，知道大致用途就够了。</p>
+    <p>你手上只有一份<em>固定日志</em>：<span class="math">(s, a, r, s′)</span> 记录，
+      由某个<span class="term">行为策略（behavior policy, π<sub>β</sub>）</span>产生，此后不再与环境交互。
+            这就是<span class="term">离线 RL（offline RL，不能与真实环境交互，
+      只能用已经攒下来的历史数据学）</span>的设定，也叫 batch RL。
+      历史操作记录、专家演示、别的模型跑出的轨迹都能用。</p>
+    <p>它和<a href="A13-dqn.html">经验回放</a>的区别在于：回放缓冲区里也是旧数据，但它为当下的探索服务，
+      随时能用新样本补充；离线数据是封口的，采样不到那些"我想知道"的状态。术语对照见
+      <a href="../reference/glossary.html">术语表</a>。</p>
+  </section>
+
+  <section>
+    <h2>分布偏移：离线 RL 失败的头号原因</h2>
+    <p>把 Q-learning 直接搬到离线数据上，会发生一件很隐蔽的事：策略会去查询那些
+      <em>日志里从未出现</em>的 <span class="math">(s, a)</span>，
+      想知道"如果当时选了另一个动作会怎样"。这些位置的 <var>Q</var> 没有数据约束，
+      完全由函数逼近器的外推决定，而外推可以是任意值。</p>
+    <p>这里插一句术语：正在学的那套策略，与产生手上这批数据的策略，
+      可以是同一套，也可以不是。是同一套叫 on-policy（边学的那套策略，就是正在用来产生数据的那套）；
+      不是同一套叫 off-policy（边学的那套策略，不是产生数据的那套，数据来自另一套旧策略）。
+      Q-learning 属于后者，正因为它允许"拿旧数据学新策略"，离线这种设定才会被提出。
+      下一批读它时，如果外推给出的估计偏了，整套学习就会被带偏。</p>
+    <p>更糟的是策略会主动去找那个任意值：某处 <var>Q</var> 被外推得偏高，策略就更愿意去那里，
+      越去越没数据，<var>Q</var> 越不可信。这个自我强化的过程叫
+      <span class="term">外推误差（extrapolation error）</span>，
+      整体现象叫<span class="term">分布偏移（distribution shift）</span>。</p>
+    <p>这条链路有两个推论。第一，离线 RL 的核心动作只有让价值函数在数据支撑之外<em>保持保守</em>，
+      换优化器没有用。第二，评测要小心：日志上算出来的分数不可信（它是
+      <a href="../reference/glossary.html">离线评估</a>的经典难题），
+      上线必须走 shadow 模式（新策略只在后台跟着真实流量跑、不真的生效，先看它会怎么决策）、小流量 A/B 测试（只让一小部分用户看到新方案）与护栏指标（用来兜底的安全线，比如"下单成功率不能掉"）。</p>
+  </section>
+
+  <section>
+        <h2>行为克隆：该先跑的那件事</h2>
+    <p>最省事的做法叫<span class="term">模仿学习（imitation learning，
+      不去试错，直接学着模仿别人的动作）</span>，生活里的说法就是"看师傅怎么做就跟着做"。
+      它里面最朴素的一种叫<span class="term">行为克隆（behavior cloning, BC，
+      把"别人看到什么就做什么"当成监督学习来学）</span>，说白了就是抄作业。</p>
+    <p><span class="term">行为克隆（behavior cloning, BC）</span>把日志里的
+      <span class="math">(s, a)</span> 当监督学习样本，直接拟合
+      <var>π</var><sub>θ</sub>(<var>a</var>|<var>s</var>)，θ（策略参数）是待学参数：连续动作退化为均方误差，
+      离散动作就是分类交叉熵。它不做价值估计、不做自举、不做探索，所以稳、便宜、好解释。</p>
+    <p>它也有一个结构性缺陷：<span class="term">复合误差（compounding error）</span>。
+      训练时模型只在自己见过的状态上犯错；预测稍微偏一点，环境就把你推到
+      分布边缘的状态，那里的动作覆盖更差，误差更大，于是偏得更远。
+      误差随步数累积，最坏可达 <span class="math">O(εT²)</span>。式中 ε（单步误差）是每步的偏差上界。</p>
+    <p>一个立刻能用的诊断：拿日志后半段的轨迹当测试集，让学到的策略从同一初始状态重走一遍，
+      看动作偏差是否随步数单调放大。训练集准确率很高、重放误差却一路涨，多半是复合误差。</p>
+  </section>
+
+  <section>
+    <h2>DAgger：把专家的纠正补回来</h2>
+    <p><span class="term">DAgger（dataset aggregation，把数据一轮轮攒起来）</span>针对的就是上面那个诊断：
+      训练分布与策略实际访问的分布不一致，那就让专家去看策略会走到哪里。
+      每轮用当前策略跑出新状态，请专家（或人工审核）标注正确动作，追加进数据集重训；
+      几轮后训练分布向策略的真实分布靠拢。</p>
+    <p>代价很明确：你必须能问到专家，而且每轮都要新数据。
+      只能查历史日志的场景用不了 DAgger，只能回到离线那一侧。</p>
+  </section>
+
+  <section>
+    <h2>离线 RL：让价值在数据外保守</h2>
+    <p>离线 RL 要解决的问题比 BC 更进一步：数据里混着次优行为时，
+      怎么学出一个比"数据平均水平"更好的策略。主流做法共享同一个核心，约束价值或约束策略：</p>
+    <ul>
+      <li><span class="term">CQL（conservative Q-learning，保守 Q 学习）</span>在贝尔曼误差之外加一项惩罚：
+        压低策略偏好、但日志里没出现过的动作的 <var>Q</var>，保留出现过动作的 <var>Q</var>。
+        不确定性由此变成保守。</li>
+      <li><span class="term">IQL（implicit Q-learning，隐式 Q 学习）</span>用期望回归（expectile regression）
+        估计价值，不做"数据外的最大化"，所以不需要显式约束，实现也更简单。</li>
+      <li><span class="term">BCQ / TD3+BC</span>换一条路：直接约束策略本身，
+        让新策略只能输出数据里见过的动作附近的动作。</li>
+    </ul>
+    <p>三条路线的取舍与超参见 <a href="../reference/algorithms.html#alg-cql">算法速查表 · CQL</a>。</p>
+  </section>
+
+  <section>
+    <h2>实践顺序：先 BC，再离线 RL</h2>
+    <table>
+      <thead><tr><th>问题</th><th>先做什么</th></tr></thead>
+      <tbody>
+        <tr><td>日志能覆盖到决策需要的状态吗？</td><td>先画状态覆盖图；覆盖不到的状态上什么算法都救不回来</td></tr>
+        <tr><td>我只想复现既有水平</td><td>BC。它便宜、稳、可解释，是所有离线方法的对照基线</td></tr>
+        <tr><td>数据混有次优行为，想学得更好</td><td>这时才上 CQL / IQL / TD3+BC，并用 BC 当上界参照</td></tr>
+        <tr><td>日志上的评估很好看</td><td>别信。上 shadow 模式、小流量 A/B、护栏指标</td></tr>
+      </tbody>
+    </table>
+    <p>"离线 RL 不需要交互，所以更省钱"是一种常见的误读。它省的只有交互预算，
+      成本换成了别的：足够多样的行为数据（每个重要状态下得有多种动作被尝试过）、
+      保守系数的调参，还有一条比在线 RL 更谨慎的评估链路。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 直接拿离线日志训练 Q-learning，为什么会失败？</p>
+      <ol class="mcq-options">
+        <li>策略会查询日志里没有的动作，那些位置的 Q 值不受约束</li>
+        <li>日志按时间顺序收集，样本相关性使梯度噪声偏大</li>
+        <li>日志奖励带噪声，Q-learning 会把噪声当成真实信号</li>
+        <li>Q-learning 是 on-policy 方法，不能用别的策略产生的数据</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：失败的核心是查询了没有数据的位置。目标里的
+          <span class="math">max<sub>a′</sub></span> 会估计日志里从未执行过的动作，这份估计由外推决定，
+          可以任意大，策略随后就跑向虚高的区域。</p>
+        <p>B 的梯度噪声靠回放就能缓解。C 对在线与离线的影响一样。
+          D 与事实相反：Q-learning 是 off-policy，能复用旧数据。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 行为克隆的复合误差是怎么产生的？</p>
+      <ol class="mcq-options">
+        <li>训练集太小而模型容量过剩，在日志上严重过拟合</li>
+        <li>动作标签不均衡，模型只学会最常见的那个动作</li>
+        <li>小误差把策略推到覆盖很差的状态，误差随步数放大</li>
+        <li>学习率（每次更新时往新信息的方向挪多远）太大，参数在训练后期震荡而无法收敛</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：BC 的训练分布是专家访问过的状态分布。策略预测偏一点，环境就把它带到
+          覆盖很差的地方，那里的预测更不可靠，误差继续累积。它<em>对状态覆盖的敏感度</em>
+          远高于对模型容量的敏感度。</p>
+        <p>A 说的是过拟合，与误差累积无关。B 属于类别不均衡，只会让策略一开始就偏。
+          D 调小学习率即可。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. DAgger 与行为克隆的关键区别是什么？</p>
+      <ol class="mcq-options">
+        <li>它直接学价值函数，用自举替代监督学习，不需要专家标注</li>
+        <li>它让专家在策略实际访问的状态上标注动作，修正分布不匹配</li>
+        <li>它在线交互并把新数据加入回放缓冲区，属于 on-policy 方法</li>
+        <li>它用多个策略并行采样做多数投票，降低数据方差</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：DAgger 针对的就是 BC 的痛点，训练分布与部署时分布不一致。
+          做法是用当前策略跑出新状态、请专家标注正确动作，再聚合回数据集重训。</p>
+        <p>A 把它说成了价值学习：DAgger 只拟合动作，没有自举。C 收集的是自己会访问的状态，
+          而且仍然做监督学习，不是 actor-critic。D 与多数投票无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 关于离线评估，下列哪一项是可靠的结论？</p>
+      <ol class="mcq-options">
+        <li>只要离线数据量足够大，日志估计就等价于上线表现</li>
+        <li>同一批日志做交叉验证得到的分数，可以直接决定上线</li>
+        <li>换成双 Q 之后，离线评估的偏差会被自动校正</li>
+        <li>分布偏移让日志上的估计偏乐观，上线必须用 A/B 与护栏兜底</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：日志由行为策略 <var>π</var><sub>β</sub> 产生，被评估的策略却会去看
+          <var>π</var><sub>β</sub> 没走过的区域，那里的估计没有数据支撑，通常偏乐观。
+          上线只能用 shadow、A/B 与护栏兜底。</p>
+        <p>A 与 B 都错在"数据多就能解决问题"：量不解决覆盖。C 混淆了目的：
+          双 Q 缓解的是<em>训练</em>中的过估计，给不了离线评估的无偏估计。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. CQL 与 IQL 这类离线算法的核心设计原则是什么？</p>
+      <ol class="mcq-options">
+        <li>把动作空间离散化，用表格法避免函数逼近的外推误差</li>
+        <li>让价值或策略在数据支撑外保持保守，不追逐无数据支持的高估值</li>
+        <li>引入在线探索，用小流量随机动作补齐日志缺的动作</li>
+        <li>并行训练多个策略，挑日志上回报（从现在起一直到结束，把每一步奖励加起来的总分）估计最高的部署</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：离线 RL 的困难来自外推：没有数据的位置上 <var>Q</var> 可以任意大。
+          主流算法都在做同一件事：让价值在数据外偏低（CQL）、不去查询数据外的最值（IQL），
+          或把策略约束在数据动作附近（BCQ / TD3+BC）。</p>
+        <p>A 只是把外推搬到表格的另一格。C 违反离线设定。
+          D 的分母仍是那份不可信的离线估计，选择会被同样的偏差污染。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0025-code-1">
+      <h3>代码题 1 · 训练线性行为克隆并预测动作</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>本课的设定是只有一份固定日志，不能与环境交互。
+          行为克隆是最先要跑的基线：把日志里的状态动作对当监督样本。训练函数在离线拟合阶段被调用，
+          学出一个线性 softmax 策略；预测函数在部署阶段被调用，拿当前状态选动作。
+          两者共用同一套中心化特征，训练与推理的输入必须对齐。</p>
+        <p>请实现 <code>fit_behavior_cloning(states, actions, n_actions, steps=2000, lr=1.0)</code>
+          与 <code>behavior_clone_predict(states, W, b)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>states</code>：形状 <code>(N, D)</code> 的状态数组，<code>D</code> 是特征维数。测试里是一维，取值在 0 到 1 之间。</li>
+          <li><code>actions</code>：长度 <code>N</code> 的整数动作标签，取值在 <code>[0, n_actions)</code>。</li>
+          <li><code>n_actions</code>：动作个数，决定输出层宽度。</li>
+          <li><code>steps</code>、<code>lr</code>：全批量梯度下降的步数与学习率，默认 <code>2000</code> 与 <code>1.0</code>。</li>
+          <li><code>W</code>、<code>b</code>：训练好的权重与偏置，也是预测函数的输入。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>fit_behavior_cloning</code> 返回 <code>(W, b)</code>：<code>W</code> 形状 <code>(D, n_actions)</code>，<code>b</code> 形状 <code>(n_actions,)</code>，是线性 logits 的权重与偏置。</li>
+          <li><code>behavior_clone_predict</code> 返回形状 <code>(N,)</code> 的数组，<code>dtype</code> 为 <code>int64</code>，第 <code>i</code> 个元素是第 <code>i</code> 个状态上 argmax logit 的动作下标。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>W</code> 与 <code>b</code> 的形状；
+          预测必须是 <code>int64</code>；两组日志上的训练准确率都接近 1，两个动作的权重必须被拉开，
+          否则策略退化成常量；小状态判动作 0、大状态判动作 1；第二组数据在 0.5 附近没有样本，
+          <code>s = 0.5</code> 处仍判为动作 0。只用标准库与 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>softmax 要减去每行最大值再取指数：<code>z = z - z.max(axis=1, keepdims=True)</code>。</li>
+          <li>one-hot：<code>Y = np.zeros_like(P); Y[np.arange(N), actions] = 1.0</code>。</li>
+          <li>一步梯度下降：<code>W -= lr * (s.T @ G)</code>、<code>b -= lr * G.sum(axis=0)</code>，
+            <code>G = (P - Y) / N</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def fit_behavior_cloning(states, actions, n_actions, steps=2000, lr=1.0):
+    # TODO: 中心化状态，用交叉熵梯度下降拟合线性 softmax 策略
+    s = np.asarray(states, dtype=float)
+    if s.ndim == 1:
+        s = s.reshape(-1, 1)
+    W = np.zeros((s.shape[1], int(n_actions)))
+    b = np.zeros(int(n_actions))
+    return W, b
+
+
+def behavior_clone_predict(states, W, b):
+    # TODO: 返回每行最大 logit 对应的动作下标
+    s = np.asarray(states, dtype=float)
+    if s.ndim == 1:
+        s = s.reshape(-1, 1)
+    return np.zeros(s.shape[0], dtype=np.int64)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+import numpy as np
+
+st = np.array([0.1, 0.3, 0.6, 0.9])
+maj = np.array([0, 0, 1, 1])
+S = np.repeat(st, 60)
+A = np.repeat(maj, 60)
+W, b = fit_behavior_cloning(S, A, 2)
+check(np.asarray(W).shape == (1, 2), f"W 形状应为 (1,2)，实际 {np.asarray(W).shape}")
+check(np.asarray(b).shape == (2,), f"b 形状应为 (2,)，实际 {np.asarray(b).shape}")
+
+pred = behavior_clone_predict(S, W, b)
+check(pred.dtype == np.int64, f"预测应为 int64 下标，实际 {pred.dtype}")
+acc = float(np.mean(pred == A))
+check(acc >= 0.95, f"四个状态的多数动作是线性可分的，训练准确率应接近 1，实际 {acc:.3f}")
+
+d = float(np.min(np.abs(np.asarray(W)[0, 0] - np.asarray(W)[0, 1])))
+check(d > 0.5, f"两个动作的权重必须被区分开（否则策略退化成常量），实际差 {d:.4f}")
+
+p_seen = behavior_clone_predict(np.array([st]), W, b)
+check(np.array_equal(p_seen, maj), f"对训练状态的预测应等于多数动作 {maj}，实际 {p_seen}")
+
+p_low = behavior_clone_predict(np.array([[0.05]]), W, b)
+p_high = behavior_clone_predict(np.array([[0.95]]), W, b)
+check(int(p_low[0]) == 0 and int(p_high[0]) == 1,
+      f"小状态应判为动作 0、大状态判为动作 1，实际 {p_low[0]} 与 {p_high[0]}")
+
+st2 = np.array([0.1, 0.2, 0.8, 0.9])
+maj2 = np.array([0, 0, 1, 1])
+S2 = np.repeat(st2, 40)
+A2 = np.repeat(maj2, 40)
+W2, b2 = fit_behavior_cloning(S2, A2, 2)
+acc2 = float(np.mean(behavior_clone_predict(S2, W2, b2) == A2))
+check(acc2 >= 0.95, f"这组数据的动作按状态阈值可分，训练准确率应接近 1，实际 {acc2:.3f}")
+p_seen2 = behavior_clone_predict(np.array([st2]), W2, b2)
+check(np.array_equal(p_seen2, maj2), f"对训练状态的预测应等于多数动作 {maj2}，实际 {p_seen2}")
+mid = int(behavior_clone_predict(np.array([[0.5]]), W2, b2)[0])
+check(mid == 0,
+      f"日志里没有 0.5 附近的样本，边界附近的判断只能由外推决定（本题落在动作 0），实际 {mid}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def fit_behavior_cloning(states, actions, n_actions, steps=2000, lr=1.0):
+    s = np.asarray(states, dtype=float).reshape(-1, 1)
+    s = s - 0.5
+    a = np.asarray(actions, dtype=int).reshape(-1)
+    n = s.shape[0]
+    n_actions = int(n_actions)
+    W = np.zeros((s.shape[1], n_actions))
+    b = np.zeros(n_actions)
+    for _ in range(int(steps)):
+        z = s @ W + b
+        z = z - z.max(axis=1, keepdims=True)
+        p = np.exp(z)
+        p = p / p.sum(axis=1, keepdims=True)
+        y = np.zeros_like(p)
+        y[np.arange(n), a] = 1.0
+        g = (p - y) / n
+        W = W - lr * (s.T @ g)
+        b = b - lr * g.sum(axis=0)
+    return W, b
+
+
+def behavior_clone_predict(states, W, b):
+    s = np.asarray(states, dtype=float).reshape(-1, 1)
+    s = s - 0.5
+    logits = s @ np.asarray(W, dtype=float) + np.asarray(b, dtype=float)
+    return np.argmax(logits, axis=1).astype(np.int64)
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0025-code-2">
+      <h3>代码题 2 · 拟合线性 Q 并测量外推误差</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>分布偏移是离线 RL 失败的头号原因，它的效果集中体现在外推上：
+          日志没覆盖过的状态动作上，Q 函数给出的值没有数据支撑。这三个函数是验证该现象的仪器，
+          在离线评估阶段给候选算法打分。先在 <code>s ∈ [0, 1]</code> 的日志上拟合线性 Q，
+          再推到数据范围之外，看误差怎么放大。输入输出都对应日志记录
+          <span class="math">(s, a, r)</span>。</p>
+        <p>请实现 <code>fit_linear_q(states, actions, rewards)</code>、
+          <code>linear_q_value(w, states, actions)</code> 与
+          <code>extrapolation_error(w, states, actions)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>states</code>、<code>actions</code>、<code>rewards</code>：等长的一维数组（长度 <code>N</code>），即日志里的状态、动作与回报；长度为 1 的数组也要能用。</li>
+          <li><code>w</code>：<code>fit_linear_q</code> 解出的权重，长度 3。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>fit_linear_q</code> 返回形状 <code>(3,)</code> 的数组：按特征 <span class="math">φ(s, a) = [1, s, a]</span> 的最小二乘权重，<code>w[0]</code> 是常数项、<code>w[1]</code> 对应状态、<code>w[2]</code> 对应动作。</li>
+          <li><code>linear_q_value</code> 返回形状 <code>(N,)</code> 的数组：第 <code>i</code> 个元素是 <span class="math">φ(s<sub>i</sub>, a<sub>i</sub>) · w</span>。</li>
+          <li><code>extrapolation_error</code> 返回 Python <code>float</code>：真实动作价值取 <span class="math">q(s, a) = s²</span>，返回估计值与它的均方误差。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>权重形状是 <code>(3,)</code>；数据严格线性时
+          <code>w</code> 必须是 <code>[0, 2, 0]</code> 且插值精确；日志范围内均方误差小于 0.1；
+          <code>s = 3</code>、<code>a = 2</code> 处真实值是 9，线性外推的预测低于 5、均方误差远大于 10；
+          严格线性那组外推到 <code>s = 3</code> 时均方误差正好是 9。只用标准库与 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>设计矩阵：<code>np.column_stack([np.ones_like(s), s, a])</code>，别写成行向量的拼接。</li>
+          <li><code>np.linalg.lstsq(A, r, rcond=None)[0]</code> 返回的就是最小二乘解。</li>
+          <li>先 <code>np.asarray(..., dtype=float).reshape(-1)</code>，
+            再 <code>float(np.mean((pred - true) ** 2))</code> 返回 Python 浮点数。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def fit_linear_q(states, actions, rewards):
+    # TODO: 用 [1, s, a] 做特征，最小二乘解出 w
+    return np.zeros(3)
+
+
+def linear_q_value(w, states, actions):
+    # TODO: 返回 phi(s, a) · w
+    s = np.asarray(states, dtype=float)
+    return np.zeros(s.shape[0])
+
+
+def extrapolation_error(w, states, actions):
+    # TODO: 与真实 q(s, a) = s^2 的均方误差
+    return 0.0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+import numpy as np
+
+rng = np.random.default_rng(0)
+s_demo = np.sort(rng.uniform(0.0, 1.0, 60))
+a_demo = np.full(60, 0.5)
+r_demo = s_demo ** 2
+w = np.asarray(fit_linear_q(s_demo, a_demo, r_demo), dtype=float)
+check(w.shape == (3,), f"权重应是长度 3 的数组，实际 {w.shape}")
+
+pred_in = np.asarray(linear_q_value(w, s_demo, a_demo), dtype=float)
+check(pred_in.shape == (60,), f"linear_q_value 应返回 (60,)，实际 {pred_in.shape}")
+err_in = float(extrapolation_error(w, s_demo, a_demo))
+check(err_in < 0.1, f"在数据范围内线性拟合已经够好，MSE 应小于 0.1，实际 {err_in:.4f}")
+check(abs(pred_in[0] - s_demo[0] ** 2) < 0.3,
+      f"数据范围内预测应贴近 s^2：s={s_demo[0]:.3f} 时实际 {pred_in[0]:.4f}")
+
+err_ood = float(extrapolation_error(w, np.array([3.0]), np.array([2.0])))
+check(err_ood > 10.0,
+      f"在 s=3 处真实值是 9，线性外推会远远偏低，MSE 应远大于 10，实际 {err_ood:.4f}")
+
+ood_pred = float(np.asarray(linear_q_value(w, np.array([3.0]), np.array([2.0])), dtype=float)[0])
+check(ood_pred < 5.0,
+      f"数据范围外 Q 依然给得出一个数，但它离真值 9 很远，实际 {ood_pred:.4f}")
+
+s3 = np.array([0.0, 1.0, 2.0, 3.0])
+a3 = np.zeros(4)
+w3 = np.asarray(fit_linear_q(s3, a3, 2.0 * s3), dtype=float)
+check(abs(w3[0]) < 1e-9 and abs(w3[2]) < 1e-9 and abs(w3[1] - 2.0) < 1e-9,
+      f"数据严格线性时 w 应为 [0, 2, 0]，实际 {w3}")
+check(abs(float(np.asarray(linear_q_value(w3, np.array([1.5]), np.array([0.0])), dtype=float)[0]) - 3.0) < 1e-9,
+      "线性关系下插值应精确：s=1.5 处应为 3.0")
+err3 = float(extrapolation_error(w3, np.array([3.0]), np.array([0.0])))
+check(abs(err3 - 9.0) < 1e-9,
+      f"线性外推到 s=3 时估计 6.0 而真实值是 9.0，MSE 应为 (6-9)^2 = 9，实际 {err3:.4f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def _features(states, actions):
+    s = np.asarray(states, dtype=float).reshape(-1)
+    a = np.asarray(actions, dtype=float).reshape(-1)
+    return np.column_stack([np.ones_like(s), s, a])
+
+
+def fit_linear_q(states, actions, rewards):
+    phi = _features(states, actions)
+    r = np.asarray(rewards, dtype=float).reshape(-1)
+    w, _, _, _ = np.linalg.lstsq(phi, r, rcond=None)
+    return w
+
+
+def linear_q_value(w, states, actions):
+    phi = _features(states, actions)
+    return phi @ np.asarray(w, dtype=float).reshape(-1)
+
+
+def extrapolation_error(w, states, actions):
+    s = np.asarray(states, dtype=float).reshape(-1)
+    pred = linear_q_value(w, states, actions)
+    true_q = s ** 2
+    return float(np.mean((np.asarray(pred, dtype=float) - true_q) ** 2))
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>离线 RL 的提出与"外推误差"的系统分析，见 Fujimoto, Meger, Precup,
+        <em>Off-Policy Deep Reinforcement Learning without Exploration</em>（BCQ, ICML 2019），
+        <a class="cite" href="https://arxiv.org/abs/1812.02900">arXiv 1812.02900</a>；
+        保守价值这一路的代表作是 Kumar et al., <em>Conservative Q-Learning for Offline
+        Reinforcement Learning</em>（CQL, NeurIPS 2020），
+        <a class="cite" href="https://arxiv.org/abs/2006.04779">arXiv 2006.04779</a>。</p>
+      <p>off-policy 学习与重要性采样的理论见 Sutton &amp; Barto,
+        <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 第 5.5 节与第 11 章。
+        理解了"用别的策略产生的数据估计当前策略的价值"难在哪，离线设定的困难也就不难理解。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "拿我的历史日志设计一套行为克隆基线加离线评估流程，告诉我每一步该看什么指标。"
+      或者 "帮我判断这份日志的状态覆盖够不够做 CQL，不够的话该先补哪一类数据。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

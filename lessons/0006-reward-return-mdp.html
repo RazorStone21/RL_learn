@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0006 · 奖励、回报、回合与 MDP 的定义 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0006" data-slug="reward-return-mdp" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 2 ／ 基础工具</p>
+    <h1>奖励、回报、回合与 MDP 的定义</h1>
+    <p class="lede">奖励（环境对你刚做的动作打的分数，一个数）是每一步的即时得分；回报（从现在起一直到结束，把每一步奖励加起来的总分）才是任务真正要最大化的量。本课给出这两个量的精确定义，讲清折扣因子（越往后的奖励，算进总分时权重越小）为什么不能省，并写出马尔可夫决策过程（MDP，强化学习里那类标准问题设定）的正式定义。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能区分奖励 $R_{t+1}$ 与回报 $G_t$，并写出各自的定义</li>
+        <li>能说出折扣因子的两个作用，并判断 $\gamma=1$ 什么时候会出问题</li>
+        <li>能证明回报的递推关系 $G_t=R_{t+1}+\gamma G_{t+1}$</li>
+        <li>能分清分幕任务与连续任务，说明各自对折扣因子的要求</li>
+        <li>能写出 MDP 的五元组，并逐个说明每一部分的含义</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 奖励与它的期望</h2>
+    <p>网格世界的规则里已经出现过三种分数：走到目标 $+1$、走进禁止区 $-1$、其余 $0$。这些分数就是奖励。环境在把智能体（做决策的那一方，就是你写的程序）送到新格子的同时把它交出来。</p>
+    <div class="def">
+      <span class="label">定义 6.1（奖励）</span>
+      <p>奖励（环境对你刚做的动作打的分数，一个数）记作 $R_{t+1}$。第 $t$ 步智能体从 $S_t$ 执行 $A_t$，环境把它送到 $S_{t+1}$ 的同时给出这个数。奖励可以是负数，它是随机变量，取值集合记作 $\mathcal{R}$。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 6.2（下标为什么是 $t+1$）</span>
+      <p>$R_{t+1}$ 与 $S_{t+1}$ 是同一时刻到手的两样东西，所以共用下标 $t+1$；动作 $A_t$ 与状态 $S_t$ 是出手前的东西，用下标 $t$。这样约定，后面写回报的求和时不会错位。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="时间轴上每一步的状态、动作与奖励，奖励的下标比动作大 1">
+        <text x="30" y="26" class="lbl">出手之前用下标 t，到手之后用下标 t+1</text>
+        <rect x="30" y="60" width="76" height="40" class="box"/><text x="58" y="86" class="val">S(t)</text>
+        <path d="M112 80 H162" class="arrow-a"/><path d="M154 75 l10 5 l-10 5" class="arrow-a"/>
+        <text x="116" y="70" class="lbl">A(t)</text>
+        <rect x="168" y="60" width="90" height="40" class="box-a"/><text x="196" y="86" class="val-b">S(t+1)</text>
+        <rect x="168" y="120" width="90" height="40" class="bar"/><text x="196" y="146" class="val">R(t+1)</text>
+        <path d="M213 104 V116" class="arrow"/>
+        <text x="270" y="146" class="lbl">这一步拿到的分数，与 S(t+1) 同时产生</text>
+        <path d="M264 80 H316" class="arrow-a"/><path d="M308 75 l10 5 l-10 5" class="arrow-a"/>
+        <text x="268" y="70" class="lbl">A(t+1)</text>
+        <rect x="322" y="60" width="90" height="40" class="box"/><text x="350" y="86" class="val">S(t+2)</text>
+        <rect x="322" y="120" width="90" height="40" class="bar"/><text x="350" y="146" class="val">R(t+2)</text>
+        <text x="30" y="204" class="lbl">奖励记在「到达」这一刻，不记在「出手」这一刻</text>
+        <text x="30" y="222" class="lbl">所以回报从 R(t+1) 开始加</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 6.1</span>
+        一步里发生的事：先有状态 $S_t$ 与动作 $A_t$，环境把智能体送到 $S_{t+1}$，同时给出 $R_{t+1}$。两样东西共用一个下标，回报的求和也从 $R_{t+1}$ 开始。</figcaption>
+    </figure>
+
+    <p>同一个 $(s,a)$ 拿到的奖励可能不止一个值，可以有多有少。能拿来算账的是它的长期平均。</p>
+    <div class="def">
+      <span class="label">定义 6.3（奖励的期望 $r(s,a)$）</span>
+      <p>固定状态与动作，奖励的期望定义为式 (6.1)。</p>
+      <div class="eq">
+        <span class="eq-body">$$r(s,a)\doteq\E[R_{t+1}\mid S_t=s,\ A_t=a]=\sum_{r\in\mathcal{R}}r\,p(r|s,a)$$</span>
+        <span class="eq-num">(6.1)</span>
+      </div>
+      <p>式中 $p(r|s,a)$ 是在 $(s,a)$ 下拿到数值 $r$ 的概率，$\E$ 表示长期平均。$r(s,a)$ 是一个确定的数，不再是随机变量。</p>
+    </div>
+
+    <div class="thm">
+      <span class="label">命题 6.4（奖励只看 $(s,a,s')$ 时的算法）</span>
+      <p>若奖励的取值只由 $(s,a,s')$ 决定，写成 $r(s,a,s')$，则式 (6.2) 成立。</p>
+      <div class="eq">
+        <span class="eq-body">$$r(s,a)=\sum_{s'\in\mathcal{S}}p(s'|s,a)\,r(s,a,s')$$</span>
+        <span class="eq-num">(6.2)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>用全期望公式，先把 $S_{t+1}$ 定下来求一次平均，再按 $p(s'|s,a)$ 加权：
+        $$\E[R_{t+1}\mid s,a]=\sum_{s'\in\mathcal{S}}\E[R_{t+1}\mid s,a,s']\,p(s'\mid s,a).$$
+        按假设 $\E[R_{t+1}\mid s,a,s']=r(s,a,s')$。代回并把最外层对 $r$ 的求和与式 (6.1) 对齐，就得到式 (6.2)。这条式子说明：知道每一步的奖励怎么定，就能算出 $r(s,a)$。</p>
+      <span class="qed">∎</span>
+    </div>
+
+    <div class="eg">
+      <span class="label">例 6.5（网格世界的 $r(s,a)$）</span>
+      <p>查上一课的转移表：从 $s_4$ 执行 $a_2$（右）进入 $s_5$，所以 $r(s_4,a_2)=+1$；从 $s_1$ 执行 $a_2$（右）进入 $s_2$，所以 $r(s_1,a_2)=-1$；从 $s_1$ 执行 $a_1$（上）撞边界留在 $s_1$，所以 $r(s_1,a_1)=0$。</p>
+      <p>打滑版本下同一个动作会分叉：从 $s_1$ 执行 $a_2$ 时以 0.8 到 $s_2$（拿 $-1$）、以 0.2 留在 $s_1$（拿 $0$），由式 (6.2) 得 $r(s_1,a_2)=0.8\times(-1)+0.2\times0=-0.8$。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 轨迹</h2>
+    <p>把一步接一步走下来的记录串起来，就是轨迹。</p>
+    <div class="def">
+      <span class="label">定义 6.6（轨迹）</span>
+      <p>轨迹（从开始到结束，一路上状态、动作、奖励的记录）写成式 (6.3) 这样的链。</p>
+      <div class="eq">
+        <span class="eq-body">$$S_t\xrightarrow{A_t}S_{t+1},R_{t+1}\xrightarrow{A_{t+1}}S_{t+2},R_{t+2}\xrightarrow{A_{t+2}}\cdots$$</span>
+        <span class="eq-num">(6.3)</span>
+      </div>
+      <p>式中箭头上面写这一步采取的动作，箭头右边是到达的新状态与拿到的奖励。轨迹是随机的：同一个起点、同一套策略（一套"看到什么状态就选什么动作"的规则），两次走出来的轨迹一般不同。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 回报与折扣因子</h2>
+    <p>奖励只是眼前那一步的分数。任务真正关心的是从这一刻往后一共能拿多少分。</p>
+    <div class="def">
+      <span class="label">定义 6.7（折扣因子）</span>
+      <p>折扣因子（越往后的奖励，算进总分时权重越小）记作 $\gamma$，取值满足 $0\le\gamma\lt1$。从现在起第 $k$ 步之后的奖励要乘上 $\gamma^k$。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 6.8（回报）</span>
+      <p>回报（从现在起一直到结束，把每一步奖励加起来的总分）定义为式 (6.4)。</p>
+      <div class="eq">
+        <span class="eq-body">$$G_t\doteq R_{t+1}+\gamma R_{t+2}+\gamma^2R_{t+3}+\cdots=\sum_{k=0}^{\infty}\gamma^kR_{t+k+1}$$</span>
+        <span class="eq-num">(6.4)</span>
+      </div>
+      <p>式中 $k$ 是从现在起往后数的步数。带上折扣的回报也叫折扣回报（每一步奖励先按 $\gamma^k$ 打折再全部加起来的总分）。$G_t$ 是随机变量，因为后面的奖励都还没发生。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="回报把一路上的奖励按 1、γ、γ²、γ³ 的权重加权求和">
+        <text x="30" y="24" class="lbl">一条轨迹上的奖励，越靠后权重越小</text>
+        <rect x="40" y="60" width="80" height="46" class="bar"/><text x="66" y="90" class="val">R(t+1)</text>
+        <rect x="150" y="60" width="80" height="46" class="bar-hi"/><text x="176" y="90" class="val">R(t+2)</text>
+        <rect x="260" y="60" width="80" height="46" class="bar-hi"/><text x="286" y="90" class="val">R(t+3)</text>
+        <rect x="370" y="60" width="80" height="46" class="bar-hi"/><text x="396" y="90" class="val">R(t+4)</text>
+        <text x="52" y="50" class="val-b">权重 1</text>
+        <text x="162" y="50" class="val-b">权重 γ</text>
+        <text x="272" y="50" class="val-b">权重 γ²</text>
+        <text x="382" y="50" class="val-b">权重 γ³</text>
+        <path d="M80 116 V140" class="arrow"/><path d="M190 116 V140" class="arrow"/>
+        <path d="M300 116 V140" class="arrow"/><path d="M410 116 V140" class="arrow"/>
+        <path d="M80 144 H410" class="arrow-a"/><path d="M402 140 l10 4 l-10 4" class="arrow-a"/>
+        <text x="180" y="164" class="lbl">每一项乘上自己的权重再相加</text>
+        <rect x="180" y="176" width="160" height="26" class="box-a"/><text x="214" y="195" class="val-b">G(t) 折扣回报</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 6.2</span>
+        回报的算法：把一路上每一步的奖励取出来，第 $k$ 项乘 $\gamma^k$，再加起来。$\gamma\lt1$ 时靠后的项越来越轻，整条无限长的和仍然是一个有限数。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">定理 6.9（回报一定有限）</span>
+      <p>若存在 $R_{\max}$ 使 $|R_{t+k+1}|\le R_{\max}$ 对所有 $k\ge0$ 成立，且 $0\le\gamma\lt1$，则式 (6.4) 的级数绝对收敛（部分和越来越接近一个确定的有限值），并且式 (6.5) 成立。</p>
+      <div class="eq">
+        <span class="eq-body">$$|G_t|\le\frac{R_{\max}}{1-\gamma}$$</span>
+        <span class="eq-num">(6.5)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记前 $N$ 项的部分和为 $S_N=\sum_{k=0}^{N-1}\gamma^kR_{t+k+1}$。由三角不等式与 $|R_{t+k+1}|\le R_{\max}$，
+        $$|S_N|\le\sum_{k=0}^{N-1}\gamma^k\,|R_{t+k+1}|\le R_{\max}\sum_{k=0}^{N-1}\gamma^k=R_{\max}\frac{1-\gamma^{N}}{1-\gamma}\le\frac{R_{\max}}{1-\gamma}.$$
+        右边与 $N$ 无关，所以绝对值级数 $\sum_k\gamma^k|R_{t+k+1}|$ 的部分和有界，由比较判别法它收敛，
+        式 (6.4) 也就是绝对收敛。又因为取绝对值是连续运算，对 $|S_N|$ 令 $N\to\infty$ 得
+        $|G_t|=\lim_N|S_N|\le R_{\max}/(1-\gamma)$，即式 (6.5)。</p>
+      <span class="qed">∎</span>
+    </div>
+
+    <div class="rem">
+      <span class="label">注记 6.10（折扣因子的两个作用）</span>
+      <p>数学上，它让无限项之和收敛，定理 6.9 保证回报是有限数，这样比较两个策略的大小才有意义。
+        建模上，越远的奖励越不确定、越不该算满，打个折更贴近真实目标。
+        $\gamma=0$ 时 $G_t=R_{t+1}$，只看眼前这一步；$\gamma$ 越接近 1，越把远期当回事。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="权重随步数衰减的两组柱子，γ 等于 0.9 衰减慢，γ 等于 0.5 衰减快">
+        <text x="30" y="22" class="lbl">权重 γ 的 k 次方随步数衰减</text>
+        <line x1="50" y1="170" x2="510" y2="170" class="axis-b"/>
+        <line x1="50" y1="36" x2="50" y2="170" class="axis-b"/>
+        <rect x="70" y="40" width="20" height="130" class="bar"/><text x="70" y="184" class="lbl">k=0</text>
+        <rect x="130" y="53" width="20" height="117" class="bar"/><text x="130" y="184" class="lbl">k=1</text>
+        <rect x="190" y="65" width="20" height="105" class="bar"/><text x="190" y="184" class="lbl">k=2</text>
+        <rect x="250" y="75" width="20" height="95" class="bar"/><text x="250" y="184" class="lbl">k=3</text>
+        <rect x="310" y="85" width="20" height="85" class="bar"/><text x="310" y="184" class="lbl">k=4</text>
+        <rect x="370" y="93" width="20" height="77" class="bar"/><text x="370" y="184" class="lbl">k=5</text>
+        <rect x="430" y="101" width="20" height="69" class="bar"/><text x="430" y="184" class="lbl">k=6</text>
+        <rect x="90" y="40" width="20" height="65" class="bar-hi"/><text x="96" y="36" class="val-b">1</text>
+        <rect x="150" y="105" width="20" height="65" class="bar-hi"/>
+        <rect x="210" y="138" width="20" height="32" class="bar-hi"/>
+        <rect x="270" y="154" width="20" height="16" class="bar-hi"/>
+        <text x="330" y="120" class="lbl">深色：γ = 0.5，两步就几乎归零</text>
+        <text x="330" y="142" class="lbl">浅色：γ = 0.9，五六步还有分量</text>
+        <text x="50" y="204" class="lbl">纵轴是权重，横轴是往后第几步</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 6.3</span>
+        $\gamma$ 决定衰减有多快。$\gamma=0.5$ 时两步之后的权重只剩四分之一，回报几乎只看眼前；$\gamma=0.9$ 时第六步还有 0.53 的权重，远期的话也算数。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 6.11（三条轨迹的回报）</span>
+      <p>取 $\gamma=0.9$，先记住两个等比级数：
+        $$1+\gamma+\gamma^{2}+\cdots=\frac{1}{1-\gamma}=10,\qquad
+        \gamma+\gamma^{2}+\cdots=\frac{\gamma}{1-\gamma}=9 .$$</p>
+      <p>轨迹 A：$s_1\to s_4\to s_5\to s_5\to\cdots$，奖励序列是 $0,1,1,1,\dots$，于是
+        $G_0=0+\gamma(1+\gamma+\gamma^{2}+\cdots)=9$。</p>
+      <p>轨迹 B：$s_2\to s_5\to s_5\to\cdots$，奖励序列是 $1,1,1,\dots$，于是 $G_0=10$。</p>
+      <p>轨迹 C：$s_1\to s_2\to s_5\to s_5\to\cdots$，奖励序列是 $-1,1,1,\dots$，于是
+        $G_0=-1+\gamma(1+\gamma+\cdots)=-1+9=8$。</p>
+      <p>轨迹 A 与轨迹 C 都从 $s_1$ 出发，回报却不同。同一个起点、同一个策略也可能走出不同的路，
+        这就是 $G_t$ 必须是随机变量的原因。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 回报的递推关系</h2>
+    <p>定义 6.8 把回报写成一个无限和，用起来不方便。下面这条关系把它变成只有两项的等式。</p>
+    <div class="thm">
+      <span class="label">定理 6.12（回报的递推关系）</span>
+      <p>在式 (6.4) 收敛的前提下，式 (6.6) 成立。</p>
+      <div class="eq">
+        <span class="eq-body">$$G_t=R_{t+1}+\gamma G_{t+1}$$</span>
+        <span class="eq-num">(6.6)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明（从定义出发）</span>
+      <p>把式 (6.4) 中 $k=0$ 的那一项单独拿出来：
+        $$\begin{aligned}
+        G_t&=\sum_{k=0}^{\infty}\gamma^{k}R_{t+k+1}
+        =R_{t+1}+\sum_{k=1}^{\infty}\gamma^{k}R_{t+k+1}\\
+        &=R_{t+1}+\gamma\sum_{j=0}^{\infty}\gamma^{j}R_{t+j+2}
+        =R_{t+1}+\gamma G_{t+1}.
+        \end{aligned}$$
+        第一个等号是定义；第二个等号把首项分离；第三个等号令 $j=k-1$ 做指标平移，并把与 $j$ 无关的 $\gamma$ 提出求和号；
+        最后一个等号里 $\sum_j\gamma^{j}R_{t+j+2}$ 恰好是 $G_{t+1}$ 的定义。每一步都要求级数收敛，
+        定理 6.9 已经保证了这一点。</p>
+      <span class="qed">∎</span>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 200" role="img" aria-label="把回报的头一项拆出来，剩下的部分正好是打折后的下一个回报">
+        <text x="30" y="26" class="lbl">整条回报：首项加上后面的全部</text>
+        <rect x="40" y="44" width="90" height="40" class="bar-hi"/><text x="56" y="70" class="val">R(t+1)</text>
+        <rect x="130" y="44" width="90" height="40" class="bar"/><text x="146" y="70" class="val">R(t+2)</text>
+        <rect x="220" y="44" width="90" height="40" class="bar"/><text x="236" y="70" class="val">R(t+3)</text>
+        <rect x="310" y="44" width="90" height="40" class="bar"/><text x="326" y="70" class="val">R(t+4)</text>
+        <text x="408" y="70" class="lbl">…</text>
+
+        <path d="M48 100 H500" class="mark"/>
+        <text x="40" y="122" class="lbl">拆成两段</text>
+        <rect x="40" y="136" width="90" height="40" class="bar-hi"/><text x="56" y="162" class="val">R(t+1)</text>
+        <text x="146" y="162" class="val-b">+ γ ×</text>
+        <rect x="200" y="136" width="90" height="40" class="bar"/><text x="216" y="162" class="val">R(t+2)</text>
+        <rect x="290" y="136" width="90" height="40" class="bar"/><text x="306" y="162" class="val">R(t+3)</text>
+        <rect x="380" y="136" width="90" height="40" class="bar"/><text x="396" y="162" class="val">R(t+4)</text>
+        <text x="476" y="162" class="lbl">…</text>
+        <text x="200" y="192" class="lbl">这整段乘以 γ 之后就是 G(t+1)</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 6.4</span>
+        递推关系的来历：把回报的第一项 $R_{t+1}$ 摘出来，剩下那一整条正好就是 $G_{t+1}$，再补一个折扣 $\gamma$。
+        无穷多项的和就这样变成了两项的关系。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 6.13（这条递推是整门课的枢纽）</span>
+      <p>式 (6.6) 把「无限多项的和」换成「这一步 + 打折后的下一步」。在它两边取期望，就得到贝尔曼方程（把这一步的价值与下一步的价值连起来的等式）；
+        再把它写成矩阵，就得到后面求价值的算法。等式两边同时出现 $G_t$ 与 $G_{t+1}$，
+        这就是自举（用自己当前的估计去更新自己当前的估计）的来源。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 回合与两类任务</h2>
+    <div class="def">
+      <span class="label">定义 6.14（回合与终止状态）</span>
+      <p>回合（从开始到结束的一整局）从一个初始状态出发，走到终止状态就结束，环境随后重置，下一回合重新开始。终止状态是不再往外转移的状态。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 6.15（分幕任务与连续任务）</span>
+      <p>有终止状态、会反复重置的任务叫分幕任务（一局一局地玩、每局会结束的任务）；没有终止状态、一直走下去的任务叫连续任务（没有终点、永远玩下去的任务）。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="分幕任务的时间轴有终点并重新开始，连续任务的时间轴一直延伸">
+        <text x="30" y="24" class="lbl">分幕任务：有终止状态，走完就重置</text>
+        <line x1="40" y1="66" x2="250" y2="66" class="axis-b"/>
+        <circle cx="52" cy="66" r="7" class="dot-a"/><text x="44" y="52" class="lbl">起点</text>
+        <circle cx="232" cy="66" r="7" class="dot"/><text x="204" y="52" class="lbl">终止状态</text>
+        <text x="110" y="90" class="lbl">第 1 回合</text>
+        <line x1="290" y1="66" x2="500" y2="66" class="axis-b"/>
+        <circle cx="302" cy="66" r="7" class="dot-a"/><text x="294" y="52" class="lbl">起点</text>
+        <circle cx="482" cy="66" r="7" class="dot"/><text x="454" y="52" class="lbl">终止状态</text>
+        <text x="360" y="90" class="lbl">第 2 回合</text>
+        <path d="M236 110 C270 130 280 110 296 78" class="arrow"/>
+        <path d="M292 88 l8 -12 l-11 2" class="arrow"/>
+        <text x="238" y="128" class="lbl">重置</text>
+
+        <line x1="30" y1="150" x2="510" y2="150" class="grid"/>
+
+        <text x="30" y="176" class="lbl">连续任务：没有终止状态，一直延伸下去</text>
+        <line x1="40" y1="196" x2="470" y2="196" class="axis-b"/>
+        <path d="M470 196 l14 -6 v12 z" class="dot-a"/>
+        <circle cx="52" cy="196" r="7" class="dot-a"/><text x="44" y="186" class="lbl">起点</text>
+        <text x="200" y="216" class="lbl">没有终点，回报是无限项之和</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 6.5</span>
+        分幕任务走完一局就回到起点重新开始，每一回合的长度有限。连续任务没有终点，回报是无限项之和，所以必须有折扣因子把和压住。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 6.16（两类任务对折扣因子的要求）</span>
+      <p>分幕任务里每回合长度有限，取 $\gamma=1$ 时回报仍是有限个数之和，可以用；
+        连续任务里回报是无限和，$\gamma=1$ 会破坏定理 6.9 的条件，奖励不肯衰减时和就发散，所以必须取 $\gamma\lt1$。
+        本课用的网格世界没有终点格，属于连续任务，一直取 $\gamma\lt1$。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 6.17</span>
+      <p>一盘棋是分幕任务：终局就是终止状态，摆好棋子重新开局。网格世界是连续任务：走到 $s_5$ 也不会停下来，
+        它可以一直待在 $s_5$ 上继续拿分。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. MDP 的正式定义</h2>
+    <p>最后一件事是把前面所有零件写成正式定义。先复习一条性质：环境满足马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关）。</p>
+    <div class="def">
+      <span class="label">定义 6.18（马尔可夫决策过程）</span>
+      <p>马尔可夫决策过程（MDP，满足马尔可夫性的那类标准问题设定）是一个五元组，见式 (6.7)。</p>
+      <div class="eq">
+        <span class="eq-body">$$\text{MDP}\doteq(\mathcal{S},\mathcal{A},p,r,\gamma)$$</span>
+        <span class="eq-num">(6.7)</span>
+      </div>
+      <p>式中 $\mathcal{S}$ 是状态空间（所有可能状态组成的集合），$\mathcal{A}$ 是动作空间（所有可能动作组成的集合），$\gamma$ 是折扣因子。$p$ 与 $r$ 分别描述状态转移（做完动作后，环境从当前状态跳到下一个状态）与奖励：$p(s'|s,a)$ 是转移概率（这个跳转不一定落到同一个格子，结果是一组各带概率的可能性），$r(s,a)$ 是奖励的期望。</p>
+      <p>另外还有两条背景条件：环境满足前面说的马尔可夫性；奖励的分布也只由 $(s,a,s')$ 决定。这两条合起来，就是「看一眼现在就知道下一步会怎么走」。</p>
+    </div>
+
+    <div class="rem">
+      <span class="label">注记 6.19（加上策略之后就是一条马尔可夫链）</span>
+      <p>在 MDP 上指定一个策略 $\pi(a|s)$，动作就消失了，状态过程由上一课算过的
+        $p_\pi(s'|s)=\sum_a\pi(a|s)p(s'|s,a)$ 决定，这是一条马尔可夫链（只有状态、没有动作的随机过程）。
+        策略好不好，就看这条链上长期平均能拿多少分。下一课要定义的状态值就是这个平均。</p>
+    </div>
+
+    <div class="thm">
+      <span class="label">命题 6.20（奖励的期望不需要历史）</span>
+      <p>在定义 6.18 的两条条件下，对任意历史 $h_t$ 都有式 (6.8)。</p>
+      <div class="eq">
+        <span class="eq-body">$$\E[R_{t+1}\mid S_t=s,\ A_t=a,\ h_t]=r(s,a)$$</span>
+        <span class="eq-num">(6.8)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>用全期望公式，先对 $S_{t+1}$ 求一次平均：
+        $$\E[R_{t+1}\mid s,a,h_t]=\sum_{s'\in\mathcal{S}}\E[R_{t+1}\mid s,a,s',h_t]\,p(s'\mid s,a,h_t).$$
+        奖励的分布只由 $(s,a,s')$ 决定，第一个因子就是 $r(s,a,s')$；
+        马尔可夫性把第二个因子里的 $h_t$ 删掉，得到 $p(s'\mid s,a)$。代回并用式 (6.2)：
+        $$\E[R_{t+1}\mid s,a,h_t]=\sum_{s'\in\mathcal{S}}p(s'|s,a)\,r(s,a,s')=r(s,a).$$</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>这条命题的作用：以后写期望时不必再操心历史，$r(s,a)$ 一个符号就够了。</p>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>奖励 $R_{t+1}$ 是每一步的即时得分，记在到达那一刻；它的期望 $r(s,a)$ 是一个确定的数。</li>
+      <li>回报 $G_t=\sum_{k\ge0}\gamma^kR_{t+k+1}$ 是从现在起往后所有奖励打折后的总和。</li>
+      <li>$\gamma\lt1$ 保证回报有限，$|G_t|\le R_{\max}/(1-\gamma)$；$\gamma$ 越大越看重远期。</li>
+      <li>递推 $G_t=R_{t+1}+\gamma G_{t+1}$ 把无限和变成两项的关系，见式 (6.6)。</li>
+      <li>分幕任务有终止状态，可以用 $\gamma=1$；连续任务必须 $\gamma\lt1$。</li>
+      <li>MDP 是五元组 $(\mathcal{S},\mathcal{A},p,r,\gamma)$，加上马尔可夫性与奖励只依赖 $(s,a,s')$。</li>
+    </ul>
+    <p>下一课把回报取期望，得到状态值与动作值，并在网格世界上把它们一个个算出来。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 关于奖励 $R_{t+1}$ 与回报 $G_t$，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>$R_{t+1}$ 是这一步拿到的分数，$G_t$ 是往后所有奖励打折后的总和</li>
+        <li>$R_{t+1}$ 是往后所有奖励的总和，$G_t$ 是这一步拿到的分数</li>
+        <li>两者都是随机变量，而且 $G_t$ 一定是正数</li>
+        <li>两者都是确定的数，由状态与动作唯一决定</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定义 6.1 与定义 6.8 说得很清楚，奖励只看一步，回报看的是从这一步往后的一整串。</p>
+        <p>B 把两者调换了。C 的前半句对，后半句错：奖励可以是负的，回报也可以是负的，例 6.11 里 $G_0=8$ 是正的，但换一个策略就可能是负的。D 错在把奖励当成确定的：$R_{t+1}$ 是随机变量，它的期望 $r(s,a)$ 才是确定的数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. $r(s,a)$ 的含义是下列哪一个？</p>
+      <ol class="mcq-options">
+        <li>在 $(s,a)$ 下实际拿到的那一个奖励值</li>
+        <li>在 $(s,a)$ 下奖励的期望，是一个确定的数</li>
+        <li>在 $(s,a)$ 下回报的期望，也就是状态值</li>
+        <li>在 $(s,a)$ 下所有可能奖励里的最大值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (6.1) 把它定义成对 $p(r|s,a)$ 的加权平均，所以它是长期平均，不是某一次的取值。</p>
+        <p>A 说的是随机变量 $R_{t+1}$ 的一次实现。C 把奖励与回报混在一起，回报的期望是下一课的状态值。D 取最大值不叫期望，期望是两个结果按概率加权，例 6.5 算出的 $-0.8$ 既不是最大值也不是最小值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. 证明 $G_t=R_{t+1}+\gamma G_{t+1}$ 时，把 $\sum_{k=1}^{\infty}\gamma^{k}R_{t+k+1}$ 写成 $\gamma\sum_{j=0}^{\infty}\gamma^{j}R_{t+j+2}$，用到了什么？</p>
+      <ol class="mcq-options">
+        <li>期望的线性性，把常数提到期望号外面</li>
+        <li>马尔可夫性，把更早的历史从条件里删掉</li>
+        <li>令 $j=k-1$ 平移指标，再提出公因子 $\gamma$</li>
+        <li>三角不等式，把绝对值放到求和号的里面</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$k=1,2,3,\dots$ 对应 $j=k-1=0,1,2,\dots$，每项都恰好差一个 $\gamma$，提出来就是那个形状。</p>
+        <p>A 用错了对象：这一步里没有期望，全是级数。B 与级数指标无关。D 是定理 6.9 里用到的工具，不是这里的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 定理 6.9 的证明里，$|S_N|\le R_{\max}\frac{1-\gamma^{N}}{1-\gamma}$ 这一步用了什么？</p>
+      <ol class="mcq-options">
+        <li>全期望公式，先对下一状态求一次平均</li>
+        <li>马尔可夫性，把历史从条件里删掉</li>
+        <li>级数收敛的定义，部分和之间存在单调关系</li>
+        <li>三角不等式，以及等比数列的求和公式</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：先把绝对值搬到求和里面（三角不等式），再对 $\sum_{k\le N-1}\gamma^k$ 用等比数列求和公式得到 $(1-\gamma^N)/(1-\gamma)$。</p>
+        <p>A 与 B 都与这一步无关，这一步里没有条件期望也没有历史。C 只说结论，说不出这个上界是怎么来的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 命题 6.20 的证明中，第一步把 $\E[R_{t+1}\mid s,a,h_t]$ 写成对 $s'$ 的加权和，用到哪条性质？</p>
+      <ol class="mcq-options">
+        <li>马尔可夫性，它允许把动作从条件里删掉</li>
+        <li>全期望公式，先对下一状态求一次平均再加权</li>
+        <li>三角不等式，把绝对值放大成求和的上界</li>
+        <li>回报的递推关系，把回报拆成两项</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：全期望公式允许先按一个中间变量（这里是 $S_{t+1}$）分层求平均，再按它的分布加权。</p>
+        <p>A 是下一步才用到的：马尔可夫性负责把 $p(s'\mid s,a,h_t)$ 里的 $h_t$ 删掉。C 与 D 在这条证明里都没有出现。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">6. 若每一时刻都拿到 $R=+1$，并取 $\gamma=1$，回报 $G_t$ 会怎样？</p>
+      <ol class="mcq-options">
+        <li>变成 $1+1+1+\cdots$，级数发散，没有有限值</li>
+        <li>收敛到 $1$，因为每一项都等于同一个数</li>
+        <li>收敛到 $1/(1-\gamma)$，也就是无穷大</li>
+        <li>仍然是有限数，等于定理 6.9 给出的那个上界</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每一项都是 1，部分和等于项数，项数越长越大，所以级数发散。定理 6.9 要求 $\gamma\lt1$，这里的条件被破坏了。</p>
+        <p>B 把「每项相同」当成了收敛的理由，项数无限时行不通。C 里 $1/(1-\gamma)$ 在 $\gamma=1$ 处没有定义，说它等于无穷大只是把发散换了个说法。D 也不对：上界公式只在 $\gamma\lt1$ 时成立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">7. 关于分幕任务与连续任务，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>连续任务里取 $\gamma=1$ 也能保证回报收敛，只要奖励有界</li>
+        <li>分幕任务里取 $\gamma=1$ 一定发散，因为回合长度不受限制</li>
+        <li>连续任务里奖励不肯衰减时，取 $\gamma=1$ 会让回报发散，所以一般取 $\gamma\lt1$</li>
+        <li>两类任务都必须取 $\gamma\lt1$，否则回报就没有定义</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：连续任务的回报是无限和，$\gamma=1$ 时没有任何东西把远处的奖励压小，奖励恒为正常数时和就发散。</p>
+        <p>A 只要求奖励有界，不够，第 6 题就是反例。B 说反了：分幕任务的每一回合长度有限，$\gamma=1$ 时回报只是有限个数之和，可以用。D 一句话否掉了分幕任务里的合法用法。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">8. 某条轨迹的奖励序列是 $0,1,1,1,\dots$，取 $\gamma=0.9$，则 $G_0$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>等于 $1/(1-0.9)=10$，因为后面的奖励全是 1</li>
+        <li>等于 $0+1+1+\cdots$，级数发散，没有有限值</li>
+        <li>等于 $\gamma/(1-\gamma)+1=10$，先把首项当成 1</li>
+        <li>等于 $0+\gamma(1+\gamma+\gamma^{2}+\cdots)=9$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：首项是 0，从第二项起才是 1，于是 $G_0=0+\gamma\cdot\frac{1}{1-\gamma}=0.9\times10=9$。</p>
+        <p>A 把首项的 0 当成 1 了，那算的是从 $s_5$ 出发的值 10。B 忽略了折扣因子，$\gamma\lt1$ 时级数收敛。C 与 A 犯的是同一个错。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 网格世界的打滑版本里，从 $s_1$ 执行 $a_2$ 有 0.8 的概率到 $s_2$（拿 $-1$），0.2 的概率留在 $s_1$（拿 $0$）。$r(s_1,a_2)$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>等于 $-1$，因为最坏的那个结果最该被记住</li>
+        <li>等于 $0$，因为正负两个结果正好抵消</li>
+        <li>等于 $-0.8$，由 $0.8\times(-1)+0.2\times0$ 算得</li>
+        <li>等于 $-0.2$，由 $0.2\times(-1)$ 算得</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：按式 (6.2)，把每个结果乘上自己的概率再相加，只有到 $s_2$ 那一项非零。</p>
+        <p>A 取的是最坏值而不是期望。B 把 $0$ 与 $-1$ 当成了对称的两个数，它们并不对称。D 把 0.2 与 $-1$ 配了对，概率和结果弄反了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. 为什么回报里必须有折扣因子？</p>
+      <ol class="mcq-options">
+        <li>因为奖励可能是负数，负数只能靠折扣因子才能相加</li>
+        <li>它让无限项的回报收敛，同时表达远期奖励不如近期重要</li>
+        <li>因为策略是随机的，只有折扣因子才能对回报求期望</li>
+        <li>它把回报变成确定性的数，方便比较两个策略的好坏</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理 6.9 给出收敛这一半，注记 6.10 给出建模这一半，两半都要。</p>
+        <p>A 说错了：负数照样可以直接相加，负奖励不需要折扣也不会出问题。C 把两件事混了：求期望只需要期望的线性性。D 也不对：回报依旧是随机变量，被确定下来的是它的期望，那是下一课的状态值。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025, 第 1 章第 1.5–1.7 节。奖励与回报的定义、折扣因子的讨论、回合与 MDP 的口径与之一致，示例数值由本课程在网格世界上逐步核对。</p>
+      <p>分幕任务与连续任务的区分另见 R. S. Sutton &amp; A. G. Barto, <em>Reinforcement Learning: An Introduction</em>（第 2 版）第 3.3 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问："把回报的递推关系用一张图再推一遍"，或者 "为什么连续任务里不能取 $\gamma=1$？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

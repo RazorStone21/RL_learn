@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0018 · Dvoretzky 收敛定理（含证明） — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0018" data-slug="dvoretzky" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 · 基础工具 ／ 第 18 课</p>
+    <h1>Dvoretzky 收敛定理（含证明）</h1>
+    <p class="lede">上一课把 RM（罗宾斯-门罗算法）定理的证明留了个口子。本课先不急着补，而是问一个更大的问题：
+      均值估计、RM、随机梯度下降是不是同一个东西换了名字？如果能把它们写成同一个递推，
+      一个定理就能同时管住它们。这个定理叫 Dvoretzky 定理。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能把一个随机迭代算法写成 $w_{k+1}=(I-A_k)w_k+b_k$ 的形式</li>
+        <li>能陈述 Dvoretzky 定理，并说出三个级数条件各管什么</li>
+        <li>能复述定理的证明结构，并指出其中哪一步是引用</li>
+        <li>能用它证明均值估计的增量形式收敛</li>
+        <li>能用它证明 Robbins-Monro 定理</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 先看几个算法长得像不像</h2>
+    <p>把上一课的均值估计与 RM 更新摆在一起：前者是 $w_{k+1}=w_k+\alpha_k(x_k-w_k)$，
+      后者是 $w_{k+1}=w_k-a_k\tilde{g}(w_k,\eta_k)$。两式的形状一样：新的估计等于旧的估计减去一步修正量。
+      修正量里都含一个"当前误差乘以一个小系数"，再叠加一点随机东西。</p>
+    <p>把这个形状写成一般式。设参数 $w_k\in\R^n$，每一步写成</p>
+    <div class="eq">
+      <span class="eq-body">$$w_{k+1}=(I-A_k)w_k+b_k,$$</span>
+      <span class="eq-num">(18.1)</span>
+    </div>
+    <p>式中 $I$ 是单位矩阵，$A_k$ 是一个 $n\times n$ 的矩阵，$b_k\in\R^n$ 是这一步加进来的随机项。
+      $A_k$ 负责把旧参数往回拉一点，$b_k$ 负责把新信息推进来。如果 $A_k$ 恒为零矩阵，
+      递推就退化成 $w_{k+1}=b_k$，参数被新信息整个替换掉，没有任何"记住旧值"的成分。</p>
+    <div class="def">
+      <span class="label">定义 18.1（误差递推）</span>
+      <p>设 $w^*$ 是我们想要的解，把第 $k$ 步的误差记作 $\Delta_k\doteq w_k-w^*$。
+        在式 (18.1) 两边减去 $w^*$，并把误差写成"收缩加噪声"：</p>
+      <div class="eq">
+        <span class="eq-body">$$\Delta_{k+1}=(1-\alpha_k)\Delta_k+\beta_k\eta_k,$$</span>
+        <span class="eq-num">(18.2)</span>
+      </div>
+      <p>式中 $\alpha_k\ge0$ 是收缩系数，衡量这一步把旧误差乘掉多少；$\beta_k\ge0$ 是噪声放大系数；
+        $\eta_k$ 是均值为 $0$ 的"单位噪声"。$1-\alpha_k$ 读作"剩下的那部分误差"。</p>
+    </div>
+    <p>本课要讲的定理，回答的就是式 (18.2) 里的 $\Delta_k$ 什么时候收敛（一轮轮算下去，数值不再明显变化，稳定下来了）到 $0$。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 520 200" role="img" aria-label="误差每步先被缩小一点，再被噪声推一下，长期下来收缩占上风">
+        <line x1="50" y1="100" x2="480" y2="100" class="axis-b"/>
+        <circle cx="90" cy="60" r="5" class="dot-a"/>
+        <path d="M90 60 Q 130 96 170 92" class="arrow-a"/>
+        <circle cx="170" cy="92" r="4" class="dot-a"/>
+        <path d="M170 92 Q 210 62 250 70" class="arrow-a"/>
+        <circle cx="250" cy="70" r="3.5" class="dot-a"/>
+        <path d="M250 70 Q 290 96 330 94" class="arrow-a"/>
+        <circle cx="330" cy="94" r="3" class="dot-a"/>
+        <path d="M330 94 Q 370 104 410 99" class="arrow-a"/>
+        <circle cx="410" cy="99" r="2.5" class="dot-a"/>
+        <text x="52" y="52" class="lbl">初始误差</text>
+        <text x="330" y="130" class="lbl">每步先收缩，再被噪声推一下</text>
+        <text x="330" y="148" class="lbl">收缩占上风时，误差越来越小</text>
+        <text x="50" y="182" class="val-b">Δ 趋于 0：参数趋于 w*</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 18.1</span>
+        每一步做两件事：先把当前误差乘上一个比 1 小的收缩因子，再叠加上一步噪声。噪声让轨迹上下抖，
+        但只要收缩在长期里占上风，误差整体仍然被压向 0。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. Dvoretzky 收敛定理</h2>
+    <div class="thm">
+      <span class="label">定理 18.2（Dvoretzky 收敛定理）</span>
+      <p>对式 (18.2) 的随机迭代，假设 $\alpha_k\ge0$ 与 $\beta_k\ge0$ 对一切 $k$ 成立，并且</p>
+      <p>(a) 三个级数</p>
+      <div class="eq">
+        <span class="eq-body">$$\sum_{k=1}^{\infty}\alpha_k=\infty,\qquad \sum_{k=1}^{\infty}\alpha_k^2<\infty,\qquad \sum_{k=1}^{\infty}\beta_k^2<\infty$$</span>
+        <span class="eq-num">(18.3)</span>
+      </div>
+      <p>一致几乎必然成立；</p>
+      <p>(b) $\E[\eta_k\mid\mathcal{H}_k]=0$ 且 $\E[\eta_k^2\mid\mathcal{H}_k]\le C$ 几乎必然成立，
+        其中 $C$ 是常数，$\mathcal{H}_k=\{\Delta_k,\Delta_{k-1},\dots,\eta_{k-1},\dots,\alpha_{k-1},\dots,\beta_{k-1},\dots\}$ 是历史；</p>
+      <p>那么 $\Delta_k$ 几乎必然收敛到 $0$。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 18.3（为什么系数允许是随机的）</span>
+      <p>上一课的 $a_k$ 是确定性序列，定理 18.2 却允许 $\alpha_k$ 与 $\beta_k$ 依赖历史。
+        这不是为了好看：把 RM 写成式 (18.2) 之后，收缩系数会变成 $a_k\nabla_wg(w'_k)$，
+        它依赖 $w_k$，是随机变量。若定理只允许确定性系数，RM 就用不上它。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 18.4（"一致几乎必然"在说什么）</span>
+      <p>$\alpha_k$ 是随机变量时，式 (18.3) 里那三句话本身也是随机的。一致几乎必然要求它们在
+        <em>同一条</em>概率为 1 的轨道上同时成立，而不是三条各自在自己那条轨道上成立。
+        这比逐条写"几乎必然"更强一点。本课不展开这个技术细节。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 18.5（为什么不需要 $\sum\beta_k=\infty$）</span>
+      <p>$\alpha_k$ 管收缩，必须能在无穷多步里持续起作用，所以要求 $\sum\alpha_k=\infty$。
+        $\beta_k$ 只乘在均值为 $0$ 的噪声上，噪声的总能量已经由 $\sum\beta_k^2<\infty$ 控制住了，
+        再要求 $\sum\beta_k=\infty$ 就没有必要。极端情形 $\beta_k\equiv0$ 时序列照样收敛。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="三条误差轨迹：收缩太快停在外面，步长不衰减一直抖，条件满足才收敛">
+        <line x1="46" y1="150" x2="512" y2="150" class="axis-b"/>
+        <text x="46" y="24" class="val-b">误差 Δₖ</text>
+        <path d="M46 30 L120 96 L200 124 L300 138 L400 144 L500 146" class="curve2"/>
+        <text x="300" y="120" class="lbl">β 太大：噪声主导，一直在抖</text>
+        <path d="M46 148 L120 132 L200 146 L300 128 L400 142 L500 134" class="curve"/>
+        <text x="330" y="168" class="lbl">条件满足：抖着抖着趋向 0</text>
+        <path d="M46 30 L120 70 L200 106 L300 132 L400 143 L500 148" class="arrow-a"/>
+        <text x="150" y="60" class="lbl">α 太小：收缩太慢，半路停住</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 18.2</span>
+        三条轨迹对应三种系数。虚线是噪声放大系数太大，估计在最优点附近持续抖动；
+        实线是条件满足，误差整体被压向 0；点线是收缩太慢，误差降到一半就停住了。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 证明</h2>
+    <div class="proof">
+      <span class="label">证明（思路：盯住误差的平方）</span>
+      <p>思路：直接跟踪 $\Delta_k$ 不好办，因为它可正可负。改看它的平方 $h_k\doteq\Delta_k^2$，
+        它非负。先证明 $h_k$ 几乎必然收敛，再证明它的极限只能是 $0$。</p>
+      <p>第一步，把 $h_{k+1}-h_k$ 算出来。由式 (18.2)，
+        $\Delta_{k+1}-\Delta_k=-\alpha_k\Delta_k+\beta_k\eta_k$，
+        而 $\Delta_{k+1}+\Delta_k=(2-\alpha_k)\Delta_k+\beta_k\eta_k$。两式相乘，把 $h_{k+1}-h_k$ 写成
+        $(\Delta_{k+1}-\Delta_k)(\Delta_{k+1}+\Delta_k)$，展开并合并同类项：</p>
+      <div class="eq">
+        <span class="eq-body">$$h_{k+1}-h_k=-\alpha_k(2-\alpha_k)\Delta_k^2+\beta_k^2\eta_k^2+2(1-\alpha_k)\beta_k\eta_k\Delta_k .$$</span>
+        <span class="eq-num">(18.4)</span>
+      </div>
+      <p>第二步，对式 (18.4) 两边关于历史 $\mathcal{H}_k$ 取条件期望。
+        这里按原书 6.3.1 的做法，考虑 $\alpha_k$ 与 $\beta_k$ 由 $\mathcal{H}_k$ 决定的简化情形，
+        此时它们连同 $\Delta_k$ 都可以提出条件期望：</p>
+      <p>$$\E[h_{k+1}-h_k\mid\mathcal{H}_k]=-\alpha_k(2-\alpha_k)\Delta_k^2
+        +\beta_k^2\E[\eta_k^2\mid\mathcal{H}_k]+2(1-\alpha_k)\beta_k\Delta_k\E[\eta_k\mid\mathcal{H}_k].$$</p>
+      <p>逐项看：第三项里的 $\E[\eta_k\mid\mathcal{H}_k]=0$，整项为 $0$；
+        第二项由条件 (b) 不超过 $\beta_k^2C$；
+        第一项非正，因为 $\sum\alpha_k^2<\infty$ 给出 $\alpha_k\to0$，于是存在 $n$，
+        当 $k\ge n$ 时 $\alpha_k\le1$，从而 $\alpha_k(2-\alpha_k)\ge0$。合并三项：</p>
+      <div class="eq">
+        <span class="eq-body">$$\E[h_{k+1}-h_k\mid\mathcal{H}_k]\le\beta_k^2C .$$</span>
+        <span class="eq-num">(18.5)</span>
+      </div>
+      <p>第三步，求和并引用收敛定理。式 (18.5) 两边对 $k$ 求和，右边由 $\sum\beta_k^2<\infty$ 有界。
+        同时 $h_k\ge0$，且 $\E[h_k]$ 也被同一个量控制住，所以 $h_k$ 是一个 $L^1$ 有界的拟鞅。
+        引用下面的拟鞅收敛定理（引用件一），$h_k$ 几乎必然收敛到一个有限的极限 $h_\infty\ge0$。</p>
+      <p>第四步，反解出另一条信息。把式 (18.4) 的条件期望整理一下：
+        $\alpha_k(2-\alpha_k)\Delta_k^2=\beta_k^2\E[\eta_k^2\mid\mathcal{H}_k]-\E[h_{k+1}-h_k\mid\mathcal{H}_k]$。
+        右边第一项可求和（被 $C\sum\beta_k^2$ 控制），第二项也可求和（因为 $h_k$ 收敛，增量 $h_{k+1}-h_k$ 的和有限），
+        所以 $\sum_k\alpha_k(2-\alpha_k)\Delta_k^2<\infty$。当 $k\ge n$ 时 $2-\alpha_k\ge1$，于是
+        $\sum_k\alpha_k\Delta_k^2<\infty$。</p>
+      <p>第五步，用引理 18.6 收尾：由 $h_k=\Delta_k^2$ 收敛、$\sum\alpha_k=\infty$ 与 $\sum\alpha_k\Delta_k^2<\infty$，
+        立刻得到 $\Delta_k\to0$，定理证完。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">引用件一（拟鞅收敛定理，此处引用不证）</span>
+      <p>设 $\{h_k\}$ 非负且适应于递增的历史 $\{\mathcal{H}_k\}$。若
+        $$\sum_{k=1}^{\infty}\E\big[(h_{k+1}-h_k)^+\mid\mathcal{H}_k\big]<\infty$$
+        几乎必然成立，且 $\sup_k\E[h_k]<\infty$，则 $h_k$ 几乎必然收敛到一个有限的极限。
+        式中 $x^+$ 表示取正部，即 $\max\{x,0\}$。</p>
+      <p>这条定理按它在 6.3.1 证明里被使用的形式陈述，措辞以原书附录 C 为准。它的证明属于测度论概率的范围，
+        本课直接引用。</p>
+    </div>
+    <div class="thm">
+      <span class="label">引理 18.6（本课自行证明）</span>
+      <p>设 $h_k=\Delta_k^2$ 几乎必然收敛，$\alpha_k\ge0$，若 $\sum_{k}\alpha_k=\infty$ 且
+        $\sum_{k}\alpha_k\Delta_k^2<\infty$ 几乎必然成立，则 $\Delta_k$ 几乎必然收敛到 $0$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记 $h_\infty=\lim_{k\to\infty}h_k$，它在概率为 1 的集合上有定义且非负。
+        反设在那个集合上有 $h_\infty>0$。取 $\varepsilon=h_\infty/2>0$，由收敛的定义，
+        存在 $N$，使一切 $k\ge N$ 满足 $\Delta_k^2>h_\infty/2$。于是</p>
+      <p>$$\sum_{k\ge N}\alpha_k\Delta_k^2\ \ge\ \frac{h_\infty}{2}\sum_{k\ge N}\alpha_k\ =\ \infty,$$</p>
+      <p>最后一步用了 $\sum_k\alpha_k=\infty$，而删掉有限项不改变发散性。这与 $\sum_k\alpha_k\Delta_k^2<\infty$ 矛盾。
+        所以 $h_\infty=0$ 几乎必然，即 $\Delta_k\to0$ 几乎必然。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 18.7（哪一步本课不敢代为补全）</span>
+      <p>第四步把"条件期望的级数"与"增量的级数"放在一起求和，原书写得很简略。
+        严格补全需要把 $\sum_k(h_{k+1}-h_k)-\sum_k\E[h_{k+1}-h_k\mid\mathcal{H}_k]$ 当成一个鞅来处理，
+        再用鞅的收敛性质把两侧对上。这一步本课照搬原书，并在这里明确标出它是本课不敢自行补全的技术细节；
+        要看清它，请读原书 6.3.1 与附录 C。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 多变量版本：一次管住所有状态</h2>
+    <p>强化学习里的参数常常是每个状态一个，而不是单独一个数。Dvoretzky 定理有一个逐元素版本。</p>
+    <div class="thm">
+      <span class="label">定理 18.8（Dvoretzky 定理的扩展，此处引用不证）</span>
+      <p>设 $\mathcal{S}$ 是有限集合。对每个 $s\in\mathcal{S}$，随机过程满足</p>
+      <div class="eq">
+        <span class="eq-body">$$\Delta_{k+1}(s)=\big(1-\alpha_k(s)\big)\Delta_k(s)+\beta_k(s)\eta_k(s),$$</span>
+        <span class="eq-num">(18.6)</span>
+      </div>
+      <p>若 (a) 对每个 $s$ 有 $\sum_k\alpha_k(s)=\infty$、$\sum_k\alpha_k^2(s)<\infty$、$\sum_k\beta_k^2(s)<\infty$，
+        且 $\E[\beta_k(s)\mid\mathcal{H}_k]\le\E[\alpha_k(s)\mid\mathcal{H}_k]$ 一致几乎必然成立；
+        (b) $\|\E[\eta_k(s)\mid\mathcal{H}_k]\|_\infty\le\gamma\|\Delta_k\|_\infty$，其中 $\gamma\in(0,1)$；
+        (c) $\var[\eta_k(s)\mid\mathcal{H}_k]\le C\big(1+\|\Delta_k\|_\infty\big)^2$，$C$ 是常数；
+        那么对每个 $s$，$\Delta_k(s)$ 几乎必然收敛到 $0$。</p>
+    </div>
+    <p>式中 $\|\Delta_k\|_\infty=\max_{s\in\mathcal{S}}|\Delta_k(s)|$ 是最大范数，也就是所有分量里绝对值最大的那个数。
+      条件 (b) 允许噪声有偏，只要求偏差被 $\Delta_k$ 自己控制住，系数 $\gamma$ 小于 $1$；
+      条件 (c) 允许方差随误差变大而变大。这两条放松是为了让 Q 学习这类算法也能套进来。
+      这个定理的证明是对定理 18.2 的归约，细节见原文献，本课引用而不证明。</p>
+  </section>
+
+  <section>
+    <h2>5. 一个定理，三个特例</h2>
+    <h3>5.1 均值估计</h3>
+    <div class="thm">
+      <span class="label">命题 18.9（均值估计收敛，本课给出完整推导）</span>
+      <p>设 $x_1,x_2,\dots$ 独立同分布、$\E[x_k^2]<\infty$，$w^*=\E[X]$，增量式均值估计为
+        $w_{k+1}=w_k+\alpha_k(x_k-w_k)$。若 $\sum_k\alpha_k=\infty$ 且 $\sum_k\alpha_k^2<\infty$，
+        则 $w_k$ 几乎必然收敛到 $\E[X]$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（把算法写成式 (18.2)）</span>
+      <p>记 $\Delta_k=w_k-w^*$。在更新式两边减去 $w^*$，并把 $x_k-w_k$ 拆成
+        $(x_k-w^*)+(w^*-w_k)$：</p>
+      <p>$$\Delta_{k+1}=\Delta_k+\alpha_k\big(x_k-w^*+w^*-w_k\big)
+        =(1-\alpha_k)\Delta_k+\alpha_k\big(x_k-w^*\big).$$</p>
+      <p>对照式 (18.2)，这里 $\beta_k=\alpha_k$、$\eta_k=x_k-w^*$。逐个核对条件：
+        条件 (a) 的 $\sum\alpha_k=\infty$ 与 $\sum\alpha_k^2<\infty$ 是命题假设，
+        $\sum\beta_k^2=\sum\alpha_k^2<\infty$；
+        条件 (b) 里，因为 $x_k$ 与 $\mathcal{H}_k$ 独立且 $w^*$ 是常数，
+        $\E[\eta_k\mid\mathcal{H}_k]=\E[x_k]-w^*=0$，且
+        $\E[\eta_k^2\mid\mathcal{H}_k]=\E[(x_k-w^*)^2]=\var(X)<\infty$，取 $C=\var(X)$。
+        全部条件满足，由定理 18.2，$\Delta_k\to0$ 几乎必然。</p>
+      <span class="qed">∎</span>
+    </div>
+    <h3>5.2 Robbins-Monro 定理</h3>
+    <div class="thm">
+      <span class="label">命题 18.10（RM 定理的证明）</span>
+      <p>在 0017 课定理 17.8 的三个条件下，RM 算法 $w_{k+1}=w_k-a_k\tilde{g}(w_k,\eta_k)$ 的 $w_k$
+        几乎必然收敛到 $g(w^*)=0$ 的根 $w^*$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（把算法写成式 (18.2)）</span>
+      <p>把观测写成 $\tilde{g}(w_k,\eta_k)=g(w_k)+\eta_k$，并在两边减去 $w^*$：</p>
+      <p>$$w_{k+1}-w^*=w_k-w^*-a_k\big[g(w_k)-g(w^*)+\eta_k\big].$$</p>
+      <p>由中值定理，存在介于 $w_k$ 与 $w^*$ 之间的点 $w'_k$，使
+        $g(w_k)-g(w^*)=\nabla_wg(w'_k)(w_k-w^*)$。代入并记 $\Delta_k=w_k-w^*$：</p>
+      <div class="eq">
+        <span class="eq-body">$$\Delta_{k+1}=\Big[1-\underbrace{a_k\nabla_wg(w'_k)}_{\alpha_k}\Big]\Delta_k+a_k\big(-\eta_k\big).$$</span>
+        <span class="eq-num">(18.7)</span>
+      </div>
+      <p>对照式 (18.2)，这里 $\alpha_k=a_k\nabla_wg(w'_k)$、$\beta_k=a_k$，噪声换成 $-\eta_k$。
+        核对条件 (a)：由 $0\lt c_1\le\nabla_wg(w)\le c_2$ 得 $a_kc_1\le\alpha_k\le a_kc_2$，于是
+        $\sum_k\alpha_k\ge c_1\sum_k a_k=\infty$，且 $\sum_k\alpha_k^2\le c_2^2\sum_k a_k^2<\infty$；
+        又有 $\sum_k\beta_k^2=\sum_k a_k^2<\infty$。
+        注意 $\alpha_k$ 依赖 $w'_k$ 因此是随机的，正是注记 18.3 说的那种情形。
+        条件 (b) 对 $\eta_k$ 成立，把它换成 $-\eta_k$ 后条件均值仍为 $0$、二阶矩不变。
+        由定理 18.2，$\Delta_k\to0$ 几乎必然，也就是 $w_k\to w^*$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <h3>5.3 随机梯度下降与时序差分</h3>
+    <p>随机梯度下降的更新式是 $w_{k+1}=w_k-\alpha_k\nabla_wf(w_k,x_k)$。把随机梯度写成真实梯度加噪声：
+      $\nabla_wf(w_k,x_k)=\E[\nabla_wf(w_k,X)]+\eta_k$，其中 $\eta_k$ 的条件均值为 $0$。
+      于是它也是式 (18.2) 的形式，条件是目标函数为凸、二阶导数有界、样本独立同分布。
+      0019 课会把它完整走一遍。</p>
+    <p>时序差分（用走一步之后的新估计去更新走这一步之前的估计）也是同一族算法。
+      它的误差递推不只有一个分量，于是要用定理 18.8 的多变量版本；那里条件 (b) 与 (c) 的放松正好派上用场。
+      自举（用自己当前的估计去更新自己当前的估计）带来的偏差就体现在条件 (b) 的 $\gamma$ 上。
+      这条路留到 0020 课。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 520 230" role="img" aria-label="Dvoretzky 定理包含 RM、均值估计、随机梯度下降与时序差分四个特例">
+        <rect x="26" y="24" width="468" height="180" rx="8" class="box-a"/>
+        <text x="40" y="46" class="val-b">Dvoretzky 收敛定理：Δ 的收缩加噪声递推</text>
+        <rect x="46" y="66" width="200" height="52" rx="6" class="box"/>
+        <text x="60" y="88" class="val">Robbins-Monro</text>
+        <text x="60" y="108" class="lbl">求 g(w) = 0 的根</text>
+        <rect x="272" y="66" width="200" height="52" rx="6" class="box"/>
+        <text x="286" y="88" class="val">均值估计</text>
+        <text x="286" y="108" class="lbl">RM 取 g(w) = w − E[X]</text>
+        <rect x="46" y="136" width="200" height="52" rx="6" class="box"/>
+        <text x="60" y="158" class="val">随机梯度下降</text>
+        <text x="60" y="178" class="lbl">随机梯度 = 真实梯度 + 噪声</text>
+        <rect x="272" y="136" width="200" height="52" rx="6" class="box"/>
+        <text x="286" y="158" class="val">时序差分学习</text>
+        <text x="286" y="178" class="lbl">每个状态一个误差，用多变量版</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 18.3</span>
+        四个算法被同一个定理罩住。它们的区别只在 $\alpha_k$、$\beta_k$、$\eta_k$ 的具体取法，
+        以及要不要用多变量版本。写成一个递推，收敛性分析就只需做一次。</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg viewBox="0 0 520 200" role="img" aria-label="三个算法写成同一个误差递推后，收缩系数、噪声系数与单位噪声的对照表">
+        <rect x="24" y="18" width="472" height="152" rx="6" class="box"/>
+        <line x1="150" y1="18" x2="150" y2="170" class="grid"/>
+        <line x1="280" y1="18" x2="280" y2="170" class="grid"/>
+        <line x1="390" y1="18" x2="390" y2="170" class="grid"/>
+        <line x1="24" y1="42" x2="496" y2="42" class="grid"/>
+        <line x1="24" y1="84" x2="496" y2="84" class="grid"/>
+        <line x1="24" y1="126" x2="496" y2="126" class="grid"/>
+        <text x="34" y="36" class="val-b">算法</text>
+        <text x="158" y="36" class="val-b">收缩系数 αₖ</text>
+        <text x="288" y="36" class="val-b">噪声系数 βₖ</text>
+        <text x="398" y="36" class="val-b">单位噪声 ηₖ</text>
+        <text x="34" y="68" class="val">均值估计</text>
+        <text x="158" y="68" class="val">αₖ</text>
+        <text x="288" y="68" class="val">αₖ</text>
+        <text x="398" y="68" class="val">xₖ − w*</text>
+        <text x="34" y="110" class="val">Robbins-Monro</text>
+        <text x="158" y="110" class="val">aₖ∇g(w′ₖ)</text>
+        <text x="288" y="110" class="val">aₖ</text>
+        <text x="398" y="110" class="val">− ηₖ</text>
+        <text x="34" y="152" class="val">随机梯度下降</text>
+        <text x="158" y="152" class="val">αₖ</text>
+        <text x="288" y="152" class="val">αₖ</text>
+        <text x="398" y="152" class="val">∇f − E∇f</text>
+        <text x="34" y="190" class="lbl">三者只差系数怎么取，结构完全一样</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 18.4</span>
+        把三个算法搬进式 (18.2) 之后的对照表。收缩系数与噪声系数各自怎么取，决定了算法的具体形状；
+        只要它们满足式 (18.3) 与条件 (b)，收敛性就自动成立。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>6. 本课证明了什么，引用了什么</h2>
+    <div class="rem">
+      <span class="label">注记 18.11（诚实交代）</span>
+      <p>本课完整给出的推导有四处：式 (18.4) 的平方展开、由式 (18.4) 到式 (18.5) 的条件期望估计、
+        引理 18.6 的完整证明、以及命题 18.9 与命题 18.10 把两个算法写成式 (18.2) 并核对条件的全过程。
+        定理 18.2 的最后一步（$\Delta_k\to0$）由引理 18.6 补齐，所以定理 18.2 的证明是完整的，
+        前提是接受引用件一。</p>
+      <p>引用而不证的有三处：拟鞅收敛定理（引用件一）、证明第四步里把条件期望级数与增量级数对上所需的鞅论细节
+        （注记 18.7 已标出）、以及多变量版本定理 18.8。这三处的严格证明都超出本课范围，
+        分别见原书附录 C、6.3.1 的完整版本与原文献。</p>
+      <p>由此，0017 课的定理 17.8 也有了证明：它由命题 18.10 给出，而命题 18.10 依赖定理 18.2，
+        定理 18.2 依赖拟鞅收敛定理。整条链的地基是那一件引用。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>均值估计、RM、随机梯度下降都能写成 $w_{k+1}=(I-A_k)w_k+b_k$，误差形式是 $\Delta_{k+1}=(1-\alpha_k)\Delta_k+\beta_k\eta_k$。</li>
+      <li>Dvoretzky 定理的三个条件：$\sum\alpha_k=\infty$、$\sum\alpha_k^2<\infty$、$\sum\beta_k^2<\infty$；噪声条件均值为 $0$ 且二阶矩有界。</li>
+      <li>证明的主线是看误差平方 $h_k=\Delta_k^2$：条件期望每步最多涨 $\beta_k^2C$，求和有界，于是 $h_k$ 收敛；再用 $\sum\alpha_k=\infty$ 逼出极限为 $0$。</li>
+      <li>均值估计与 RM 定理都能在几个代数步骤内套进这个定理，RM 的收缩系数是随机变量，正好用上定理允许随机系数这一点。</li>
+      <li>多变量版本把"有偏噪声"和"方差随误差增长"也纳进来，为后面的时序差分方法铺路。</li>
+    </ul>
+    <p>下一课把随机梯度下降单独拿出来：批量、单样本、小批量三种做法差在哪里，
+      步长怎么调度，以及为什么它的轨迹一开始很平滑、靠近最优点时反而开始抖。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 关于式 (18.2) 里的系数 $\alpha_k$ 与 $\beta_k$，下列说法正确的是哪个？</p>
+      <ol class="mcq-options">
+        <li>它们必须是事先定好的常数序列，不能随机</li>
+        <li>它们必须服从高斯分布，否则定理不成立</li>
+        <li>它们可以依赖历史 $\mathcal{H}_k$，是随机变量</li>
+        <li>必须满足 $\sum_k\beta_k=\infty$，否则不收敛</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理只要求 $\alpha_k,\beta_k$ 非负，允许它们依赖历史。RM 的收缩系数
+          $a_k\nabla_wg(w'_k)$ 就是随机的，定理必须容得下它。</p>
+        <p>A 太严，RM 就用不上这个定理。B 与系数无关，条件 (b) 只要求噪声条件均值为 $0$。
+          D 恰好相反，$\sum\beta_k=\infty$ 不是定理的要求。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 定理 18.2 的条件 (b) 对单位噪声提出了什么要求？</p>
+      <ol class="mcq-options">
+        <li>条件均值为零，且条件二阶矩有上界</li>
+        <li>无条件均值为零，且噪声本身有界</li>
+        <li>与误差相互独立，且方差等于零</li>
+        <li>条件均值有上界，且条件二阶矩为零</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：条件 (b) 要求噪声的条件均值为零、条件二阶矩有上界 $C$，
+          两条都是关于条件分布的。</p>
+        <p>B 把条件期望换成了无条件期望，而且加了有界这种更强的要求。
+          C 的方差为零等于要求没有噪声。D 把两条写反了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 证明式 (18.4) 时，辅助量 $h_k$ 取的是什么？</p>
+      <ol class="mcq-options">
+        <li>$h_k=\Delta_k$</li>
+        <li>$h_k=\alpha_k\Delta_k$</li>
+        <li>$h_k=\beta_k\Delta_k^2$</li>
+        <li>$h_k=\Delta_k^2$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：取误差的平方，一是让它非负，二是能把 $h_{k+1}-h_k$ 写成
+          $(\Delta_{k+1}-\Delta_k)(\Delta_{k+1}+\Delta_k)$，从而用上递推式。</p>
+        <p>A 可正可负，用不了非负性。B 与 C 都把系数混进了辅助量，非负性还要额外讨论。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 在式 (18.4) 的条件期望里，第三项 $2(1-\alpha_k)\beta_k\Delta_k\E[\eta_k\mid\mathcal{H}_k]$ 为什么等于 $0$？</p>
+      <ol class="mcq-options">
+        <li>因为 $\Delta_k$ 给定历史后是常数</li>
+        <li>因为条件 (b) 给出 $\E[\eta_k\mid\mathcal{H}_k]=0$</li>
+        <li>因为常数步长下有 $\beta_k=0$</li>
+        <li>因为 $\alpha_k\le1$ 使 $1-\alpha_k$ 非负</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：整个因子里只有 $\E[\eta_k\mid\mathcal{H}_k]$ 可能非零，条件 (b) 第一条直接把它压成 $0$。</p>
+        <p>A 说的是为什么 $\Delta_k$ 能提出条件期望，不能说明这一项为零。
+          C 与 D 都与这一项是否为 $0$ 无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 引理 18.6 从 $\sum_k\alpha_k\Delta_k^2<\infty$ 与 $\sum_k\alpha_k=\infty$ 推出 $\Delta_k\to0$，用的是什么论证？</p>
+      <ol class="mcq-options">
+        <li>用中值定理，把误差换成导数形式</li>
+        <li>用数学归纳法，对每一步逐步验证</li>
+        <li>反证：若误差平方的极限大于零，级数就会发散</li>
+        <li>用单调有界原理，说每一步都单调下降</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：若极限 $h_\infty>0$，则从某一项起 $\Delta_k^2>h_\infty/2$，
+          于是 $\sum\alpha_k\Delta_k^2\ge(h_\infty/2)\sum\alpha_k=\infty$，与有限矛盾。</p>
+        <p>A 用不上，这里没有可微函数。B 只能验证有限步。D 是确定性迭代的工具，
+          处理不了这种带随机步长的级数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">6. 若把条件 (a) 里的 $\sum_k\beta_k^2<\infty$ 去掉，会出什么问题？</p>
+      <ol class="mcq-options">
+        <li>噪声的总方差可能不收敛，$h_k$ 不一定收敛</li>
+        <li>$\alpha_k$ 会变成负数，迭代不再收缩</li>
+        <li>条件 (b) 会失效，噪声均值不再为零</li>
+        <li>什么都不会变，这一条本来就是多余的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (18.5) 右边的 $\beta_k^2C$ 求和必须有界，才能说 $h_k$ 是拟鞅。
+          去掉这一条，噪声注入的总能量可能无限，误差平方就可能一直不收敛。</p>
+        <p>B 与条件 (a) 无关，$\alpha_k$ 的非负性是单独假设的。C 混淆了系数条件与噪声条件。
+          D 说反了，这一条在证明第三步里被直接用到。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 为什么定理要求 $\sum_k\alpha_k=\infty$，却不要求 $\sum_k\beta_k=\infty$？</p>
+      <ol class="mcq-options">
+        <li>因为 $\beta_k$ 只影响噪声的符号与方向</li>
+        <li>因为 $\beta_k$ 与 $\alpha_k$ 之间总有等式约束</li>
+        <li>因为噪声的方差在条件 (b) 里恒为零</li>
+        <li>因为 $\beta_k$ 只乘在零均值的噪声上，它有限也能收敛</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\alpha_k$ 必须持续起作用才能把误差压下去，所以它的级数要发散；
+          $\beta_k$ 乘的是零均值噪声，噪声的总能量由 $\sum\beta_k^2<\infty$ 控制，不需要 $\sum\beta_k$ 发散。</p>
+        <p>A 错在 $\beta_k$ 影响的是幅度而不是符号。B 两者之间没有这种约束。
+          C 条件 (b) 只要求二阶矩有上界，不是零。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. 为什么 Dvoretzky 定理把结论写成"误差 $\Delta_k\to0$"，而不是直接写"参数 $w_k\to w^*$"？</p>
+      <ol class="mcq-options">
+        <li>因为误差 $\Delta_k$ 比参数 $w_k$ 更容易直接计算出来</li>
+        <li>因为写成同一个误差递推后，一个定理就能覆盖 RM、均值估计、随机梯度下降与时序差分</li>
+        <li>因为 $\Delta_k$ 一定是非负的，便于比较大小</li>
+        <li>因为参数 $w_k$ 在这些算法里不是随机变量</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把每个算法减去自己的最优解，剩下的结构都是"收缩加零均值噪声"。
+          统一到这个结构上，收敛性就只需要证明一次。</p>
+        <p>A 说反了，实际计算里算的是参数而不是误差。C 错在误差可正可负，非负的是它的平方。
+          D 错在参数是随机变量，正因为随机才需要这套理论。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 均值估计 $w_{k+1}=w_k+\alpha_k(x_k-w_k)$ 写成式 (18.2) 后，$(\alpha_k,\beta_k,\eta_k)$ 分别是？</p>
+      <ol class="mcq-options">
+        <li>$(\alpha_k,\ 1,\ x_k)$</li>
+        <li>$(\alpha_k,\ \alpha_k,\ x_k)$</li>
+        <li>$(\alpha_k,\ \alpha_k,\ x_k-w^*)$</li>
+        <li>$(1,\ \alpha_k,\ x_k-w^*)$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两边减去 $w^*$ 得到 $\Delta_{k+1}=(1-\alpha_k)\Delta_k+\alpha_k(x_k-w^*)$，
+          所以收缩系数是 $\alpha_k$，噪声放大系数也是 $\alpha_k$，噪声本身是 $x_k-w^*$。</p>
+        <p>A 与 D 把收缩系数取错了。B 里的噪声 $x_k$ 均值不为零，不满足条件 (b)。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 用 Dvoretzky 定理证明 RM 定理时，收缩系数 $\alpha_k$ 取的是什么？</p>
+      <ol class="mcq-options">
+        <li>取 $a_k$ 本身，与中值点在哪里无关</li>
+        <li>取 $a_k^2$，把它当成噪声的放大系数</li>
+        <li>取 $\nabla_wg(w_k)$，在 $w_k$ 处的取值</li>
+        <li>取 $a_k\nabla_wg(w'_k)$，在中值点处的取值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由中值定理把 $g(w_k)-g(w^*)$ 换成 $\nabla_wg(w'_k)(w_k-w^*)$，
+          收缩系数就是步长乘上中值点的导数，它是一个随机变量。</p>
+        <p>A 漏掉了导数因子。B 把步长平方当收缩系数，没有依据。
+          C 用的点不对，中值定理给出的点在 $w_k$ 与 $w^*$ 之间。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 6 章 6.3 节，含 6.3.1 的证明、6.3.2 与 6.3.3 的两个应用、6.3.4 的多变量扩展。
+        本课的定理 18.2、定理 18.8 与两个应用的口径都取自这一节。</p>
+      <p>拟鞅收敛定理的完整陈述与证明见原书附录 C。原始论文是 A. Dvoretzky,
+        <em>On stochastic approximation</em>, 1956；多变量扩展见 6.3.4 引用的文献。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把引理 18.6 的反证再走一遍"，
+      或者 "为什么把 RM 写成误差递推时会出现中值点 $w'_k$？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

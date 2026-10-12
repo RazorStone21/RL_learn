@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A21 · DDPG：确定性策略梯度 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A21" data-slug="ddpg" data-part="进阶篇 · 第五部分 · 连续控制与最大熵">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第五部分 · 连续控制与最大熵</p>
+    <h1>DDPG：确定性策略梯度</h1>
+    <p class="lede">这一节讲一个专门为"动作是连续的数"设计的算法。
+      连续动作的例子有机械臂每个关节转多少度、空调设几度、广告出价多少。
+      本节先看老办法为什么在这类动作上失灵，再写出新算法往哪个方向调参数，
+      最后说明怎么让训练稳住。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能说出连续动作下 max<sub>a</sub>Q 为什么失效，DDPG 用什么替代</li>
+        <li>能写出 <span class="math">∇<sub>a</sub>Q · ∇<sub>θ</sub>μ</span>（θ 是策略参数，μ 是确定性策略）并解释两个因子各自的作用</li>
+        <li>能实现软更新，并说清 DDPG 的探索噪声与过估计问题从哪来</li>
+      </ul>
+    </div>
+  </header>
+
+        <section>
+    <h2>连续动作下，max 没法算</h2>
+    <p><span class="term">策略（一套"看到什么状态就选什么动作"的规则）</span>就是出招习惯。
+      本课学的是<span class="term">确定性策略（deterministic policy）</span>：每个状态只输出一个动作，不掷骰子。
+      调好它的办法叫<span class="term">策略梯度（policy gradient）</span>：
+      不绕道去估价值，直接算"参数往哪调能让总分更高"。
+      用在确定性策略上，这套算法叫
+      <span class="term">DDPG（deep deterministic policy gradient，深度确定性策略梯度）</span>。</p>
+    <p>问题出在哪？<a href="A13-dqn.html">0013 课</a>的 DQN（deep Q-network，深度 Q 网络）
+      要算 <span class="math">max<sub>a′</sub> Q(s′,a′)</span>，
+      意思是"在下一个状态里，把能做的动作都比一遍，挑分数最高的那个"。
+      <span class="math">Q(s′,a′)</span> 像成绩单：给它一个状态和一个动作，
+      报出这么做最后大概能拿多少分。s′ 是下一步的状态，a′ 是动作。
+      动作只有几十个选项时，逐个代进去比一遍就行。</p>
+    <p>动作变成连续的数就比不了了：关节可以取 0.317 弧度，也可以取 0.3171 弧度，
+      中间有无穷多个值。这时 <span class="math">max<sub>a</sub> Q(s,a)</span>
+      不再是比较，而是一个优化问题：在一条曲线上找最高点。</p>
+    <p>这个最高点没有公式解。用梯度上升慢慢爬也行，但每步都要爬一次，慢，
+      而且可能只爬到局部最高。</p>
+    <p>老办法为什么非要取最大？因为最优的价值满足一个等式，叫
+      <span class="term">贝尔曼最优方程（把"这一步的价值"和"下一步最好的价值"连起来，每一步都挑当前最好的动作）</span>。
+      max 就是从这来的。</p>
+    <p>DDPG 的做法是绕开这一步：不再现搜最好的动作，
+      而是学一个函数，让它看到状态直接把动作算出来。</p>
+  </section>
+
+        <section>
+    <h2>策略梯度怎么算：让裁判指路</h2>
+    <p>这套办法里有两个网络。
+      一个负责出动作，叫 actor（出招的那一方，负责决定做什么动作，也叫策略网络）。
+      一个负责打分，叫 critic（打分的那一方，负责估计局面值多少分，也叫价值网络）。
+      actor 是球员，critic 是教练。</p>
+    <p>critic 要学的分数叫<span class="term">动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）</span>，
+      写作 <span class="math">Q(s,a)</span>。只看状态、不管动作的那个估计叫
+      <span class="term">价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）</span>，
+      写作 <span class="math">V(s)</span>。</p>
+    <p>要最大化的东西是一局结束时的总分，它叫
+      <span class="term">回报（从现在起一直到结束，把每一步奖励加起来的总分）</span>。
+      同一个策略跑两次，回报通常不一样。所以真正要最大化的是它的长期平均，也就是期望，
+      写作 𝔼（期望，同一件事重复很多次之后的平均结果，不是某一次的结果）。</p>
+    <p>目标就是让这个平均最大，写作
+      <span class="math">J(θ) = 𝔼<sub>s∼ρ</sub>[ Q(s, μ<sub>θ</sub>(s)) ]</span>。
+      右下角的 s∼ρ 表示"状态按 ρ 这个规则来取"。ρ 是状态访问分布，
+      意思是训练时各个状态被访问到的频繁程度，它本身就是一个概率分布（每个结果各自有多大可能）。
+      μ 是策略网络，θ 是它的参数。</p>
+    <p>要让它变大，就对 θ 求梯度，用链式法则展开，得到主公式：</p>
+    <div class="eq">
+      <span class="eq-body">∇<sub>θ</sub>J ≈ 𝔼[ ∇<sub>a</sub>Q(s, a; φ) |<sub>a = μ<sub>θ</sub>(s)</sub> · ∇<sub>θ</sub>μ<sub>θ</sub>(s) ]</span>
+      <span class="eq-num">(21.1)</span>
+    </div>
+    <p>∇ 读作 nabla，意思是"上升最快的方向"。
+      ∇<sub>a</sub>Q 是 critic 递过来的一句话："动作往哪边改，价值会更高"；
+      ∇<sub>θ</sub>μ 把方向换算成"参数该往哪改"。两者相乘就是链式法则。
+      进入更新的只有 Q 的梯度，大小不影响方向。
+      所以 critic 必须能求导。</p>
+    <p>这条式子的来历是<span class="term">确定性策略梯度（deterministic policy gradient, DPG）</span>：
+      它证明确定性策略的梯度可以写成不含动作期望的形式，所以不必对动作采样（按概率抽一个数）。</p>
+    <p>顺带认识一个亲戚：优势（在某个状态下，选这个动作比"平均水平"好多少）。</p>
+  </section>
+
+        <section>
+    <h2>四个网络与软更新</h2>
+    <p>critic 拿一批"状态、动作、结果"的数据，让 Q 的预测去靠近一个目标值。
+      麻烦在于这个目标值里本身就含 Q。</p>
+    <p>用自己当前的估计去构造目标，再拿它更新自己，这叫
+      <span class="term">自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）</span>。
+      毛病是靶子在动：你刚把 Q 往靶子挪一点，靶子也跟着挪了。</p>
+    <p>解法是另存一份"稍旧"的网络专门算靶子，隔一阵才同步一次，它叫
+      <span class="term">目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑）</span>。
+      比喻是照着旧照片找目标，别照镜子。</p>
+    <div class="eq">
+      <span class="eq-body">y = r + γ Q<sub>φ<sup>−</sup></sub>( s′, μ<sub>θ<sup>−</sup></sub>(s′) )</span>
+      <span class="eq-num">(21.2)</span>
+    </div>
+    <p>式中 γ 是折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折），
+      r 是这一步拿到的奖励，s′ 是下一步的状态。r 是真实拿到的分，
+      后面那一截用目标网络来估，这就是自举。参数右上角的减号表示"旧的那一份"。</p>
+    <p>目标网络怎么跟上？DQN 每 10000 步硬拷贝一次，拷贝那一瞬间目标会跳一下。
+      DDPG 换了个平滑的做法，叫
+      <span class="term">软更新（每次只把参数往新参数挪一点点，慢慢跟上，不要猛跳）</span>。</p>
+    <div class="eq">
+      <span class="eq-body">θ<sup>−</sup> ← τθ + (1−τ)θ<sup>−</sup>, &nbsp;&nbsp; φ<sup>−</sup> ← τφ + (1−τ)φ<sup>−</sup></span>
+      <span class="eq-num">(21.3)</span>
+    </div>
+    <p>式中 τ 是软更新系数，管每次挪多远，通常取 0.005。
+      τ = 1 退化成硬拷贝，τ = 0 则目标永远不动。
+      式子里的 ← 读作"更新为"，左边的值被右边的结果替换掉。</p>
+    <p>所以 DDPG 一共维护四个网络：actor <span class="math">μ<sub>θ</sub></span>、
+      critic <span class="math">Q<sub>φ</sub></span>（φ 是价值网络参数），
+      以及各自的目标网络，参数记作 θ<sup>−</sup> 和 φ<sup>−</sup>。</p>
+  </section>
+
+        <section>
+    <h2>探索得从外面加</h2>
+    <p>确定性策略有个副作用：同一个状态永远给出同一个动作。
+      训练时只按它走，就永远试不到别的动作。</p>
+    <p>DDPG 的做法是在动作上加一点随机数，写作
+      <span class="math">a = μ<sub>θ</sub>(s) + N</span>。
+      随机数从一个<span class="term">高斯分布（最常见的那个钟形分布）</span>里取。
+      钟形分布中间高、两边低：大多数取值落在中心附近，离中心越远越少见。</p>
+    <p>从分布里取一个数，这一步叫采样。抽出来的数围着中心忽大忽小，
+      晃动的幅度由<span class="term">标准差（衡量波动大小）</span>控制：标准差越大，离中心越远。</p>
+    <p>噪声多大要手调：太小探索不够，会卡在不够好的做法上；
+      太大动作几乎等于乱按。噪声幅度通常随训练慢慢变小。</p>
+    <p>原文用的是 <span class="term">OU 噪声（Ornstein–Uhlenbeck noise）</span>：
+      它前后相关，比独立噪声更有惯性，适合控制问题。</p>
+    <p>最后别忘：加完噪声的动作可能超出合法范围，要 clip（裁剪，超过上下限就按上下限算）回区间里。
+      比如动作要求落在 [−1, 1]，算出来 1.3 就按 1 记。</p>
+  </section>
+
+        <section>
+    <h2>为什么它脆弱，什么时候还值得用</h2>
+    <p>critic 的估计总有误差，麻烦在于这个误差会自己放大。</p>
+    <p>假设 Q 在某个动作上被高估了。actor 沿着 <span class="math">∇<sub>a</sub>Q</span>
+      把动作往"分数更高"的方向调，正好调到那个位置。
+      这些动作被采得更多，critic 在那里报的分又被推得更高。
+      这叫<span class="term">过估计（因为总是取最大值，估计出来的分数系统性地偏高）</span>，
+      比喻是每次都挑最好听的评价，越听越高。</p>
+    <p>再叠加对学习率（每次更新时往新信息的方向挪多远）、batch（一批样本，训练时一次处理一小批）、
+      噪声尺度的敏感，就有了"DDPG 能跑但难调"的名声。这类要你自己定、训练学不出来的数，统称
+      <span class="term">超参（需要你自己设定，而不是训练学出来的参数）</span>。</p>
+    <p>另一个麻烦是波动大，也就是方差（同一个做法重复很多次，结果的波动有多大）大。</p>
+    <p>DDPG 属于 off-policy（边学的那套策略不是产生数据的那套，等于看别人的录像学自己的打法），
+      所以能用<span class="term">经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用）</span>。
+      同一条数据被反复使用，<span class="term">样本效率（拿到同样多的经验能学多好，效率高就是"更省数据"）</span>就高。</p>
+    <p>还有一条路是让策略自己保持随机。SAC（soft actor-critic，软演员-评论家）在损失里加一项叫
+      <span class="term">熵正则（在目标里加一项鼓励保持随机性，防止过早死磕一个选择）</span>的东西。
+      熵（衡量"选择有多随机、多分散"，熵大代表还敢试）越大，策略越愿意试别的动作。</p>
+    <p><a href="A22-td3.html">0022 课</a>的 TD3（twin delayed DDPG，双延迟深度确定性策略梯度）
+      用三处修正治过估计：截断双 Q（用两套估计分别挑动作和打分，压住总是高估的毛病）、
+      让 actor 慢几拍再改动作、给目标动作加噪声抹平尖峰。</p>
+    <p>那什么时候还值得用 DDPG？它推理时不用采样，部署一次前向就出动作，
+      对延迟敏感的在线系统友好。维护老实现、读老论文时会用到它；新项目一般直接用 TD3 或者 SAC。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 为什么 DQN 那套 <span class="math">max<sub>a</sub>Q</span>
+        不能直接用到连续动作上？</p>
+      <ol class="mcq-options">
+        <li>连续动作无法枚举，取最大值本身变成一个优化问题</li>
+        <li>连续动作的价值函数不存在，Q 只在离散动作集上有定义</li>
+        <li>连续动作下贝尔曼最优方程不成立，只能估计策略价值</li>
+        <li>连续动作的奖励不可微，目标函数因此无法做反向传播</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：动作是几十个离散选项时，max 就是挨个比一遍。
+          动作变成连续的数以后，max 变成"在一个函数的输出里找全局最高点"。
+          这个问题没有公式解，每一步更新都要解一次，慢，而且不保证找到全局最高点。</p>
+        <p>B 与 C 都不成立：动作价值对连续动作照样有定义，
+          贝尔曼最优方程对连续动作也成立，难的是算得动，不是定义不了。
+          D 弄错了对象：需要能求导的是 Q 对动作，不是奖励。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 式 (21.1) 里 actor 用到 critic 的哪一个量？</p>
+      <ol class="mcq-options">
+        <li>critic 对状态的梯度，用它判断哪些状态更值得访问</li>
+        <li>critic 输出的动作价值本身，拿它当回报直接做回归</li>
+        <li>critic 对动作的梯度，在 a 等于 μ(s) 处取到的方向</li>
+        <li>critic 对自身参数的梯度，用它同时更新 actor 参数</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：链式法则要的是 ∇<sub>a</sub>Q(s,a)，它回答"动作往哪边调，价值会更高"，
+          再乘 ∇<sub>θ</sub>μ<sub>θ</sub>(s)，把方向换算回策略参数。</p>
+        <p>A 用的是对状态的梯度，跟选哪个动作没关系。
+          B 拿 Q 当回报去做回归，那是 critic 自己的活，actor 要的是 Q 的梯度。
+          D 把 φ 和 θ 弄混了，critic 的参数由 critic 自己的损失更新。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 关于 DDPG 的目标网络与软更新，下列说法正确的是？</p>
+      <ol class="mcq-options">
+        <li>它比 DQN 更省事：只需给 actor 配一份目标网络</li>
+        <li>软更新让目标参数迅速跟上在线网络，以加快学习速度</li>
+        <li>软更新的 τ 取 0 时，目标网络就等于在线网络的一份拷贝</li>
+        <li>它让自举目标短期内稳定，τ 通常取一个很小的值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：目标网络的作用和 0013 课一样，让回归目标短期内别动，
+          避免追一个一直在跑的靶子。DDPG 把"每 N 步硬拷贝"换成"每步挪一点"，
+          τ 通常取 0.005，目标变平滑，但仍然会慢慢跟上在线网络。</p>
+        <p>A 不成立，actor 和 critic 各有一份目标网络。
+          B 把 τ 说成了"迅速跟上"。
+          C 说反了：τ = 0 时目标完全不动，τ = 1 才是硬拷贝。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. DDPG 的行为策略从哪里获得探索性？</p>
+      <ol class="mcq-options">
+        <li>策略输出高斯分布的均值与方差，靠采样得到随机动作</li>
+        <li>在 actor 输出的动作上叠加外部噪声，如高斯或 OU 噪声</li>
+        <li>用 ε-greedy（ε 是探索率）以一定概率把某个动作维度替换成随机值</li>
+        <li>在损失里加入策略熵正则项，与优势演员-评论家（A2C）的做法完全一致</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：μ 是确定性的，给定状态只输出一个动作，策略本身没有随机性。
+          所以探索只能从外面加：a = μ(s) + N，加完再用 clip 限制回合法范围。</p>
+        <p>A 说的是随机策略（比如 SAC），那是另一条路线。
+          C 把 ε-greedy 硬套到连续动作上，DDPG 不这么做。
+          D 的熵项在 SAC 里才有，DDPG 的损失里没有熵。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 下列哪一项是 DDPG 脆弱性的核心原因？</p>
+      <ol class="mcq-options">
+        <li>它要用 Fisher 向量积与共轭梯度，二阶优化容易出错</li>
+        <li>它必须等到回合结束才能更新，方差很大且样本效率低</li>
+        <li>actor 会主动利用 critic 的过估计，形成正反馈</li>
+        <li>它的经验回放缓冲区太小，样本相关性会让训练发散</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：actor 直接沿 ∇<sub>a</sub>Q 调动作，Q 在哪里高估，
+          actor 就把动作往哪里推；这些动作被采得更多，Q 在那里被推得更高，
+          误差就这样被主动放大了。</p>
+        <p>A 说的是 0019 课的 TRPO（trust region policy optimization）。
+          它的信赖域（规定这一步只允许在"离旧策略不太远"的范围内改）DDPG 没有。
+          B 说的是 on-policy（边学的那套策略就是产生数据的那套）的方法，DDPG 是 off-policy。
+          D 不成立：回放缓冲区的大小是超参之一，不是它脆弱的根因。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0021-code-1">
+      <h3>代码题 1 · 手算一步确定性策略梯度并校验</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这是 DDPG 里 actor 的更新步。
+        critic 已经能说出"动作往哪个方向改，Q 会变大"，actor 就照这个方向调自己的参数，
+        训练循环每采一个 batch（一批样本）走一次这里。
+        为了让梯度能逐个元素核对，本题把 critic 换成一个简单的二次型打分函数：
+        动作离"理想动作"越远，分越低。输入是一批状态，输出是目标值与它的一对梯度。</p>
+        <p>请实现 <code>dpg_actor_grad(W, b, states, ideal_actions, action_weights)</code>，按式 (21.1) 计算，返回 <code>(J, dW, db)</code>。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>W</code>：形状 <code>(n_actions, n_states)</code> 的浮点数组。形状就是"几行几列"，
+              这里是 n_actions 行、n_states 列。它是线性 actor <span class="math">μ(s) = W s + b</span> 的权重。</li>
+          <li><code>b</code>：形状 <code>(n_actions,)</code> 的浮点数组，actor 的偏置，每个动作维度加一个常数。</li>
+          <li><code>states</code>：形状 <code>(B, n_states)</code> 的浮点数组，本批状态，B 是这一批的样本条数。</li>
+          <li><code>ideal_actions</code>：形状 <code>(B, n_actions)</code>，各状态下 critic 认为最好的动作 <span class="math">g(s)</span>。</li>
+          <li><code>action_weights</code>：形状 <code>(n_actions,)</code>，二次型 critic
+              <span class="math">Q(s,a) = −Σ<sub>k</sub> w<sub>k</sub>(a<sub>k</sub> − g<sub>k</sub>(s))²</span> 的权重。
+              这里的 Σ 是求和号，意思是把 k 取遍所有维度后加起来。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回元组 <code>(J, dW, db)</code>。<code>J</code> 是 Python <code>float</code>，
+              等于这一批样本 Q 的平均值 <span class="math">mean<sub>i</sub> Q(s<sub>i</sub>, μ(s<sub>i</sub>))</span>，
+              mean 就是求平均。</li>
+          <li><code>dW</code> 形状 <code>(n_actions, n_states)</code>、<code>db</code> 形状 <code>(n_actions,)</code>，
+              是 <code>J</code> 对 <code>W</code>、<code>b</code> 的梯度，对整批取了平均。
+              梯度就是"参数往哪个方向调，J 上升最快"。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试用有限差分核对 <code>dW</code>、<code>db</code> 的若干元素。
+        有限差分就是把某个参数挪一丁点，看 <code>J</code> 变了多少，用这个变化率近似梯度。
+        另外检查沿梯度走一步后 <code>J</code> 上升；<code>W = 0</code>、<code>b = 0</code> 时按定义照算，不做特判。
+        只用标准库和 numpy，不要改写入参。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先算动作矩阵：<code>A = states @ W.T + b</code>。
+              <code>@</code> 是矩阵乘法；<code>W.T</code> 是转置，行列对调，这样形状才对得上。
+              <code>A</code> 的形状是 <code>(B, n_actions)</code>。</li>
+          <li><code>np.asarray(x, dtype=float)</code> 把输入变成浮点数组并返回；
+              它可能和原对象是同一个数组，所以只读它，不要改它。</li>
+          <li>差值 <code>diff = A - ideal</code>，形状 <code>(B, n_actions)</code>。
+              对动作的梯度是 <code>grad_a_q = -2.0 * w * diff</code>。
+              <code>w</code> 形状是 <code>(n_actions,)</code>，numpy 会自动把它铺到每一行上，
+              这个规则叫广播（形状不同也能逐元素运算的自动扩展）。</li>
+          <li>目标值 <code>J = float(np.mean(-np.sum(w * diff ** 2, axis=1)))</code>。
+              <code>np.sum(..., axis=1)</code> 把每一行的所有列加起来，返回长度 <code>B</code> 的数组；
+              <code>np.mean</code> 再对这批取平均，返回一个数。</li>
+          <li>对 <code>W</code> 的梯度：<code>dW = (grad_a_q.T @ states) / B</code>，
+              形状 <code>(n_actions, n_states)</code>。除以 <code>B</code> 是因为 <code>J</code> 里带了平均。</li>
+          <li>对 <code>b</code> 的梯度：<code>db = np.mean(grad_a_q, axis=0)</code>，
+              形状 <code>(n_actions,)</code>，也就是按列求平均。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def dpg_actor_grad(W, b, states, ideal_actions, action_weights):
+    # TODO: A = states @ W.T + b；grad_a_Q = -2*w*(A - g)；
+    #       返回 (J, dW, db)，J = mean(-sum(w * (A - g)**2))
+    W = np.asarray(W, dtype=float)
+    b = np.asarray(b, dtype=float)
+    return 0.0, np.zeros_like(W), np.zeros_like(b)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+rng = np.random.default_rng(0)
+S = rng.normal(size=(4, 3))
+G = rng.normal(size=(4, 2))
+w = np.array([1.0, 2.0])
+W0 = rng.normal(size=(2, 3)) * 0.5
+b0 = rng.normal(size=2) * 0.5
+
+def J_of(W, b):
+    A = S @ np.asarray(W, dtype=float).T + np.asarray(b, dtype=float)
+    return float(np.mean(-np.sum(w * (A - G) ** 2, axis=1)))
+
+J, dW, db = dpg_actor_grad(W0, b0, S, G, w)
+dW = np.asarray(dW, dtype=float)
+db = np.asarray(db, dtype=float)
+check(abs(J - J_of(W0, b0)) < 1e-12,
+      f"J 应等于 mean_i Q(s_i, mu(s_i)) = {J_of(W0, b0):.9f}，实际 {J:.9f}")
+check(dW.shape == W0.shape and db.shape == b0.shape,
+      f"梯度形状应与参数一致：期望 {W0.shape} 与 {b0.shape}，实际 {dW.shape} 与 {db.shape}")
+
+eps = 1e-6
+for i, j in [(0, 1), (1, 2), (1, 0)]:
+    up = W0.copy(); up[i, j] += eps
+    dn = W0.copy(); dn[i, j] -= eps
+    fd = (J_of(up, b0) - J_of(dn, b0)) / (2 * eps)
+    check(abs(fd - dW[i, j]) < 1e-6,
+          f"dW[{i},{j}] 与数值梯度不符：解析 {dW[i, j]:.9f}，数值 {fd:.9f}")
+for k in range(2):
+    up = b0.copy(); up[k] += eps
+    dn = b0.copy(); dn[k] -= eps
+    fd = (J_of(W0, up) - J_of(W0, dn)) / (2 * eps)
+    check(abs(fd - db[k]) < 1e-6,
+          f"db[{k}] 与数值梯度不符：解析 {db[k]:.9f}，数值 {fd:.9f}")
+
+Jr, _, _ = dpg_actor_grad(np.zeros((2, 3)), np.zeros(2), S, G, w)
+check(abs(Jr - J_of(np.zeros((2, 3)), np.zeros(2))) < 1e-12,
+      "W=0、b=0 时动作全为 0，J 仍按定义计算，不应特判")
+
+lr = 0.1
+check(J_of(W0 + lr * dW, b0 + lr * db) > J + 1e-9,
+      f"沿梯度走一步必须提高 J：走之前 {J:.6f}，走之后 {J_of(W0 + lr * dW, b0 + lr * db):.6f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def dpg_actor_grad(W, b, states, ideal_actions, action_weights):
+    W = np.asarray(W, dtype=float)
+    b = np.asarray(b, dtype=float)
+    states = np.asarray(states, dtype=float)
+    ideal = np.asarray(ideal_actions, dtype=float)
+    w = np.asarray(action_weights, dtype=float)
+
+    actions = states @ W.T + b
+    diff = actions - ideal
+    grad_a_q = -2.0 * w * diff
+    B = states.shape[0]
+
+    J = float(np.mean(-np.sum(w * diff ** 2, axis=1)))
+    dW = (grad_a_q.T @ states) / B
+    db = np.mean(grad_a_q, axis=0)
+    return J, dW, db
+</script>
+    </div>
+
+<div class="code-ex" data-code="0021-code-2">
+      <h3>代码题 2 · 实现软更新（Polyak 平均）</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这是 DDPG 里把目标网络往前挪一步的那段代码，叫软更新。
+        actor 和 critic 各有一套目标网络参数，训练循环在更新完在线参数之后调用它：
+        输入是两套参数，输出是把目标网络那套原地改过之后的结果。
+        "慢慢跟上，不要猛跳"就是靠它实现的。</p>
+        <p>请实现 <code>soft_update(target, source, tau)</code>，按 <span class="math">target ← τ · source + (1−τ) · target</span>
+        原地改写 <code>target</code>，并返回 <code>target</code> 本身。式子里的 ← 读作"更新为"。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>target</code>：目标网络的浮点 numpy 数组，会被原地改写。
+              数组就是一排数字的容器；原地修改就是直接在原来那个数组上改，不新建一个。</li>
+          <li><code>source</code>：在线网络的浮点数组，形状与 <code>target</code> 相同，必须保持原样。</li>
+          <li><code>tau</code>：Python <code>float</code>，软更新系数，取值在 0 到 1 之间，管这次挪多远。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回传进来的那个 <code>target</code> 对象本身，而不是另建的新数组。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试检查两个端点与中点：
+        <code>tau = 1</code> 退化成硬拷贝，<code>tau = 0</code> 时目标完全不动，
+        <code>tau = 0.5</code> 时逐元素取加权平均；
+        还会检查返回值与入参是同一个对象、<code>source</code> 没被改动，
+        以及反复软更新 100 步后目标缓慢逼近而不等于 <code>source</code>。只用标准库和 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>np.asarray(x, dtype=float)</code> 返回一个浮点数组视图，它和传入的数组共享内存，
+              所以在它上面做原地运算就等于改传入的那个数组。</li>
+          <li>分两步原地算：先 <code>t *= (1 - tau)</code>，再 <code>t += tau * s</code>，
+              这两步都不新建数组。</li>
+          <li>最后 <code>return target</code>，返回调用者传进来的那一个对象，不要返回副本。</li>
+          <li>检查一下你没有写 <code>source *= ...</code> 这类语句，那会把 source 也改掉。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def soft_update(target, source, tau):
+    # TODO: 原地软更新 target，并返回 target 本身
+    return target
+</script>
+
+      <script type="text/x-python" data-role="tests">
+t1 = np.zeros(3)
+ret1 = soft_update(t1, np.ones(3), 1.0)
+check(np.allclose(t1, 1.0),
+      f"tau=1 必须退化为硬拷贝，实际 {t1}")
+check(ret1 is t1,
+      "soft_update 必须返回传进来的那个数组本身（原地修改），而不是新的副本")
+
+t2 = np.array([1.0, 2.0, 3.0])
+soft_update(t2, np.zeros(3), 0.0)
+check(np.allclose(t2, [1.0, 2.0, 3.0]),
+      f"tau=0 时目标参数必须完全不动，实际 {t2}")
+
+t3 = np.array([1.0, -1.0, 2.0])
+s3 = np.array([3.0, 1.0, 0.0])
+s3_copy = s3.copy()
+soft_update(t3, s3, 0.5)
+check(np.allclose(t3, [2.0, 0.0, 1.0]),
+      f"tau=0.5 时 target = 0.5*source + 0.5*target = [2, 0, 1]，实际 {t3}")
+check(np.array_equal(s3, s3_copy),
+      "soft_update 不能修改 source")
+
+t4 = np.zeros(4)
+for _ in range(100):
+    soft_update(t4, np.ones(4), 0.1)
+check(np.max(np.abs(t4 - 1.0)) < 1e-4,
+      f"反复软更新应让目标缓慢逼近 source：100 步 tau=0.1 后误差应小于 1e-4，实际 {np.max(np.abs(t4 - 1.0)):.3e}")
+check(np.max(np.abs(t4 - 1.0)) > 0.0,
+      "软更新不是一次到位：即使走 100 步也不应恰好等于 source")
+
+t5 = np.array([5.0])
+ret5 = soft_update(t5, np.array([1.0]), 0.25)
+check(abs(float(t5[0]) - 4.0) < 1e-12,
+      f"0.25*1 + 0.75*5 = 4.0，实际 {float(t5[0]):.6f}")
+check(ret5 is t5, "返回值仍必须是同一个数组对象")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def soft_update(target, source, tau):
+    t = np.asarray(target, dtype=float)
+    s = np.asarray(source, dtype=float)
+    t *= (1.0 - tau)
+    t += tau * s
+    return target
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>原始论文：Lillicrap et al., <em>Continuous control with deep reinforcement learning</em>（ICLR 2016），
+        arXiv <a class="cite" href="https://arxiv.org/abs/1509.02971">1509.02971</a>。
+        式 (21.1) 的 DPG 定理、四个网络结构与 OU 噪声的设置都在里面；
+        更早的确定性策略梯度理论出自 Silver et al. 的
+        <em>Deterministic Policy Gradient Algorithms</em>（ICML 2014）。</p>
+      <p>实现约定与超参对照 Spinning Up 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/algorithms/ddpg.html">DDPG 章节</a>
+        （<a class="cite" href="https://spinningup.openai.com/en/latest/">spinningup.openai.com</a>），
+        它明确写了 τ=0.005、回放缓冲区大小与探索噪声的建议。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "帮我把式 (21.1) 的链式法则一步步推给我看，并对应到 PyTorch 的两次 backward。"
+      或者 "我的 DDPG 学到的动作总是贴着动作范围的边界，帮我判断是噪声、奖励尺度还是 Q 过估计的问题。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

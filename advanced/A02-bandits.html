@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A02 · 多臂老虎机：探索与利用 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A02" data-slug="bandits" data-part="进阶篇 · 第一部分 · 基础概念">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第一部分 · 基础概念</p>
+    <h1>多臂老虎机：探索与利用</h1>
+    <p class="lede">这一节从最简单的选择讲起：反复挑一样东西，每次都只能看到拿到多少分，没有别的信息。
+      你会看到三种挑法各自把"试着换一个"的机会花在哪里，也能说清 ε-greedy（ε 是探索率，也就是平均一百次决策里，
+      大约有几次去随便试一个）、乐观初始值、UCB（upper confidence bound，置信上界）分别适合什么场景。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出样本平均的增量式更新式，并解释 1/n 与固定 α（步长）的区别</li>
+        <li>能说清三种探索策略各自解决什么毛病、什么时候失效</li>
+        <li>能判断一个业务场景该不该先当老虎机来做</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>剥到只剩骨架的强化学习（RL）</h2>
+    <p>先看一个每天都会遇到的小决定。首页有十张 banner（网页或 App 顶部那条可以点的图片广告），
+      但展示位只有一块，你只能放一张，目标是点率最高。点率就是"看到它的人里，有多大比例真的点了它"。
+      每张 banner 的真实点率是固定的，但你事先不知道。你能做的只有一件事：今天放一张，看有多少人点，明天再换个方式试。
+      这里没有"状态"：昨天放了哪一张，不会改变今天的点率，这一次的选择也不会影响下一刻的局面。
+      这类问题有个名字，叫 <span class="term">k 臂老虎机（k-armed bandit，一排老虎机摆在你面前，你不知道哪台吐钱多）</span>。</p>
+    <p>它比完整的强化学习少了最重要的东西：长期后果。剩下的只有一件事要权衡：
+      继续用现在看起来最好的那个，还是花一次机会试试别的。
+      所有算法的"探索直觉"都可以在这里用最低成本试出来。真实业务里，A/B 测试（把流量分成几组、每组给不同方案，比一比哪组效果好）的流量分配、
+      冷启动阶段的推荐位选择、广告素材轮换，都是老虎机问题的直接对应物。</p>
+  </section>
+
+  <section>
+    <h2>动作价值与它的估计</h2>
+    <p>先给每个臂定一个分数。所有臂合起来，就是你这一步能做的全部选择，也就是<span class="term">动作空间（你这一步能做的选择有多少种）</span>。
+      其中第 <var>a</var> 个臂的分数叫它的<span class="term">动作价值（先选这个动作，之后再好好走，平均能拿多少总分）</span>，
+      定义成"拉起这个臂，长期平均能拿到多少奖励"：</p>
+    <div class="eq">
+      <span class="eq-body">q<sub>*</sub>(a) = 𝔼[ R<sub>t</sub> | A<sub>t</sub> = a ]</span>
+      <span class="eq-num">(2.1)</span>
+    </div>
+    <p>式子里的 𝔼（期望，同一件事重复很多次之后的平均结果）说的是：把"拉这个臂"重复很多次，
+      每次的奖励加起来再除以次数。真实点率是固定的，所以重复得越多，这个平均越接近真实值。</p>
+    <p>现实里你拿不到真值，手上只有一个估计 <span class="math">Q<sub>t</sub>(a)</span>。
+      最自然的估计是"到目前为止这个臂的平均奖励"，叫<span class="term">样本平均法（sample-average method，把拿到的奖励全加起来再除以次数）</span>。
+      每一步都挑当前估计最大的臂下注，这种选法叫<span class="term">贪心（greedy，只挑眼前最好的那个）</span>。</p>
+    <p>贪心的问题很具体。第一张 banner 碰巧第一个被点了一下，它的估计就领先，
+      于是你再也不给别人机会。可一次点击说明不了什么，估计里带着噪声，它不是真实点率。</p>
+  </section>
+
+  <section>
+    <h2>增量式更新：两个数记住全部历史</h2>
+    <p>把 <var>n</var> 次奖励全存下来再求平均，内存会随步数一直涨。下面这个等价形式只需要两个数：</p>
+    <div class="eq">
+      <span class="eq-body">Q<sub>n+1</sub> = Q<sub>n</sub> + (1/n) [ R<sub>n</sub> − Q<sub>n</sub> ]</span>
+      <span class="eq-num">(2.2)</span>
+    </div>
+    <p>读法是：新估计 = 老估计 + 步长 ×（实际奖励 − 老估计）。方括号里是这一次的预测误差，
+      也就是"这次比原来的估计高多少、或低多少"。</p>
+    <p>这里最容易想岔：<var>1/n</var> 变小，意思并不是"后来的尝试不值钱"。
+      每一次拿到的奖励，在最终结果里的分量<em>完全一样</em>——都占 <var>1/n</var> 里的那一份。
+      <var>1/n</var> 之所以越来越小，是因为<em>分母在变大</em>：样本从 3 个变成 300 个，
+      这一次的修正自然只占总量的一小部分。</p>
+    <p>手算一遍就清楚了。假设三次拿到的奖励分别是 1、2、3：</p>
+    <ul>
+      <li>第 1 次：<var>Q</var> = 0 + (1/1)×(1 − 0) = 1，也就是第一次的奖励本身；</li>
+      <li>第 2 次：<var>Q</var> = 1 + (1/2)×(2 − 1) = 1.5；</li>
+      <li>第 3 次：<var>Q</var> = 1.5 + (1/3)×(3 − 1.5) = 2。</li>
+    </ul>
+    <p>而 (1 + 2 + 3) / 3 = 2，一模一样。这个式子算出来的，<em>就是全部奖励的算术平均</em>：
+      早期和后期的奖励同等重要，只是换了个算法，不必把历史全存下来。</p>
+    <p>别把它和折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折，常用 <var>γ</var> 表示）
+      搞混。折扣因子是"未来的奖励故意打折"，那是你为了表达"远期收益没那么重要"而主动做的取舍；
+      <var>1/n</var> 只是平均值的记账方式，没有"后来者不值钱"这层意思。</p>
+    <p>这个"估计 + 步长 × 误差"的形状会一路跟着你。后面要学的策略
+      （一套"看到什么状态就选什么动作"的规则）也是这么一小步一小步改出来的，
+      同样的形状会一直用到 Q-learning 和 PPO（proximal policy optimization，近端策略优化）。</p>
+    <p>把 <var>1/n</var> 换成固定常数 <var>α</var>（比如 0.1），得到的是指数加权平均：
+      近期奖励权重更高，估计大约只记得最近 <span class="math">1/α</span> 次的结果。
+      推荐的点击率会随季节和活动漂移。奖励分布不随时间变化的场景叫静止环境，会漂移的叫非静止（nonstationary）场景。
+      漂移的场景必须用固定 <var>α</var>；静止环境才用 <var>1/n</var>，因为这样算出来的估计最终会收敛
+      （一轮轮算下去，数值不再明显变化，稳定下来了），停在真实均值附近。</p>
+  </section>
+
+  <section>
+    <h2>ε-greedy：把探索写成预算</h2>
+    <p>概率先用一句话理解：平均一百次里大约发生几次。以概率 <var>ε</var> 随机选一个臂，
+      就是"平均一百次里，大约有 <var>ε</var> × 100 次去随便试一个"，剩下的次数选当前估计最大的那个：</p>
+    <div class="eq">
+      <span class="eq-body">A<sub>t</sub> = 随机臂（概率 ε）；arg max<sub>a</sub> Q<sub>t</sub>(a)（概率 1 − ε）</span>
+      <span class="eq-num">(2.3)</span>
+    </div>
+    <p>式子里的 arg max 读作 arg-max，意思是"挑出让后面那个式子最大的那个选择"：
+      <code>arg max<sub>a</sub> Q<sub>t</sub>(a)</code> 就是挑出当前估计最大的那个臂。</p>
+    <p>工程上它就是"拿出 10% 的流量做随机投放"。好处是实现简单，也不需要任何环境知识。
+      坏处是探索太平均：它照样会去试已经明显很差的臂。而 ε 固定不变，意味着永远有一部分步数
+      花在没有信息的尝试上，长期平均收益比最优策略低一截。</p>
+  </section>
+
+  <figure class="sim" data-sim="bandit" data-arms="10" data-steps="1000" data-runs="200"></figure>
+
+  <section>
+    <h2>两种更聪明的探索</h2>
+    <h3>乐观初始值（optimistic initial values）</h3>
+    <p>做法很土：把每个臂的初始估计 <span class="math">Q<sub>1</sub>(a)</span> 设成一个偏高的数。
+      奖励上限是 1，你就设成 5。一开始每个臂都"看起来很好"，贪心会把它们挨个试一遍。
+      真拉起来总是失望，估计一路往下掉。探索就是被这份失望推着走的，不需要 <var>ε</var>。
+      它只适合静止环境：环境一变，这些虚高的初值就不再提供任何信息。</p>
+    <h3>UCB：按不确定性分配探索</h3>
+    <div class="eq">
+      <span class="eq-body">A<sub>t</sub> = arg max<sub>a</sub> [ Q<sub>t</sub>(a) + c √( ln t / N<sub>t</sub>(a) ) ]</span>
+      <span class="eq-num">(2.4)</span>
+    </div>
+    <p><span class="math">N<sub>t</sub>(a)</span> 是臂 <var>a</var> 到现在被选过多少次。
+      试得少的臂，根号里的分母小，加分项就大；试得多的臂，加分项趋近于零。
+      这份加分让它自动拿到"置信上界（upper confidence bound）"的身份。</p>
+    <p>于是探索被挤到没把握的地方：<span class="math">N<sub>t</sub>(a) = 0</span> 的臂加分视为无穷大，
+      开局每个臂必须先各试一次。常数 <var>c</var> 决定探索的激进程度，越大越敢试没试过的臂。</p>
+    <p>有一种误读是"UCB 更聪明，所以不用探索"。它是更省，不是不用：
+      少了那一次初始访问，它连一个数都拿不到。</p>
+  </section>
+
+  <section>
+    <h2>什么时候先做老虎机就够了</h2>
+    <p>判断标准只有一条：你这次的选择会不会改变以后各选项的收益。
+      今天放哪张 banner 不影响明天的用户构成，那它就是个老虎机问题，别急着上 Q-learning。
+      先当成静止或缓慢漂移的老虎机，用 ε-greedy 或 UCB 把收益拿稳，
+      再问要不要把状态加回来（见第 <a href="A03-mdp.html">0003 课</a>）。</p>
+    <div class="note">
+      <p><em>诊断视角：</em>线上 A/B 测试长期跑不出结论，问题多半不在样本量，而在"胜利者诅咒"：
+        你在多个臂上反复偷看指标，把噪声当成了信号。固定的探索预算比"随时切到当前最好"更可靠。</p>
+    </div>
+    <p>还有一种更细的做法叫梯度老虎机（gradient bandit）。它不用价值估计，改用一组 softmax
+      （把一组原始分数变成一组加起来等于 1 的概率，分数高的概率大）偏好
+      （每个臂一个可正可负的打分，只表示相对好坏，不是奖励本身），适合只关心相对名次的场景。
+      推导见 Sutton &amp; Barto 第 2.8 节。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. ε 固定不变的 ε-greedy 在训练后期仍然拿不到最优收益，最主要的原因是什么？</p>
+      <ol class="mcq-options">
+        <li>价值估计的方差太大，导致 argmax 经常选到错误的那个臂</li>
+        <li>初始值设置得不够乐观，导致一部分臂始终没机会被访问到</li>
+        <li>总有固定比例的步数在执行一次没有信息量的随机尝试</li>
+        <li>样本平均法会遗忘早期的奖励，使估计逐渐偏离真实均值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：固定 <var>ε</var> 意味着每个时刻都有 <var>ε</var> 的概率完全随机选臂，
+          这部分流量永远学不到东西，稳态收益因此被钉在最优值以下（Sutton &amp; Barto 第 2.3 节）。</p>
+        <p>A 把稳态损失说成了估计噪声：估计方差只影响收敛快慢，不影响"是否永远随机试"。
+          B 误以为 ε-greedy 依赖乐观初值，那是另一条独立路线。
+          D 说反了：遗忘早期奖励是固定步长 α 的性质，样本平均不遗忘。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 把增量式更新里的步长 <span class="math">1/n</span> 换成固定常数 <var>α</var> = 0.1，会发生什么？</p>
+      <ol class="mcq-options">
+        <li>估计变成指数加权的平均，近期奖励权重更高，能跟上漂移的环境</li>
+        <li>估计仍然等于算术平均，只不过每一步的计算量变得明显更小</li>
+        <li>估计不再收敛，会随着每次奖励的符号在真值附近持续震荡</li>
+        <li>估计将永远停留在第一次奖励上，之后的奖励会被完全忽略掉</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：固定步长下老数据的权重按 <span class="math">(1−α)<sup>k</sup></span>
+          指数衰减，估计只反映最近大约 <span class="math">1/α</span> 次的结果，代价是引入了稳态偏差，
+          收益是能跟踪非静止的奖励分布（S&amp;B 第 2.5 节）。</p>
+        <p>B 错在"仍然等于算术平均"：它是有偏的滑动平均。
+          C 错在把权重衰减当成不收敛：估计依然会收敛，只是收敛到一个指数加权均值。
+          D 描述的是 <var>α</var> = 1 的极端情况，而不是 0.1。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. UCB 与 ε-greedy 在选择动作时最本质的差别是什么？</p>
+      <ol class="mcq-options">
+        <li>UCB 完全不估计动作价值，只按每个臂被访问过的次数来排序</li>
+        <li>UCB 的探索比例会随训练推进单调上升，最终覆盖到所有的臂</li>
+        <li>UCB 只在静止环境中有效，而 ε-greedy 只能用于非静止的环境</li>
+        <li>UCB 给不确定性高的臂额外加分，把探索集中在没把握的地方</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：UCB 的选择值是"价值项 + 置信上界加分项"，加分项随访问次数增加而下降，
+          所以它把试验次数优先分给样本少、估计不可靠的臂，而不是像 ε-greedy 那样均匀乱试。</p>
+        <p>A 忽略了价值项 <span class="math">Q<sub>t</sub>(a)</span>，那才是 UCB 的主项。
+          B 说反了：<span class="math">ln t</span> 增长慢于 <span class="math">N<sub>t</sub>(a)</span>，
+          加分项随时间单调下降，探索是递减的。
+          C 也反了：置信上界依赖奖励分布静止，漂移环境里 UCB 反而吃亏。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 用乐观初始值来驱动探索，什么情况下它会失效？</p>
+      <ol class="mcq-options">
+        <li>当臂的数量很少、每个臂被反复访问很多次的时候</li>
+        <li>当环境非静止、奖励分布随着时间不断漂移的时候</li>
+        <li>当奖励的取值范围是负的、初始值只能设成负数的时</li>
+        <li>当估计采用样本平均而不是用固定步长来做更新的时候</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：乐观初始值靠"初值误差"制造前期探索，它假设奖励分布不动。
+          环境一旦漂移，被平均进来的旧数据不再代表当前分布，虚高的初值也不再提供任何信息，
+          所以 Sutton &amp; Barto 第 2.6 节明确把它归为静止环境的方法。</p>
+        <p>A 恰好是它最有效的场景（臂少、访问多时误差很快被洗掉）。
+          C 不成立：初值只要高于当前真实值就能驱动探索，与奖励正负无关。
+          D 也反了：S&amp;B 图 2.3 的标准组合就是"乐观初始值 + 样本平均"。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 把一个业务问题先当成老虎机来处理，最重要的前提是什么？</p>
+      <ol class="mcq-options">
+        <li>动作空间需要是连续的，这样才能做足够精细的流量分配</li>
+        <li>你必须能事先精确估计出每个动作真实期望收益的上界</li>
+        <li>当前的这一次选择不会改变后续各动作的收益分布</li>
+        <li>奖励必须是稀疏出现的，否则探索不会带来任何额外收益</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：老虎机假设无状态、无延迟后果：每次拉臂得到的奖励分布只由臂本身决定，
+          与其他时刻的选择无关。满足这条，长期后果这一整块复杂度就可以先不付。</p>
+        <p>A 相反：老虎机通常是少量离散的臂，连续动作是后续课程的问题。
+          B 说的就是老虎机要解决的问题：真值未知才需要估计。
+          D 与稀疏性无关：密集奖励同样需要探索来发现更好的臂。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0002-code-1">
+      <h3>代码题 1 · 用增量式公式更新臂的均值估计</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>老虎机的核心是把每个臂的价值估计成它至今的平均奖励。这个函数用增量式公式在线更新这一步被拉起的那个臂：每来一个新奖励，就把估计往它那个方向挪一点点，不需要保存全部历史奖励。它在学习循环里每次拉臂后调用，输入是这一步选了哪个臂、拿到多少奖励，输出是更新后的价值估计与访问计数。</p>
+        <p>请实现 <code>incremental_update(Q, N, a, reward)</code>。</p>
+                <div class="eq">
+                  <span class="eq-body">N[a] ← N[a] + 1；&nbsp;&nbsp;Q[a] ← Q[a] + (reward − Q[a]) / N[a]</span>
+                  <span class="eq-num">(2.5)</span>
+                </div>
+
+        <p>式子里的 <code>←</code> 读作"更新为"：把右边算出来的值写回左边这个位置。两行有先后，先把计数加一，再用新的 <code>N[a]</code> 当分母。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>Q</code>：长度 <code>k</code> 的一维 numpy 数组（一排数字的容器），形状记作 <code>(k,)</code>，存每个臂的价值估计；</li>
+          <li><code>N</code>：同样长度、同样形状的整数数组，存每个臂被访问过的次数；</li>
+          <li><code>a</code>：本轮所选臂的整数下标，从 <code>0</code> 开始数，所以合法取值是 <code>0</code> 到 <code>k-1</code>；</li>
+          <li><code>reward</code>：本轮拿到的浮点奖励，一个数。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回更新后的 <code>(Q, N)</code>，两个数组的长度与传入时相同，<code>N</code> 保持整数类型；只有下标 <code>a</code> 那一项被改写，<code>Q[a]</code> 是历史上所有奖励的算术平均。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>同一臂连续更新 7 次后 <code>Q[a]</code> 与 <code>np.mean</code> 一致；两次相同的奖励 10.0 会使估计停在 10.0；第一次更新后 <code>Q[a]</code> 就等于那次奖励；没被访问到的臂，<code>Q</code> 与 <code>N</code> 一个元素都不能改动。就地修改传入数组或返回新数组都可以；只用标准库与 numpy，本题不需要随机数。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>Q</code> 和 <code>N</code> 都是 numpy 数组，<code>Q[a]</code> 是取第 <code>a</code> 个位置上的数（下标从 0 开始）。</li>
+          <li>第一步先做 <code>N[a] += 1</code>，把访问次数加一。第二步的除法要用这个新值当分母；顺序反了，第一次更新就会除以 0。</li>
+          <li>第二步算误差 <code>reward - Q[a]</code>，除以 <code>N[a]</code> 得到这一步要挪的距离，再加回 <code>Q[a]</code>：
+              写成一行就是 <code>Q[a] += (reward - Q[a]) / N[a]</code>。</li>
+          <li>不需要保存历史奖励，那个误差就是全部所需信息。最后 <code>return Q, N</code>；就地改传入的两个数组也行。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def incremental_update(Q, N, a, reward):
+    # TODO: 计数加一，再用 1/N[a] 的步长把 Q[a] 往 reward 方向修正
+    return Q, N
+</script>
+
+      <script type="text/x-python" data-role="tests">
+Q = np.zeros(3)
+N = np.zeros(3, dtype=int)
+for r in (1.0, 3.0, 2.0):
+    Q, N = incremental_update(Q, N, 0, r)
+check(N[0] == 3, f"臂 0 应当被访问 3 次，实际 {N[0]}")
+check(abs(Q[0] - 2.0) < 1e-9, f"奖励 [1, 3, 2] 的均值应为 2.0，实际 {Q[0]:.4f}")
+check(N[1] == 0 and Q[1] == 0.0, "没有被访问的臂，计数和价值都不应被改动")
+
+Q, N = incremental_update(Q, N, 1, -2.0)
+check(abs(Q[1] + 2.0) < 1e-9, f"第一次更新的估计应当就等于那次奖励，实际 {Q[1]:.4f}")
+check(N[1] == 1, f"臂 1 的计数应为 1，实际 {N[1]}")
+
+Q2 = np.zeros(2)
+N2 = np.zeros(2, dtype=int)
+vals = [0.5, -1.0, 2.0, 7.0, 3.5, 0.0, 1.0]
+for r in vals:
+    Q2, N2 = incremental_update(Q2, N2, 1, r)
+check(abs(Q2[1] - float(np.mean(vals))) < 1e-9,
+      f"增量式结果应与算术平均一致：{Q2[1]:.6f} 对 {float(np.mean(vals)):.6f}")
+check(abs(Q2[0]) < 1e-12, "臂 0 从未被访问，估计应当保持为 0")
+
+Q3 = np.zeros(1)
+N3 = np.zeros(1, dtype=int)
+Q3, N3 = incremental_update(Q3, N3, 0, 10.0)
+Q3, N3 = incremental_update(Q3, N3, 0, 10.0)
+check(abs(Q3[0] - 10.0) < 1e-9,
+      f"两次相同的奖励 10.0，均值仍是 10.0；若结果明显偏小，说明步长不是 1/n。实际 {Q3[0]:.4f}")
+
+Q4 = np.zeros(1)
+N4 = np.zeros(1, dtype=int)
+for r in (0.0, 4.0):
+    Q4, N4 = incremental_update(Q4, N4, 0, r)
+check(abs(Q4[0] - 2.0) < 1e-9,
+      f"奖励 [0, 4] 的均值应为 2.0；用固定步长 0.1 会得到 0.4。实际 {Q4[0]:.4f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def incremental_update(Q, N, a, reward):
+    N[a] += 1
+    Q[a] += (reward - Q[a]) / N[a]
+    return Q, N
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0002-code-2">
+      <h3>代码题 2 · 用 UCB 加分挑出下一个臂</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>UCB（upper confidence bound，置信上界）把探索预算花在估计最不确定的臂上：估计值加上一个随访问次数下降的加分项，加分大的臂优先被选。这个函数在每轮决策时被调用，输入是当前的价值估计与访问次数，输出这一步要拉的臂。它只做选择，不更新任何估计。</p>
+        <p>请实现 <code>ucb_select(Q, N, c, t)</code>。</p>
+                <div class="eq">
+                  <span class="eq-body">A<sub>t</sub> = arg max<sub>a</sub> [ Q[a] + c √( ln t / N[a] ) ]</span>
+                  <span class="eq-num">(2.6)</span>
+                </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>Q</code>：长度 <code>k</code> 的一维 numpy 数组，形状 <code>(k,)</code>，存每个臂的价值估计；</li>
+          <li><code>N</code>：同样长度、同样形状的整数数组，存每个臂的访问次数；</li>
+          <li><code>c</code>：控制探索强度的 float 系数，越大越敢试访问少的臂；</li>
+          <li><code>t</code>：当前总步数，整数且至少为 1。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回本轮要选的动作下标，类型为 <code>int</code>，取值 <code>0</code> 到 <code>k-1</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>N[a] == 0</code> 的臂加分视为无穷大，必须先访问，有多个未访问的臂时返回下标最小的那个；加分项相同时取下标较小的臂；所有臂访问次数相同时退化为选价值最高的臂；完全平局时返回下标 0。测试还会核对传入的 <code>Q</code>、<code>N</code> 一个元素都没被改动。只用标准库与 numpy，本题不需要随机数。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先查有没有没访问过的臂：<code>N == 0</code> 得到一个布尔数组，
+              <code>np.where(...)[0]</code> 把里面为 True 的位置下标取出来，返回一个下标数组。</li>
+          <li>这个数组非空时，直接返回它的第一个元素 <code>int(unvisited[0])</code>。它的下标最小，正好满足"有多个未访问臂时返回下标最小的那个"。</li>
+          <li>否则算加分项：<code>bonus = c * np.sqrt(np.log(t) / N)</code>。<code>np.log(t)</code> 是 t 的自然对数，返回一个数；
+              <code>np.sqrt</code> 是开平方。除法和开方都逐项作用在整个数组上，得到每个臂一个加分。</li>
+          <li>最后 <code>int(np.argmax(Q + bonus))</code>。<code>np.argmax</code> 返回最大值所在的下标，平局时返回最小的下标。</li>
+          <li>这个函数只做选择，不要修改传入的 <code>Q</code> 或 <code>N</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def ucb_select(Q, N, c, t):
+    # TODO: 未访问的臂优先；否则按 Q + c*sqrt(log(t)/N) 取最大
+    return 0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+Q = np.array([1.0, 1.0, 1.0, 1.0])
+N = np.array([0, 0, 0, 0])
+check(ucb_select(Q, N, 2.0, 1) == 0,
+      "所有臂都没试过时，应当返回下标最小的未访问臂（0）")
+
+N = np.array([5, 0, 3, 9])
+check(ucb_select(Q, N, 2.0, 20) == 1,
+      "只要还有 N=0 的臂，就必须先访问它，而不是继续利用已知的臂")
+
+Q = np.array([1.0, 1.0])
+N = np.array([100, 4])
+check(ucb_select(Q, N, 2.0, 100) == 1,
+      "价值相同时应当选访问次数更少、更不确定的那个臂")
+
+N = np.array([4, 100])
+check(ucb_select(Q, N, 2.0, 100) == 0,
+      "同样两个臂只是次数对调，选择也必须跟着对调，不能写死下标")
+
+Q = np.array([5.0, 1.6])
+N = np.array([10, 10])
+check(ucb_select(Q, N, 1.0, 10) == 0,
+      "不确定性相同时应当退化为贪心，选价值更高的臂")
+
+Q = np.array([1.0, 1.5])
+N = np.array([2, 40])
+check(ucb_select(Q, N, 2.0, 1000) == 0,
+      "访问次数极少的臂即使估计略低，也应当被优先访问")
+
+Q = np.array([0.0, 0.4, 0.9, 1.0])
+N = np.array([1000, 1000, 1000, 1000])
+check(ucb_select(Q, N, 3.0, 1000) == 3,
+      "所有臂访问次数相同时，UCB 应当选价值最高的臂")
+
+Q = np.array([2.0, 2.0])
+N = np.array([7, 7])
+check(ucb_select(Q, N, 2.0, 50) == 0, "完全平局时应当返回下标较小的臂")
+
+r = ucb_select(np.array([1.0, 2.0]), np.array([1, 1]), 1.0, 5)
+check(isinstance(r, (int, np.integer)), f"返回值应当是整数下标，实际类型 {type(r).__name__}")
+
+Qin = np.array([1.0, 1.0, 1.0])
+Nin = np.array([3, 3, 3])
+ucb_select(Qin, Nin, 2.0, 10)
+check(Qin.tolist() == [1.0, 1.0, 1.0] and Nin.tolist() == [3, 3, 3],
+      "这个函数只做选择，不应当修改传入的 Q 或 N")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def ucb_select(Q, N, c, t):
+    unvisited = np.where(N == 0)[0]
+    if len(unvisited) > 0:
+        return int(unvisited[0])
+    bonus = c * np.sqrt(np.log(t) / N)
+    return int(np.argmax(Q + bonus))
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 2 章
+        （2.1–2.7 节）。增量式更新式、ε-greedy、乐观初始值、UCB 的原始定义与对比实验都在这里，
+        图 2.2 与图 2.3 是本课所有结论的实验依据。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "我的场景里只有 3 个候选方案但流量很少，ε 该取多少？" 或者
+      "帮我把这个 A/B 测试改写成 UCB 的更新式"。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

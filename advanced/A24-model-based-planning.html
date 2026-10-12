@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A24 · 基于模型与规划：Dyna、MCTS 与 AlphaZero — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A24" data-slug="model-based-planning" data-part="进阶篇 · 第六部分 · 模型基、离线与对齐">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第六部分 · 模型基、离线与对齐</p>
+    <h1>基于模型与规划：Dyna、MCTS 与 AlphaZero</h1>
+    <p class="lede">这一节讲一个很朴素的思路：先在脑子里把计划过一遍，再动手。要回答三个问题：
+      手上的问题该不该上一个环境模型；Dyna 循环怎么画；
+            蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）树搜索，也就是
+      MCTS（Monte Carlo tree search），它的选择、扩展、模拟、回传在做什么。
+      说穿了就是先在脑子里把很多种走法各试一遍，再决定这一步走哪个。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能区分价值基 / 策略基 / 模型基三条路线，并说出各自吃的是什么资源</li>
+        <li>能写出 Dyna 的一步循环：真实经验同时更新价值与模型，再从模型里回放</li>
+        <li>能实现 UCB1（upper confidence bound 1，置信上界算法）选择与 MCTS 回传，并解释 UCT 里 √(ln N / n) 项在平衡什么</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>第三条路线：先有模型，再"想象"</h2>
+    <p>到这里为止，课程里的算法都在不建模型：DQN（deep Q-network，深度 Q 网络）一族直接学价值，
+              这里面又分两种：一种先估值的，叫价值基；另一种策略（看到什么状态就选什么动作的那套规则）
+       直接学出招习惯的，叫策略基，PPO（proximal policy optimization，近端策略优化）
+       与 SAC（soft actor-critic，软演员-评论家）都属于它，每次交互都是消耗品。
+       用它们的时候，每走一步都要去真实系统里问一次答案。</p>
+    <p>人下棋不这样。你会先在脑子里把后面几步演一遍，觉得不划算就换一条路，
+       真要落子之前不用碰棋盘。下面这条路线，就是让程序也学会这一手。</p>
+    <p>先认识几个后面反复出现的词。这里的策略，就是一套"看到什么状态就选什么动作"的规则。
+      蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）。
+      自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）。
+            智能体（做决策的那一方，也就是你写的程序）。
+      人类偏好（只告诉你"这两个里我更喜欢哪一个"，不给绝对分数），
+      这样叫是为了和 0002 课"每个臂一个打分"的偏好区分开。</p>
+    <p><span class="term">模型基（model-based，先把环境本身学出来、再用它做计划的那类方法）</span>方法多学一样东西：
+       <span class="term">环境模型（environment model）</span>，也就是
+       <span class="math">(s, a) → (r, s′)</span> 的预测器。
+       这里的 <span class="math">s</span> 是当前状态，<span class="math">a</span> 是你这一步的动作，
+       <span class="math">r</span> 是这一步拿到的奖励，<span class="math">s′</span> 是做完动作之后的新状态
+       （<span class="math">s′</span> 读作"s 撇"，就是"下一步的 s"）。
+       这个预测器回答的是"你会得多少分、会走到哪个新状态"。</p>
+    <p>有了它就能在"脑子里"推演，不必每次都去真实系统试。
+       这类方法通常用 <span class="math">γ</span>（读作 gamma，折扣因子，
+       意思是越往后的奖励算进总分时权重越小，相当于给它打了个折）给未来价值打折，写成
+       <span class="math">Q(s,a) = r(s,a) + γ Σ<sub>s′</sub> p(s′|s,a) V(s′)</span>。
+       这里的 <span class="math">Q(s,a)</span> 是动作价值（在某个状态下先选某个具体动作，
+       之后再好好走，能拿多少总分），它的意思是：在状态 <span class="math">s</span> 下先选动作
+       <span class="math">a</span>、之后好好走能拿到的总分估计。
+             式子里 <span class="math">Σ</span> 是求和号，意思是"把后面那串东西全加起来"。
+       <span class="math">p(s′|s,a)</span> 是转移概率，读作"在状态 <span class="math">s</span> 做动作
+       <span class="math">a</span> 之后，落到状态 <span class="math">s′</span> 的可能性有多大"。
+       式子里的 <span class="math">V(s′)</span> 是状态价值，意思是从新状态 <span class="math">s′</span>
+       出发、之后按某套策略走下去，平均能拿多少总分。
+       把一个状态在所有动作上的价值合起来，就得到价值函数（用来估"这个局面值多少分"的那份函数）。
+       环境不一定只跳到一个地方，所以要把每个可能落点的概率乘上那里的价值，再全部相加。
+       拿模型这样算一遍，就叫一次贝尔曼备份（backup，把"下一步的价值"倒推回来更新"这一步的价值"）。
+       贝尔曼方程，就是把"这一步的价值"和"下一步的价值"连起来的等式，完整讲法在
+       <a href="A04-value-bellman.html">0004 课</a>，本课只要会照着算一遍。</p>
+        <p>三分法的判据是样本从哪来，与"用了什么网络"无关：模型基的样本有一部分来自模型。
+       对你的实际意义是：交互越贵，模型基越值。</p>
+  </section>
+
+  <!-- 价值迭代 = 用已知模型做规划，正好对应模型基方法的骨架 -->
+  <figure class="sim" data-sim="gridworld" data-rows="4" data-cols="4" data-gamma="0.9" data-mode="policy"></figure>
+
+  <section>
+    <h2>Dyna：理解模型基最短的一条路</h2>
+    <p><span class="term">Dyna</span> 架构只有一个循环，但每一步真实交互做三件事：</p>
+    <ul>
+      <li>用真实转移 <span class="math">(s,a,r,s′)</span> 更新价值 <var>Q</var>（普通的 Q-learning 更新）；</li>
+      <li>用同一条转移更新模型：记住"在 <var>s</var> 做 <var>a</var> 会到 <var>s</var>′ 并得 <var>r</var>"；</li>
+      <li>再从模型里抽若干个 <span class="math">(s,a)</span>，用预测的 <span class="math">(r̂, ŝ′)</span> 做额外价值更新，这叫规划。</li>
+    </ul>
+    <div class="eq">
+      <span class="eq-body"><var>Q</var>(<var>s</var>,<var>a</var>) ← <var>Q</var>(<var>s</var>,<var>a</var>) + <var>α</var> [ <var>r</var> + <var>γ</var> max<sub><var>a</var>′</sub> <var>Q</var>(<var>s</var>′,<var>a</var>′) − <var>Q</var>(<var>s</var>,<var>a</var>) ],&nbsp;&nbsp;(<var>r</var>,<var>s</var>′) 来自真实一步或模型</span>
+      <span class="eq-num">(24.1)</span>
+    </div>
+    <p>式中 α 是学习率（每次更新时往新信息的方向挪多远；太大会来回震荡，太小就学得慢），
+      它决定这一步把 <var>Q</var> 往新估计的方向挪一小步。</p>
+    <p>这个式子的读法是：把 <var>Q</var>(<var>s</var>,<var>a</var>) 更新为"原来的
+      <var>Q</var> 加上一小步修正"，方括号里是"这一步实际拿到的 <var>r</var>，
+      加上打折后的下一步最好价值，再减去原来的估计"。
+      式 (24.1) 里唯一的区别就是 <span class="math">(r, s′)</span> 的来源。
+      规划次数 <var>n</var> 是这里最重要的旋钮：<var>n</var> 越大，每条真实样本被榨得越干，
+      但每一步的计算量也越大，而且规划得越多，模型误差被重复利用的次数也越多。</p>
+  </section>
+
+  <section>
+    <h2>学到的模型为什么会骗你</h2>
+    <p>如果模型是环境给的（下棋的规则、仿真器），规划不会引入新误差。
+      但多数业务里模型要从数据里学，于是出现恶性循环：
+      模型在某处预测偏了，规划就在那个状态上算出偏掉的价值；策略于是更爱往那块区域跑，
+      收到的主要又是那块区域的数据，偏差被反复强化。</p>
+    <p>两条实践建议。其一，模型基方法的效果上限由模型在策略会访问到的区域的精度决定，
+      而不是全局平均误差。按策略访问分布去看模型，别只看整体 MSE（mean squared error，均方误差）。
+      其二，先用短规划（小的 <var>n</var>）跑通，确认没有系统性偏差再加长。</p>
+    <div class="note">
+      <p>容易想反的一点："模型基一定比无模型更省样本"。
+        省的是真实交互，不是总计算量；规划消耗的是 CPU 与时间。
+        当真实交互便宜而算力紧张时（比如有便宜的仿真器），模型基反而不划算。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>MCTS：把算力压在最有希望的分支上</h2>
+    <p>当环境模型是规则或仿真器（棋类、调度、组合优化），
+      就能在决策时做前瞻搜索。蒙特卡洛树搜索（MCTS，
+      Monte Carlo tree search）      意思是在你真正走这一步之前，先在脑子里把以后很多种走法各试很多遍，
+      看哪一步试下来的结果普遍更好，然后只走那一步。蒙特卡洛在这里指
+      "把一整局走完，用真实拿到的总分来估计价值"。它反复执行四步：</p>
+    <ul>
+      <li><em>选择（selection）</em>：从根开始，用 UCT 规则一层层往下走，直到遇到还有未扩展子节点的节点。</li>
+      <li><em>扩展（expansion）</em>：在这个节点上新建一个子节点，代表一个还没试过的动作。</li>
+      <li><em>模拟（simulation）</em>：从新节点出发，用快速策略（随手走）跑到终局，
+        得到一个回报（从此刻起一直到这局结束，把每一步奖励加起来得到的总分）。</li>
+      <li><em>回传（backpropagation）</em>：把回报沿路径反向传回，更新沿途节点的访问次数与平均价值。</li>
+    </ul>
+    <p>第三步提到的回报，就是从此刻起一直到这局结束、把每一步奖励加起来得到的总分。
+      衡量一个局面好不好，看的是这个总分，不是眼前这一步拿了多少分。</p>
+    <p>选择那一步用的 <span class="term">UCT（upper confidence bound applied to trees，树上的置信上界）</span> 就是把
+      <a href="A02-bandits.html">0002 课的 UCB</a>（upper confidence bound，置信上界）搬到树上：</p>
+    <div class="eq">
+      <span class="eq-body"><var>a</var>* = arg max<sub><var>a</var></sub> [ <var>Q</var>(<var>s</var>,<var>a</var>) + <var>c</var> √( ln <var>N</var>(<var>s</var>) / <var>N</var>(<var>s</var>,<var>a</var>) ) ]</span>
+      <span class="eq-num">(24.2)</span>
+    </div>
+    <p>第一项是利用（估值好的分支多走），第二项是探索
+      （访问少的分支优先）。子节点都没被访问过时那项按无穷大处理，
+      于是每个动作至少被试一次，这就是 MCTS 不需要额外探索策略的原因。</p>
+  </section>
+
+  <section>
+    <h2>AlphaZero：把网络塞进 MCTS</h2>
+    <p>纯 MCTS 的弱点很实际：随机模拟的回报噪声大，每次决策还要跑到终局。
+      <span class="term">AlphaZero</span> 用两个网络替换掉这两部分：</p>
+    <ul>
+      <li>价值网络 <span class="math">v<sub>θ</sub>(s)</span>（θ 是网络参数）直接给出局面评估，取代随机模拟到终局；</li>
+      <li>策略网络 <span class="math">p<sub>θ</sub>(a|s)</span> 给出先验概率，进入 UCT 的探索项，让搜索一开始就往像样的着法集中；</li>
+      <li>搜索结束后，<em>访问次数的分布</em>被当作策略网络的学习目标，胜负当作价值网络的目标；数据全部来自自对弈，所以不需要人类棋谱。</li>
+    </ul>
+        <p>顺带认识两个词：出招的那张策略网络叫 actor（出招的那一方，负责决定动作，
+      也叫"策略网络"），打分的那张价值网络叫 critic（打分的那一方，负责估计局面值多少分，
+      也叫"价值网络"）。一边出招、一边打分，再用分去改出招习惯，这套搭法叫 actor-critic。</p>
+    <p>这套循环有效的原因可以一句话概括：网络让搜索变强，搜索又给网络提供比它自己更好的目标。
+      代价是搜索与训练互相纠缠，出问题时很难判断是哪一边坏了。</p>
+  </section>
+
+  
+
+  <section>
+    <h2>什么时候值得上模型</h2>
+    <table>
+      <thead><tr><th>你的处境</th><th>建议</th></tr></thead>
+      <tbody>
+        <tr><td>有可靠仿真器 / 规则，回合制、分支可控</td><td>规划优先：MCTS（配网络则更强）</td></tr>
+        <tr><td>真实交互极贵，状态动作不大</td><td>Dyna 式：学一个一步模型，用短规划回放</td></tr>
+        <tr><td>真实交互便宜、算力紧张</td><td>先用无模型方法，别为省样本付出更多算力</td></tr>
+        <tr><td>模型只在部分区域准</td><td>先量化"策略访问区域内的模型误差"，再决定要不要扩大规划</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 区分"模型基"与"无模型"方法，最本质的判据是什么？</p>
+      <ol class="mcq-options">
+        <li>是否使用了神经网络来拟合价值函数或策略函数那部分参数</li>
+        <li>用于更新的样本是全部来自真实交互，还是有一部分来自模型</li>
+        <li>是否需要一个已知的转移概率表，从而完全不需要与环境交互</li>
+        <li>是否在每次决策时都执行搜索，而不是让策略网络直接输出动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：判据是样本来源。模型基方法会从模型（学到的或已知的）
+          生成"想象"样本参与更新；无模型方法的每一个更新样本都来自真实交互。
+          这也直接决定了两者在"交互贵不贵"这个维度上的取舍。</p>
+        <p>A 无关：DQN 是纯粹的模型无关方法，却也用神经网络，
+          用不用网络和建不建模型是两件事。C 把"有模型"和"不用交互"混为一谈：
+          学到的模型本身要靠交互数据训练，而且几乎所有实用方法仍需真实数据校正。
+          D 描述的是规划式决策，是模型基常见的<em>用法</em>，不是定义。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. Dyna 用一个学到的模型做规划，最主要的风险是什么？</p>
+      <ol class="mcq-options">
+        <li>规划次数越多，真实环境的交互次数会随之增加，总成本上升</li>
+        <li>模型只能记住已经访问过的转移，于是策略无法尝试全新的动作</li>
+        <li>模型误差会在反复规划中被不断复用，策略在想象里越走越偏</li>
+        <li>它需要额外训练一个策略网络，参数变多之后更容易过拟合数据</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：规划用的 <span class="math">(r̂, ŝ′)</span> 是模型的预测。
+          一旦某处预测有系统偏差，价值更新就会把偏差固化；策略随后更频繁地访问那块区域，
+          数据、模型、价值三者互相强化，最终学到一个"在想象里最优"的策略。</p>
+        <p>A 说反了：规划的作用是减少真实交互，代价是算力。
+          B 混淆了"模型只能预测见过的转移"与"智能体不能选没做过的动作"：
+          探索动作仍然由 ε-greedy（ε 是探索率）之类的机制决定。D 描述的是 actor-critic 的结构，
+          Dyna-Q 在表格型设定下连神经网络都不需要。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. MCTS 的四个步骤里，"回传"这一步在做什么？</p>
+      <ol class="mcq-options">
+        <li>把模拟得到的回报沿路径反向传播，更新沿途节点的统计量</li>
+        <li>把根节点选出的动作发回给环境执行，并接收下一状态与奖励</li>
+        <li>把当前节点的价值估计向上取最大，替换父节点原有的估值数据</li>
+        <li>把搜索树里访问次数最少的那些分支剪掉，以节省内存与时间</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：回传就是把新拿到的回报带回所有祖先节点：
+          每个节点的访问次数 <span class="math">N</span> 加一，平均价值 <span class="math">Q</span>
+          向这个回报方向小幅移动。这样下一次选择时，UCT 用的统计量才是最新的。</p>
+        <p>B 混淆了"回传（backpropagation）"与"把动作施加到环境（step）"。
+          C 说成取最大值，而 MCTS 用的是访问平均值，不是最大。
+          D 描述的是剪枝，MCTS 靠的是把算力集中在访问次数多的分支上，
+          而不是显式删掉其他分支。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. UCT 里的探索项 c√(ln N(s) / N(s,a)) 起什么作用？</p>
+      <ol class="mcq-options">
+        <li>它把所有的动作价值归一化到同一量纲，避免不同分支量级不一致</li>
+        <li>它随子节点访问次数增加而衰减，让少被访问的分支优先被尝试</li>
+        <li>它和先验概率相乘，使搜索过程完全依赖策略网络给出的偏好</li>
+        <li>它保证每次决策一定选到全局最优的那条分支，与访问次数无关</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：分母是子节点的访问次数，访问越多这一项越小；
+          分子是父节点访问次数的对数，父节点被访问越多，所有子节点的不确定性一起变大。
+          两者合起来就是 UCB 的形状：把预算分给"还没试够"的分支。</p>
+        <p>A 弄错了作用：它是用来平衡探索与利用的加项，不做归一化。
+          C 描述的是 AlphaZero 在 UCT 上再乘策略网络先验的变体（式 A.31），
+          纯 MCTS 里没有这一项。D 是过强的承诺：UCT 是启发式，不保证选到最优分支。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. AlphaZero 不需要人类棋谱，根本原因是什么？</p>
+      <ol class="mcq-options">
+        <li>它直接求解棋类规则对应的最优价值函数，因此不必再学习策略</li>
+        <li>它的价值网络在初始化时就通过规则推导出局面评估，无需训练数据</li>
+        <li>它的 MCTS 搜索足够强，只靠搜索就能达到超越人类的棋力水平</li>
+        <li>它的监督信号来自自对弈的胜负与搜索访问分布，不依赖人类标注</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：AlphaZero 的学习目标是自产的：胜负给价值网络当标签，
+          搜索得到的访问次数分布给策略网络当标签。数据由"当前的自己"生成，
+          所以人类棋谱这类外部标注就不是必需品。</p>
+        <p>A 把"求解"和"搜索"混了：它不解析求解棋类的最优价值，只用自举与自对弈逼近。
+          B 不成立：随机初始化的价值网络给不出有意义的评估，它的精度靠训练逐步提升。
+          C 夸大了搜索：论文里的棋力来自搜索与网络的组合，把网络换掉、只留随机模拟的
+          纯 MCTS 会明显弱得多。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0024-code-1">
+      <h3>代码题 1 · 写 UCB1 分数与 UCT 选择（numpy）</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这是 MCTS 选择阶段的两步。树里每个节点记着平均回报 Q 与访问次数 N，UCB1 把 Q 和一项随访问次数衰减的探索奖励加起来，UCT 挑分数最高的子节点继续往下走，搜索循环每下探一层就调用一次。输入是父节点与子节点的统计量，输出是分数数组和选中的下标。</p>
+        <p>请实现 <code>ucb1_scores(q_values, child_counts, parent_count, c)</code> 与 <code>uct_select(q_values, child_counts, parent_count, c)</code>，分数按式 (24.2) 算：</p>
+<div class="eq">
+          <span class="eq-body">score<sub><var>a</var></sub> = <var>Q</var><sub><var>a</var></sub> + <var>c</var> √( ln <var>N</var><sub>parent</sub> / <var>N</var><sub><var>a</var></sub> )，<var>N</var><sub><var>a</var></sub> = 0 时取 <code>inf</code></span>
+        </div>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>q_values</code>：形状 <code>(n_children,)</code> 的浮点数组，各子节点已观测的平均回报 <var>Q</var><sub>a</sub>。</li>
+          <li><code>child_counts</code>：形状相同的浮点数组，各子节点的访问次数 <var>N</var><sub>a</sub>。</li>
+          <li><code>parent_count</code>：父节点的访问总次数 <var>N</var>(s)，传进来的是原始次数而不是对数。</li>
+          <li><code>c</code>：Python <code>float</code>，探索常数。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>ucb1_scores</code> 返回形状与 <code>q_values</code> 相同的浮点数组；计数为 0 的未访问子节点必须是 <code>np.inf</code>。</li>
+          <li><code>uct_select</code> 返回一个 Python <code>int</code> 下标，即分数最高子节点的位置，并列时（包括多个未访问）取最小下标。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试检查形状、未访问项为 <code>inf</code>、<code>c = 0</code> 时退化成按 Q 贪心（按现有估计挑看起来最好的那个），以及 Q 略低但访问次数远少的子节点会被探索项顶到前面。不要原地改写入参，只用标准库和 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先做一份副本 <code>score = np.array(q_values, dtype=float)</code>，别原地改调用者的数组。</li>
+          <li>未访问的位置用布尔掩码挑出来：<code>score[counts == 0] = np.inf</code>，
+            只对访问过的算根号项，避免除零。</li>
+          <li><code>np.argmax</code> 遇到并列返回第一个下标，正好是你要的"最小下标"。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def ucb1_scores(q_values, child_counts, parent_count, c):
+    # TODO: Q + c * sqrt(ln(parent_count) / n)，未访问的子节点取 inf
+    return np.asarray(q_values, dtype=float)
+
+
+def uct_select(q_values, child_counts, parent_count, c):
+    # TODO: 返回分数最高的子节点下标（并列取最小下标）
+    return 0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+q = np.array([0.6, 0.7, 0.2])
+n = np.array([10, 10, 0])
+s = np.asarray(ucb1_scores(q, n, 20, 1.0), dtype=float)
+tail = np.sqrt(np.log(20.0) / 10.0)
+check(s.shape == (3,), f"应返回形状 (3,)，实际 {s.shape}")
+check(abs(s[0] - (0.6 + tail)) < 1e-12,
+      f"访问 10 次时探索项应为 sqrt(ln20/10)={tail:.4f}，实际 {s[0]:.4f}")
+check(abs(s[1] - (0.7 + tail)) < 1e-12,
+      f"第二项应为 0.7 + {tail:.4f} = {0.7 + tail:.4f}，实际 {s[1]:.4f}")
+check(np.isinf(s[2]), f"未被访问的子节点分数必须是 inf，实际 {s[2]}")
+
+q2 = np.array([5.0, 0.1])
+n2 = np.array([0, 0])
+s2 = np.asarray(ucb1_scores(q2, n2, 1, 1.0), dtype=float)
+check(np.all(np.isinf(s2)), f"两个子节点都没访问过时应全为 inf，实际 {s2}")
+check(uct_select(q2, n2, 1, 1.0) == 0, "并列的 inf 应返回最小下标 0")
+
+q3 = np.array([0.6, 0.7])
+n3 = np.array([10, 10])
+check(uct_select(q3, n3, 20, 1.0) == 1,
+      "访问次数相同、探索项相同，应选 Q 更大的下标 1")
+check(uct_select(q3, n3, 20, 0.0) == 1,
+      "c=0 时退化为纯贪心，也应选 Q 更大的下标 1")
+
+q4 = np.array([1.0, 0.0])
+n4 = np.array([50, 1])
+check(uct_select(q4, n4, 51, 2.0) == 1,
+      f"Q 差 1.0 但访问次数差 50 倍，探索项应把下标 1 顶上来，实际选了 {uct_select(q4, n4, 51, 2.0)}")
+check(uct_select(q4, n4, 51, 0.0) == 0,
+      "c=0 时探索项消失，应回到 Q 更大的下标 0")
+
+q5 = np.array([0.0, 0.0, 0.0])
+n5 = np.array([3, 3, 0])
+check(uct_select(q5, n5, 6, 1.0) == 2,
+      "只要有未访问的子节点，就必须先去访问它")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def ucb1_scores(q_values, child_counts, parent_count, c):
+    q = np.asarray(q_values, dtype=float)
+    counts = np.asarray(child_counts, dtype=float)
+    score = q.copy()
+    visited = counts > 0
+    bonus = np.zeros_like(score)
+    bonus[visited] = np.sqrt(np.log(float(parent_count)) / counts[visited])
+    score = score + c * bonus
+    score[~visited] = np.inf
+    return score
+
+
+def uct_select(q_values, child_counts, parent_count, c):
+    score = ucb1_scores(q_values, child_counts, parent_count, c)
+    return int(np.argmax(score))
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0024-code-2">
+      <h3>代码题 2 · 写 MCTS 回传与一步规划</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这是 MCTS 一次模拟的后半段加一步规划。选择到叶子后，回传把回报摊到路径上的每个节点；一步规划用已知模型做贝尔曼备份；策略从 Q 表抽贪心动作。输入是节点统计量或模型参数，输出是更新后的统计量与动作下标。</p>
+        <p>请实现 <code>backpropagate(counts, values, parents, leaf, reward)</code>、<code>plan_one_step(rewards, transitions, values, gamma)</code> 与 <code>greedy_policy(q_values)</code>。</p>
+        <p>① 回传从叶子 <code>leaf</code> 沿父指针走到根（<code>parents[r] &lt; 0</code>），用加一后的计数更新路径上每个节点 <var>t</var>：</p>
+<div class="eq">
+          <span class="eq-body"><var>N</var><sub><var>t</var></sub> ← <var>N</var><sub><var>t</var></sub> + 1,&nbsp;&nbsp;<var>Q</var><sub><var>t</var></sub> ← <var>Q</var><sub><var>t</var></sub> + ( <var>reward</var> − <var>Q</var><sub><var>t</var></sub> ) / <var>N</var><sub><var>t</var></sub></span>
+        </div>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>backpropagate</code> 的 <code>counts</code>、<code>values</code>：长度 <code>n_nodes</code> 的浮点数组，存访问次数 <var>N</var> 与平均回报 <var>Q</var>；<code>parents</code> 等长整数数组，负值表示根；<code>leaf</code> 起始下标；<code>reward</code> 回报标量。</li>
+          <li><code>plan_one_step</code> 的 <code>rewards</code>：形状 <code>(n_actions, n_states)</code> 的奖励表；<code>transitions</code> 形状 <code>(n_actions, n_states, n_states)</code>，<code>[a, s, s′]</code> 项是转移概率；<code>values</code> 形状 <code>(n_states,)</code> 的状态价值 V；<code>gamma</code> 折扣因子。</li>
+          <li><code>greedy_policy</code> 的 <code>q_values</code>：形状 <code>(n_actions, n_states)</code> 的 Q 表。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>backpropagate</code> 原地更新并返回 <code>(counts, values)</code>，即这两个数组本身；回传到根即停。</li>
+          <li><code>plan_one_step</code> 返回同形状 <code>(n_actions, n_states)</code> 的浮点数组，元素为 <span class="math">r(s,a) + γ Σ<sub>s′</sub> p(s′|s,a) V(s′)</span>；V 为负时照算，不做特判。</li>
+          <li><code>greedy_policy</code> 返回长度 <code>n_states</code> 的 <code>int64</code> 数组，每状态取 <var>Q</var> 最大的动作下标。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试检查回传路径上的计数与均值（回传到根即停、均值用加一后的计数）、一步备份数值（含 V 为负）与策略 dtype。只用标准库和 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>回传的循环结构：<code>t = leaf</code>，处理完 <code>t = parents[t]</code>，直到 <code>t &lt; 0</code>。</li>
+          <li>均值更新要先把 <code>counts[t]</code> 加一，再用新的计数做除法。</li>
+          <li>备份就是一次矩阵乘法：<code>r + gamma * transitions @ values</code>，
+            其中 <code>transitions</code> 形状为 <code>(n_actions, n_states, n_states)</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def backpropagate(counts, values, parents, leaf, reward):
+    # TODO: 沿父指针回到根，更新路径上每个节点的访问次数与平均回报
+    return counts, values
+
+
+def plan_one_step(rewards, transitions, values, gamma):
+    # TODO: Q(s,a) = r(s,a) + gamma * sum_s' p(s'|s,a) * V(s')
+    return np.asarray(rewards, dtype=float)
+
+
+def greedy_policy(q_values):
+    # TODO: 每个状态取 Q 最大的动作下标
+    return np.zeros(np.asarray(q_values).shape[1], dtype=np.int64)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+counts = np.zeros(4, dtype=float)
+values = np.zeros(4, dtype=float)
+parents = np.array([-1, 0, 1, 1])
+
+backpropagate(counts, values, parents, 2, 1.0)
+check(np.array_equal(counts, [1, 1, 1, 0]),
+      f"叶子到根的路径是 2→1→0，计数应为 [1,1,1,0]，实际 {counts}")
+check(np.allclose(values, [1.0, 1.0, 1.0, 0.0]),
+      f"第一次回传后路径上的均值都应是 1.0，实际 {values}")
+
+backpropagate(counts, values, parents, 3, 3.0)
+check(np.array_equal(counts, [2, 2, 1, 1]),
+      f"路径 3→1→0，计数应为 [2,2,1,1]，实际 {counts}")
+check(abs(values[0] - 2.0) < 1e-12,
+      f"节点 0 收到 1.0 与 3.0 两次，均值应为 2.0，实际 {values[0]:.4f}")
+check(abs(values[1] - 2.0) < 1e-12,
+      f"节点 1 同样收到两次，均值应为 2.0，实际 {values[1]:.4f}")
+check(abs(values[2] - 1.0) < 1e-12,
+      f"节点 2 只被访问一次，均值应保持 1.0，实际 {values[2]:.4f}")
+check(abs(values[3] - 3.0) < 1e-12,
+      f"节点 3 只被访问一次，均值应等于 3.0，实际 {values[3]:.4f}")
+
+backpropagate(counts, values, parents, 0, 8.0)
+check(abs(values[0] - 4.0) < 1e-12,
+      f"节点 0 第三次收到 8.0，均值应为 (1+3+8)/3 = 4.0，实际 {values[0]:.4f}")
+check(abs(values[1] - 2.0) < 1e-12,
+      f"回传到根就停止，节点 1 不应被这次模拟影响，实际 {values[1]:.4f}")
+
+r = np.array([[0.0, 1.0], [2.0, -1.0]])
+p = np.array([
+    [[0.0, 1.0], [0.5, 0.5]],
+    [[1.0, 0.0], [0.0, 1.0]],
+])
+v = np.array([0.0, 10.0])
+q = np.asarray(plan_one_step(r, p, v, 0.9), dtype=float)
+check(q.shape == (2, 2), f"返回形状应为 (2,2)，实际 {q.shape}")
+check(np.allclose(q, [[9.0, 5.5], [2.0, 8.0]], atol=1e-12),
+      f"一步备份应为 [[9.0,5.5],[2.0,8.0]]，实际 {q}")
+
+pol = greedy_policy(q)
+check(pol.dtype == np.int64, f"策略下标应为 int64，实际 {pol.dtype}")
+check(np.array_equal(pol, [0, 1]), f"每个状态应取 Q 最大的动作，实际 {pol}")
+
+r_neg = np.array([[0.0], [0.0]])
+v_neg = np.array([-5.0])
+q_neg = np.asarray(plan_one_step(r_neg, np.ones((2, 1, 1)), v_neg, 1.0), dtype=float)
+check(np.allclose(q_neg, -5.0),
+      f"V 为负时备份结果也应为负：0 + 1*(-5) = -5，实际 {q_neg}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def backpropagate(counts, values, parents, leaf, reward):
+    t = int(leaf)
+    while t >= 0:
+        counts[t] = counts[t] + 1.0
+        values[t] = values[t] + (float(reward) - values[t]) / counts[t]
+        t = int(parents[t])
+    return counts, values
+
+
+def plan_one_step(rewards, transitions, values, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    transitions = np.asarray(transitions, dtype=float)
+    values = np.asarray(values, dtype=float)
+    return rewards + gamma * np.einsum('ast,t->as', transitions, values)
+
+
+def greedy_policy(q_values):
+    q = np.asarray(q_values, dtype=float)
+    return np.argmax(q, axis=0).astype(np.int64)
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Dyna 架构与"规划 = 用模型做备份"的完整推导，见 Sutton &amp; Barto,
+        <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 第 8 章（含 Dyna-Q 伪代码），
+        MCTS 与 AlphaGo 的案例见第 16 章。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>原始论文：Silver et al., <em>Mastering the game of Go with deep neural networks and
+        tree search</em>（AlphaGo, Nature 2016），
+        <a class="cite" href="https://arxiv.org/abs/1601.06158">arXiv 1601.06158</a>
+        给出 UCT 与策略/价值网络结合的全部细节，是理解"搜索 + 网络"分工的起点。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师 —— 它是你的私教。比如可以问：
+      "把我现在的排产问题写成 Dyna 的一步模型与规划循环，用 numpy 给出骨架。"
+      或者 "我的 MCTS 每次决策要几万次模拟，帮我把 UCB1 与回传改成更能压预算的版本。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

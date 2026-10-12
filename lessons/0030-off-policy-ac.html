@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0030 · Off-policy Actor-Critic — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0030" data-slug="off-policy-ac" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法</p>
+    <h1>Off-policy Actor-Critic 与重要性采样</h1>
+    <p class="lede">上一课的 A2C（Advantage Actor-Critic，用"比平均好多少"当权重的 Actor-Critic）
+      有个浪费的地方：数据用完就得扔。这一课解决它。
+      办法是让"负责探索的策略（看到什么状态就选什么动作的规则）"和"想学好的策略"分开，
+      再用一个比值把两边的期望对齐。这个比值叫重要性采样权重，
+      它能把旧数据救回来，但也会带来新麻烦：方差可能爆炸。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>写出重要性采样的恒等式，并说明它为什么能把期望从一套分布搬到另一套</li>
+        <li>说明重要性采样比值的方差在什么情况下会失控</li>
+        <li>写出 off-policy 策略梯度定理，并说清行为策略与目标策略的分工</li>
+        <li>实现 off-policy Actor-Critic 的两条更新式</li>
+        <li>说清裁剪与折扣这两个缓解手段分别在治什么病</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. On-policy 的限制</h2>
+    <p>上一课末尾提到，A2C 是 on-policy（只用自己的数据学，学完这批就不能再用）的：
+      它的梯度期望是对<em>当前策略</em>取的。
+      这意味着每一批数据只能用一次，用完就过期了，因为策略已经变了。</p>
+    <p>这个代价很大。如果环境的交互很贵（真机实验、临床试验、昂贵的仿真），
+      我们希望能把数据反复利用。要做到这一点，就得允许"产生数据的策略"和"我们想评估的策略"不是同一个。</p>
+    <div class="def">
+      <span class="label">定义 1.1（行为策略与目标策略）</span>
+      <p><em>行为策略</em>（behavior policy）记作 $\beta(a|s)$，它是实际与环境交互、
+        负责产生数据的策略，通常带较强的探索（比如 $\varepsilon$-greedy）。
+        <em>目标策略</em>（target policy）记作 $\pi(a|s,\theta)$，它是我们真正想学好的那个。
+        两者不同时，这样的方法叫 off-policy（可以拿别人或自己以前的数据来学）。
+        后面还会反复用到两个英文词：actor（演员，负责做决定的那一方）与
+        critic（评论家，负责打分的那一方）。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="on-policy 只有一个策略，off-policy 分开行为策略与目标策略">
+        <text x="26" y="20" class="lbl">on-policy：一套策略同时负责探索与学习</text>
+        <rect x="60" y="34" width="150" height="46" rx="4" class="box"/>
+        <text x="96" y="62" class="val">策略 π</text>
+        <rect x="300" y="34" width="150" height="46" rx="4" class="box"/>
+        <text x="336" y="62" class="val">环境</text>
+        <path d="M214 50 H296" class="arrow-a"/>
+        <path d="M289 45 l9 5 l-9 5" class="arrow-a"/>
+        <path d="M296 68 H214" class="arrow-a"/>
+        <path d="M221 63 l-9 5 l9 5" class="arrow-a"/>
+        <text x="222" y="98" class="lbl">动作要同时满足"探索"与"学好"，互相牵制</text>
+        <line x1="26" y1="116" x2="514" y2="116" class="grid"/>
+        <text x="26" y="140" class="lbl">off-policy：两套策略各管一件事</text>
+        <rect x="40" y="154" width="140" height="44" rx="4" class="box-a"/>
+        <text x="60" y="176" class="val">行为策略 β</text>
+        <text x="52" y="192" class="lbl">只管大胆探索</text>
+        <rect x="330" y="154" width="140" height="44" rx="4" class="box"/>
+        <text x="352" y="176" class="val">目标策略 π</text>
+        <text x="342" y="192" class="lbl">只管学好，可以很贪</text>
+        <path d="M184 176 H326" class="arrow-a"/>
+        <path d="M319 171 l9 5 l-9 5" class="arrow-a"/>
+        <text x="196" y="166" class="lbl">数据经比值修正后交给 π 学习</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 30.1</span>
+        on-policy 里一套策略要同时承担探索与学习，两件事互相牵制；
+        off-policy 把它们拆开：行为策略专注探索，目标策略专注学好。
+        代价是数据必须经过一个比值修正才能为目标策略所用。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 重要性采样</h2>
+    <p>问题可以精确地表述成：我想算 $f(X)$ 在分布 $p$ 下的期望，
+      但手上只有从分布 $q$ 采来的样本。能不能换算？能，只要 $q$ 在 $p$ 不为零的地方也不为零。</p>
+    <div class="thm">
+      <span class="label">定理 2.1（重要性采样恒等式）</span>
+      <p>设 $p,q$ 是两个概率分布，且 $q(x)>0$ 时必有 $p(x)>0$。则对任意可积函数 $f$，
+        $$\E_{X\sim p}\big[f(X)\big]=\E_{X\sim q}\Big[\frac{p(X)}{q(X)}f(X)\Big].$$
+        比值 $\frac{p(x)}{q(x)}$ 叫<em>重要性采样权重</em>（importance sampling weight）。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（离散情形）</span>
+      <p>右边按定义展开：
+        $$\E_{X\sim q}\Big[\frac{p(X)}{q(X)}f(X)\Big]=\sum_x q(x)\cdot\frac{p(x)}{q(x)}\cdot f(x).$$
+        当 $q(x)>0$ 时可以直接约掉 $q(x)$；当 $q(x)=0$ 时该样本不会被采到，
+        按前提此时 $p(x)=0$，这一项在左边的求和里也是零。于是
+        $$=\sum_x p(x)f(x)=\E_{X\sim p}\big[f(X)\big].$$</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.2（这只是期望的搬运，不是分布的搬运）</span>
+      <p>定理说的是"期望相等"，并没有说两个分布变成一样了。
+        这个区别在下一节会变成实际麻烦：期望对了，但方差可能完全失控。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 2.3（一个能心算的例子）</span>
+      <p>设 $p=(0.5,0.5)$、$q=(0.9,0.1)$，$f(x)=(1,10)$。
+        在 $p$ 下：$\E_p[f]=0.5\times1+0.5\times10=5.5$。
+        用 $q$ 的样本算：权重是 $(0.5/0.9,\ 0.5/0.1)=(0.556,\ 5)$，
+        所以 $\E_q[\text{权重}\cdot f]=(0.9)(0.556)(1)+(0.1)(5)(10)=0.5+5=5.5$，两者一致。</p>
+      <p>但注意那个权重 5：第二个样本一旦被采到，它对估计的贡献是第一项的五倍。
+        而它被采到的概率只有 0.1。这种"小概率、大权重"的组合，正是方差问题的来源。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 方差的麻烦</h2>
+    <p>定理 2.1 只保证期望。要谈方差，得看二阶矩：</p>
+    <div class="eq">
+      <span class="eq-body">$$\E_{X\sim q}\Big[\Big(\frac{p(X)}{q(X)}\Big)^2\Big]=\sum_x\frac{p(x)^2}{q(x)}.$$</span>
+      <span class="eq-num">(30.1)</span>
+    </div>
+    <p>这个求和对 $q$ 很敏感。若某个 $x$ 在 $p$ 下概率不小（$p(x)$ 明显大于零）而在 $q$ 下几乎不出现
+      （$q(x)\to0$），那么 $\frac{p(x)^2}{q(x)}\to\infty$，二阶矩发散，方差也就发散了。</p>
+    <div class="thm">
+      <span class="label">命题 3.1（方差有限的条件）</span>
+      <p>当 $f$ 有界时，$\E_q\big[(\frac{p}{q}f)^2\big]$ 有限的一个充分条件是：
+        存在常数 $M$，使得对一切 $x$ 都有 $\frac{p(x)}{q(x)}\le M$。
+        若 $q$ 在 $p$ 的支撑集上取下界 $c>0$，这个条件就成立。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>设 $|f(x)|\le F$。则
+        $$\E_q\Big[\Big(\frac{p}{q}f\Big)^2\Big]=\sum_x q(x)\frac{p(x)^2}{q(x)^2}f(x)^2
+        =\sum_x\frac{p(x)^2}{q(x)}f(x)^2\le F^2M\sum_x p(x)=F^2M,$$
+        其中第一个不等号用了 $\frac{p(x)}{q(x)}\le M$（于是 $\frac{p(x)^2}{q(x)}=\frac{p(x)}{q(x)}p(x)\le Mp(x)$）
+        与 $f^2\le F^2$，最后用 $\sum_x p(x)=1$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 235" role="img" aria-label="两套分布错开时权重忽大忽小，方差失控">
+        <text x="26" y="20" class="lbl">情形一：两套分布接近，权重都在 1 附近</text>
+        <line x1="60" y1="86" x2="250" y2="86" class="axis-b"/>
+        <path d="M70 84 C110 84 120 36 155 36 C190 36 200 84 240 84" class="curve"/>
+        <path d="M70 84 C112 84 124 40 155 40 C186 40 198 84 240 84" class="curve2"/>
+        <text x="60" y="104" class="lbl">实线 p ／ 虚线 q，几乎重合 → 权重≈1，稳</text>
+        <line x1="290" y1="30" x2="290" y2="104" class="grid"/>
+        <text x="306" y="20" class="lbl">情形二：两套分布错开</text>
+        <line x1="310" y1="86" x2="510" y2="86" class="axis-b"/>
+        <path d="M320 84 C356 84 362 34 392 34 C422 34 430 84 470 84" class="curve"/>
+        <path d="M352 84 C400 84 416 58 448 56 C482 54 496 82 506 84" class="curve2"/>
+        <text x="310" y="104" class="lbl">p 的左尾落在 q 几乎为零处 → 权重爆掉</text>
+        <line x1="26" y1="130" x2="514" y2="130" class="grid"/>
+        <text x="26" y="156" class="lbl">同样的期望，方差可以差很多个数量级：</text>
+        <text x="26" y="184" class="val-b">权重 0.556 ／ 5 　→　偶尔抽到 5，估计值被它主导</text>
+        <text x="26" y="212" class="lbl">这就是 off-policy 方法在实践中"能用但难调"的根本原因</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 30.2</span>
+        重要性采样权重是否稳定，取决于两套分布的形状是否接近。
+        两套分布接近时权重都在 1 附近，估计很稳；一旦目标策略关心的区域被行为策略冷落，
+        那里就会冒出极大的权重，整个估计被少数样本主导。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>4. Off-policy 策略梯度定理</h2>
+    <p>把重要性采样搬到策略梯度（算出参数往哪调能让总分更高）上，得到本课的主定理。</p>
+    <div class="thm">
+      <span class="label">定理 4.1（off-policy 策略梯度定理）</span>
+      <p>设行为策略 $\beta$ 产生的数据，且 $\beta(a|s)>0$ 时必有 $\pi(a|s,\theta)>0$。则
+        $$\nabla J(\theta)=\E_{\substack{S\sim d_\beta\\ A\sim\beta}}
+        \Big[\frac{\pi(A|S,\theta)}{\beta(A|S)}\,\nabla\log\pi(A|S,\theta)\,q_\pi(S,A)\Big],$$
+        其中 $d_\beta$ 是行为策略下的折扣状态访问分布。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（思路）</span>
+      <p>从上一课的 on-policy 形式 $\nabla J=\E_{S\sim d_\pi,\,A\sim\pi}
+        [\nabla\log\pi(A|S,\theta)q_\pi(S,A)]$ 出发，要把"按 $\pi$ 抽动作"换成"按 $\beta$ 抽动作"。
+        对固定的 $s$，把对 $A$ 的期望写成求和并乘除同一个 $\beta$：
+        $$\sum_a\pi(a|s)\nabla\log\pi(a|s)q_\pi(s,a)
+        =\sum_a\beta(a|s)\cdot\frac{\pi(a|s)}{\beta(a|s)}\cdot\nabla\log\pi(a|s)q_\pi(s,a),$$
+        这正是定理 2.1 的搬运，比值就是重要性采样权重。
+        外层对状态的期望同理从 $d_\pi$ 换成 $d_\beta$（这一步要额外假设两个状态分布覆盖关系良好，
+        严格处理见原书 10.3.2 节）。合并即得结论。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.2（比值乘在哪儿很关键）</span>
+      <p>注意比值 $\frac{\pi}{\beta}$ 只乘在动作那一层，它修正的是"这个动作被采到的概率不对"。
+        如果把比值直接乘在整条轨迹的回报（从某一步往后拿到的奖励加起来）上，就会变成"连乘"：
+        一条长度 $T$ 的轨迹要乘 $T$ 个比值，方差会随 $T$ 指数级恶化。
+        这正是逐动作修正（本定理）优于逐轨迹修正的原因。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 215" role="img" aria-label="逐动作比值与逐轨迹连乘比值的方差差别">
+        <text x="26" y="20" class="lbl">逐轨迹连乘：比值越乘越多，方差随长度指数恶化</text>
+        <rect x="40" y="36" width="52" height="34" rx="4" class="box"/>
+        <text x="46" y="58" class="lbl">ρ₁</text>
+        <text x="98" y="58" class="val">×</text>
+        <rect x="114" y="36" width="52" height="34" rx="4" class="box"/>
+        <text x="120" y="58" class="lbl">ρ₂</text>
+        <text x="172" y="58" class="val">×</text>
+        <rect x="188" y="36" width="52" height="34" rx="4" class="box"/>
+        <text x="194" y="58" class="lbl">ρ₃</text>
+        <text x="248" y="58" class="val">× ⋯ ×</text>
+        <rect x="316" y="36" width="52" height="34" rx="4" class="box"/>
+        <text x="322" y="58" class="lbl">ρ_T</text>
+        <text x="386" y="58" class="lbl">→ 乘积的方差迅速放大</text>
+        <line x1="26" y1="92" x2="514" y2="92" class="grid"/>
+        <text x="26" y="118" class="lbl">逐动作修正：每一步只用当前那一个比值</text>
+        <rect x="40" y="134" width="52" height="34" rx="4" class="box-a"/>
+        <text x="46" y="156" class="lbl">ρₜ</text>
+        <text x="104" y="156" class="lbl">只修正"这一步为什么选了这个动作"，不累积</text>
+        <text x="26" y="196" class="lbl">同样的数据，后者可用的步数长得多</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 30.3</span>
+        重要性采样的比值放在哪个层级，决定了方差的增长速度。
+        逐轨迹连乘会让方差随轨迹长度呈指数恶化，而逐动作修正只引入一个比值。
+        这就是 off-policy 策略梯度定理里比值乘在动作那一层的原因。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. 算法与两个缓解手段</h2>
+    <div class="def">
+      <span class="label">算法 5.1（Off-policy Actor-Critic）</span>
+      <p>维护 actor 参数 $\theta$ 与 critic 参数 $w$，另有一个行为策略 $\beta$（常用 $\varepsilon$-greedy 的 $\pi$）。</p>
+      <p>① 用 $\beta$ 与环境交互，把经验存进缓冲区；</p>
+      <p>② critic 更新（学 $q_\pi$ 或 $v_\pi$），目标用当前目标策略算；</p>
+      <p>③ actor 更新，权重里带上比值：
+        $$\theta\leftarrow\theta+\alpha_\theta\,\frac{\pi(a_t|s_t,\theta)}{\beta(a_t|s_t)}\,
+        \hat A_t\,\nabla_\theta\log\pi(a_t|s_t,\theta).$$</p>
+      <p>由于 $\beta$ 与 $\pi$ 常常只差一个探索项，实践中常把比值整体略去或做弱化，
+        这在工程上是可行的近似，但会引入偏差。</p>
+    </div>
+    <div class="def">
+      <span class="label">手段 5.2（裁剪比值）</span>
+      <p>给比值设上限：$\bar\rho_t=\min\big(\rho_t,\,c\big)$，$c$ 常取 1 到 10 之间。
+        它压住了极端权重，代价是引入偏差。这是"用偏差换方差稳定"的典型做法。</p>
+    </div>
+    <div class="def">
+      <span class="label">手段 5.3（给比值加折扣）</span>
+      <p>把比值改成 $\big(\frac{\pi}{\beta}\big)^{\lambda}$（$\lambda\in(0,1]$），
+        或者对历史比值做指数衰减。它让久远之前的概率偏差快速失去影响，
+        对应"越旧的数据越不可信"这一直觉。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.4（这条路通向哪里）</span>
+      <p>把上面的裁剪思路推到底，就得到近端策略优化（PPO）那一类算法：
+        它不直接乘比值，而是限制新策略不能离旧策略太远。
+        本课讲的是它的理论出处。再下一课换一个方向：把策略从随机改成确定性策略（每一步都选同一个动作），
+        得到 DPG（deterministic policy gradient，确定性策略梯度）定理。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>off-policy 把行为策略 $\beta$ 与目标策略 $\pi$ 分开，让旧数据可以复用（定义 1.1）。</li>
+      <li>重要性采样恒等式 $\E_p[f]=\E_q[\frac{p}{q}f]$ 是搬运期望的工具（定理 2.1）。</li>
+      <li>它的方差取决于 $\sum_x\frac{p(x)^2}{q(x)}$；两套分布错开时方差会发散（式 (30.1)、命题 3.1）。</li>
+      <li>off-policy 策略梯度定理把比值乘在动作那一层，而不是整条轨迹上（定理 4.1）。</li>
+      <li>裁剪比值与给比值加折扣是两个主要的缓解手段（手段 5.2、5.3）。</li>
+    </ul>
+    <p>下一课是本书的最后一课：把策略从随机改成确定性策略（每一步都选同一个动作）
+      $a=\mu(s,\theta)$，得到确定性策略梯度定理。
+      会看到它比随机策略（同一个状态按概率选不同动作）的梯度少了一层对动作的期望，
+      因此在连续控制里更省算力，但也就此失去了内建的探索。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. off-policy 方法与 on-policy 方法的核心区别是什么？</p>
+      <ol class="mcq-options">
+        <li>off-policy 不需要价值网络，只靠策略网络就能学</li>
+        <li>off-policy 只能用于离散动作，on-policy 可用于连续动作</li>
+        <li>产生数据的策略与想学好的策略可以不是同一个</li>
+        <li>off-policy 不需要与环境交互，只用别人跑好的现成数据</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：on-policy 的梯度期望是对当前策略取的，数据必须由它自己产生；
+          off-policy 把行为策略与目标策略分开，于是旧数据、别人的数据都能用。</p>
+        <p>A 错在 off-policy 通常也要 critic。B 说反了，两类方法都可用于连续动作。
+          D 错在"只用现成数据、不与环境交互"是 off-policy 的一个特例，不是它的定义。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 重要性采样恒等式成立需要什么前提？</p>
+      <ol class="mcq-options">
+        <li>两个分布必须完全相同，否则恒等式不成立</li>
+        <li>目标分布不为零的地方，行为分布也不能为零</li>
+        <li>被求期望的函数 $f$ 必须是有界的连续函数</li>
+        <li>两个分布必须都是离散分布，连续情形不适用</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：若某个 $x$ 在目标分布下有可能出现、在行为分布下却永远采不到，
+          那个位置的贡献就无法被任何样本代表。所以需要 $\beta>0$ 覆盖 $\pi$ 的支撑集。</p>
+        <p>A 错在两者可以不同，恒等式正是为了处理不同的情形。
+          C 错在可积即可，有界连续是更强且不必要的条件。
+          D 错在连续情形把求和换成积分，结论同样成立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 在例 2.3 中（$p=(0.5,0.5)$、$q=(0.9,0.1)$、$f=(1,10)$），第二个样本的权重是多少？</p>
+      <ol class="mcq-options">
+        <li>$0.1$，等于它在行为分布下的概率</li>
+        <li>$0.5$，等于它在目标分布下的概率</li>
+        <li>$0.556$，与第一个样本的权重相同</li>
+        <li>$5$，等于 $0.5/0.1$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：权重是 $\frac{p(x)}{q(x)}=\frac{0.5}{0.1}=5$。
+          这个样本被采到的概率只有 0.1，可一旦采到就按 5 倍计，于是它主导了估计。</p>
+        <p>A 把行为概率当成了权重。B 把目标概率当成了权重，漏了除以 $q$。
+          C 是第一个样本的权重（$0.5/0.9\approx0.556$）。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 式 (30.1) 中的 $\sum_x\frac{p(x)^2}{q(x)}$ 在什么情况下会发散？</p>
+      <ol class="mcq-options">
+        <li>某个 $x$ 处 $p(x)$ 不趋于零，而 $q(x)$ 趋于零</li>
+        <li>两个分布都接近均匀分布的时候，权重最稳</li>
+        <li>被求期望的那个函数 $f$ 取值都为正数时</li>
+        <li>样本量足够大时，按大数定律必然发散</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：分母趋于零而分子不趋于零，这一项就趋于无穷。
+          物理含义是"目标策略关心的区域被行为策略冷落"，那里采不到样本却需要很大权重。</p>
+        <p>B 恰恰相反，接近均匀时权重最稳。
+          C 错在式 (30.1) 里根本没有 $f$，它算的是权重的二阶矩。
+          D 错在大数定律讲的是收敛（样本越多越接近真值），与发散无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. off-policy 策略梯度定理里，比值乘在哪个层级？</p>
+      <ol class="mcq-options">
+        <li>乘在整条轨迹的回报上，即所有时刻的比值连乘</li>
+        <li>乘在动作那一层，每个时刻只用当前的一个比值</li>
+        <li>乘在学习率（每次更新时往新信息的方向挪多远）上，等价于动态调整步长</li>
+        <li>乘在"局面值多少分"的估计上，用来修正 critic 的偏差</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理 4.1 里比值只出现在对动作求期望的那一层。
+          逐轨迹连乘会让方差随轨迹长度指数恶化，这是必须避免的。</p>
+        <p>A 描述的正是要避免的那种做法。C 错在比值是概率修正，不是步长调度。
+          D 错在比值修正的是动作分布，不作用于 critic。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 给重要性采样比值设上限（裁剪）会带来什么代价？</p>
+      <ol class="mcq-options">
+        <li>会让算法退化成 on-policy，失去复用数据的能力</li>
+        <li>会让梯度的期望变成零，学习完全停滞</li>
+        <li>会让目标策略的概率不再归一化</li>
+        <li>会引入偏差，因为被压下去的那些权重本来是有信息的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：裁剪把极端权重拉回有限范围，稳住了方差，但也改变了期望值，
+          于是估计不再无偏。这是典型的"用偏差换方差"。</p>
+        <p>A 错在裁剪不改变数据可以复用这件事。B 错在梯度期望一般不为零。
+          C 错在裁剪的是权重，不是策略本身，策略概率仍然归一。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">7. 为什么"给比值加折扣"（手段 5.3）是合理的？</p>
+      <ol class="mcq-options">
+        <li>因为给未来奖励打折的那个系数在回报里也出现，两处必须一致</li>
+        <li>因为久远之前的样本数量更多，需要压低它们的总权重</li>
+        <li>因为当前目标策略与产生旧数据时的策略差得最远，旧数据的比值最不可信</li>
+        <li>因为折扣能保证重要性采样的期望不再变化</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：数据越旧，它对应的行为策略与当前目标策略的差距可能越大，
+          比值也就越不可靠。给它快速衰减的权重，等于承认"太旧的数据别太当真"。</p>
+        <p>A 错在两个折扣的作用不同，不必一致。
+          B 错在这不是数量问题而是可信度问题。
+          D 错在加折扣本身就改变了期望，不是保持不变。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 命题 3.1 证明里，把 $\frac{p(x)^2}{q(x)}$ 放缩成 $Mp(x)$ 用到了什么？</p>
+      <ol class="mcq-options">
+        <li>比值有上界 $M$，于是 $\frac{p^2}{q}\le Mp(x)$，二次项降成一次</li>
+        <li>概率之和等于 1，于是可以让整个求和化为 1</li>
+        <li>函数 $f$ 的有界性，因为恒有 $f^2\le F^2$</li>
+        <li>两个分布都是离散的，所以能够一项一项地比较</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：关键是先把 $\frac{p^2}{q}$ 重写成 $\frac{p}{q}\cdot p$，
+          再用比值上界 $M$ 控制第一因子。$f$ 的有界性在下一步才用上。</p>
+        <p>B 用得比较晚（最后把 $\sum p$ 收成 1），不是这一步。
+          C 是下一步，不是把二次项化成一次项的依据。D 与放缩无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">9. 若行为策略 $\beta$ 就是目标策略 $\pi$ 本身，off-policy 策略梯度定理会变成什么？</p>
+      <ol class="mcq-options">
+        <li>梯度的期望变成零，因为分子分母相同</li>
+        <li>比值恒为 1，定理退化成上一课的 on-policy 形式</li>
+        <li>比值恒为 0，因为两个分布相减得零</li>
+        <li>定理不再适用，因为它要求两套策略必须不同</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\beta=\pi$ 时 $\frac{\pi(a|s)}{\beta(a|s)}=1$，权重消失，
+          剩下的就是 $\E[\nabla\log\pi\cdot q_\pi]$，即上一课的 A2C 形式。</p>
+        <p>A 错在比值是 1 不是 0。C 混淆了比值与差值。
+          D 错在定理并不要求两者不同，相同只是它的一个特例。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 以下哪种做法最可能让 off-policy 训练变得不稳定？</p>
+      <ol class="mcq-options">
+        <li>把学习率调小一些，让更新更保守</li>
+        <li>用较短的回合，减少轨迹长度的累积</li>
+        <li>给 critic 更多训练轮次，让它估值更准</li>
+        <li>让目标策略迅速变得很贪，而行为策略仍均匀随机</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：目标策略越贪，它关心的动作越集中；行为策略越均匀，
+          那些被关心的动作在数据里出现的比例就越低。两套分布错开，权重随之爆掉，
+          正是命题 3.1 所说的方差失控条件。</p>
+        <p>A、C 都是在降低不稳定，B 能削弱比值沿轨迹的累积影响。
+          只有 D 会主动制造分布错位，把方差推到极端。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 10 章 10.3 节（含重要性采样 10.3.1、off-policy 策略梯度定理 10.3.2、算法描述 10.3.3）。</p>
+      <p>重要性采样在强化学习中的系统讨论，可读 Sutton &amp; Barto,
+        <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 第 5.5 与 5.7 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "用我手上的数据把那个比值算出来看看到底多大"，
+      或者 "为什么逐轨迹连乘的方差会随长度指数恶化？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

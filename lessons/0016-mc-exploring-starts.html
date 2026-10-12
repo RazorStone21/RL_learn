@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0016 · MC Exploring Starts、MC ε-Greedy 与探索-利用 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0016" data-slug="mc-exploring-starts" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">基础工具 16</p>
+    <h1>MC Exploring Starts、MC ε-Greedy 与探索-利用</h1>
+    <p class="lede">上一课的蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）方法有一个不方便的要求：每个状态动作对都要有机会当回合的起点。本课先把这条要求写成 MC（Monte Carlo，蒙特卡洛）Exploring Starts（探索起点：每个状态动作对都有机会当回合的起点），再说清它在真实系统里为什么常常做不到，最后换掉它：让策略（一套"看到什么状态就选什么动作"的规则）自己带一点随机性，以探索率（每次决策时，有多大比例的概率去做"随便试一个"）记作 ε，得到 MC ε-greedy。这条规则把探索与利用放在同一个式子里。</p>
+    <div class="objectives">
+      <h2>学完本课你会</h2>
+      <ul>
+        <li>能说清探索起点假设的内容与它在现实中的局限</li>
+        <li>能写出 ε-greedy 策略的定义，并证明每个动作的概率都不小于 ε 除以动作个数</li>
+        <li>能完整证明 ε-greedy 的策略改进定理，并说明它比贪心版本多用了哪一步</li>
+        <li>能算出 ε-greedy 下的软价值，并解释探索的代价有多大</li>
+        <li>能说清探索率取大取小各有什么后果，以及为什么实践中让它逐步减小</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 探索起点假设与它的局限</h2>
+    <p>0015 课的 MC Basic 做法是：对每个状态动作对，从它出发跑 $N$ 个回合，用回报（从现在起一直到结束，把每一步奖励加起来的总分）的平均值估计动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分），再按估计值改策略。它默认了一件事：想要哪一对的样本，就能从那一对出发。这条要求叫探索起点（每个状态动作对都有机会当回合的起点）。</p>
+    <p>放松一点看，探索起点假设只要求"有机会"，不要求每一对都从起点开始。一条回合从某个起点出发，一路上经过的每一对都贡献样本，所以只要每个状态动作对在足够多的回合里出现过，估计就能补齐。这是 0015 课讲过的样本复用。</p>
+    <p>现实里这条要求经常落空。机器人只能在充电桩附近启动，库存系统只能从今天的库存开始，推荐系统只能从用户当下的行为开始。想从任意一对出发，需要能把环境重置到任意状态并指定第一个动作，很多系统不提供这种能力。更麻烦的是"没试过的动作永远试不到"：如果策略在某个状态上从不选某个动作，那一对就永远没有样本，它的动作值永远空着，改进就可能在缺信息的状态上挑错。</p>
+    <div class="def">
+      <span class="label">算法 16.1（MC Exploring Starts）</span>
+      <p>保持 MC Basic 的框架，只把评估方式改得更省：每跑完一条回合，就把轨迹上出现过的每一对都记一个样本，并立刻更新这些对的估计与策略。起点仍然要覆盖所有状态动作对，否则估计不全。</p>
+    </div>
+    <p>比起 MC Basic，它省掉了"每一对单独跑 $N$ 个回合"的浪费，但起点覆盖这条假设还在。要真正去掉它，得让策略自己愿意尝试没试过的动作。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="探索起点要求每个状态动作对都能当起点，现实系统常常只能从固定起点启动">
+        <rect x="30" y="40" width="60" height="56" class="box"/>
+        <rect x="90" y="40" width="60" height="56" class="box"/>
+        <rect x="30" y="96" width="60" height="56" class="box"/>
+        <rect x="90" y="96" width="60" height="56" class="box-a"/>
+        <text x="48" y="74" class="val-b">s1</text>
+        <text x="108" y="74" class="val-b">s2</text>
+        <text x="48" y="130" class="val-b">s3</text>
+        <text x="108" y="130" class="val-b">s4</text>
+        <text x="48" y="30" class="lbl">起点</text>
+        <text x="176" y="58" class="lbl">理想：每一对都能当起点</text>
+        <text x="176" y="86" class="lbl">现实：只能在固定位置启动</text>
+        <text x="176" y="114" class="lbl">没试过的动作永远没有样本</text>
+        <text x="176" y="142" class="lbl">动作值缺口导致改进挑错</text>
+        <text x="30" y="186" class="lbl">出路：让策略自己带随机性，保证每个动作都有正概率被选中</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 16.1</span>
+        探索起点假设要求每一对都能当回合的起点。真实系统通常只能在固定的初始状态启动，
+        所以这条假设必须换掉，而不能只靠"多跑几局"绕过去。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. ε-greedy：把探索写进策略</h2>
+    <p>先给两个词。探索（故意试试那些现在看起来不是最好的选择）保证别的动作有机会被纠正；利用（挑现在看起来最好的那个选择）保证当前最好的动作被反复使用。只用其中一个都会出问题：只利用会锁死在早期的错误判断上，只探索等于永远在乱试。</p>
+    <p>探索率（每次决策时，有多大比例的概率去做"随便试一个"）记作 ε，它取 0 到 1 之间的数。ε-greedy 策略的做法是：以 $1-\varepsilon$ 的概率贪心（在当前估计里挑看起来最好的那个），剩下 $\varepsilon$ 的概率在所有动作上平均分配。写成公式，设 $a^*(s)$ 是动作值最大的那个动作：</p>
+    <div class="eq">
+      <span class="eq-body">$$\pi_\varepsilon(a\mid s)=\begin{cases}1-\varepsilon+\dfrac{\varepsilon}{|\mathcal A|}, & a=a^*(s)\\[4pt] \dfrac{\varepsilon}{|\mathcal A|}, & a\ne a^*(s)\end{cases}\qquad a^*(s)=\argmax_{a'}q_\pi(s,a').$$</span>
+      <span class="eq-num">(16.1)</span>
+    </div>
+    <p>式中 $|\mathcal A|$ 是动作总数，$\argmax$（挑出让后面最大的那个选择）给出动作值最大的动作。最好的那个动作拿走了两份概率：一份来自 $1-\varepsilon$ 的贪心，另一份来自平均分配里的 $\varepsilon/|\mathcal A|$，合起来是 $1-\varepsilon+\varepsilon/|\mathcal A|$。</p>
+    <div class="thm">
+      <span class="label">命题 16.2（每个动作都有正概率）</span>
+      <p>对任何状态 $s$ 与任何动作 $a$，都有</p>
+      <div class="eq">
+        <span class="eq-body">$$\pi_\varepsilon(a\mid s)\ge\frac{\varepsilon}{|\mathcal A|}>0.$$</span>
+        <span class="eq-num">(16.2)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>若 $a\ne a^*(s)$，由式 (16.1) 第二行直接得到 $\pi_\varepsilon(a\mid s)=\varepsilon/|\mathcal A|$。若 $a=a^*(s)$，则 $\pi_\varepsilon(a\mid s)=1-\varepsilon+\varepsilon/|\mathcal A|$，而 $1-\varepsilon\ge0$，所以它不小于 $\varepsilon/|\mathcal A|$。两种情形合起来给出下界；又因为 $\varepsilon>0$ 且 $|\mathcal A|$ 有限，这个下界严格大于 0。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>这条下界是整课的关键：不管当前的估计多么肯定某个动作最好，其它每个动作都还留着 $\varepsilon/|\mathcal A|$ 的概率。只要状态被反复访问，每个动作都会被无限次尝试，估计不会永远空着。把满足 $\pi(a\mid s)\ge\varepsilon/|\mathcal A|$ 的策略统称为 ε-soft 策略，ε-greedy 策略是其中最简单的一类。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="ε-greedy 策略把概率分成一份大的贪心份与几份小的探索份">
+        <line x1="60" y1="160" x2="470" y2="160" class="axis-b"/>
+        <rect x="90" y="60" width="52" height="100" class="bar-hi"/>
+        <rect x="180" y="140" width="52" height="20" class="bar"/>
+        <rect x="270" y="140" width="52" height="20" class="bar"/>
+        <rect x="360" y="140" width="52" height="20" class="bar"/>
+        <text x="98" y="180" class="lbl">最好的动作</text>
+        <text x="196" y="180" class="lbl">其它动作</text>
+        <text x="286" y="180" class="lbl">其它动作</text>
+        <text x="376" y="180" class="lbl">其它动作</text>
+        <text x="86" y="50" class="val-b">1 − ε + ε ÷ |A|</text>
+        <text x="186" y="130" class="val">ε ÷ |A|</text>
+        <text x="60" y="212" class="lbl">纵轴是选中概率；所有柱子加起来等于 1</text>
+        <text x="60" y="26" class="lbl">当 ε = 0 时只剩最高柱；当 ε = 1 时所有柱一样高</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 16.2</span>
+        ε-greedy 把一份大概率留给当前最好的动作，把剩下的概率平均分给其它动作。
+        ε 等于 0 时它退化成纯贪心，ε 等于 1 时它退化成均匀随机。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. ε-greedy 的策略改进定理</h2>
+    <p>策略改进（根据算出的分数，把策略里明显吃亏的选择换掉）在 0014 课有定理保证：新策略不劣于旧策略。ε-greedy 是贪心的"掺了随机"版本，它还能保证不劣吗？答案是能，只要旧策略也是 ε-soft 的。</p>
+    <div class="thm">
+      <span class="label">定理 16.3（ε-greedy 的策略改进定理）</span>
+      <p>设 $0\le\varepsilon\lt1$，$\pi$ 是 ε-soft 策略，$\pi'$ 是对 $q_\pi$ 的 ε-greedy 策略。那么</p>
+      <div class="eq">
+        <span class="eq-body">$$v_{\pi'}(s)\ge v_\pi(s),\qquad \forall s\in\mathcal S.$$</span>
+        <span class="eq-num">(16.3)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：贪心版本用"平均不超过最大"。ε-greedy 版本多一步：先把旧策略的权重减掉那份强制探索，重写成一组和为 1 的非负权重，再套同一个不等式。</p>
+      <p>第一步。把新策略在状态 $s$ 的动作值平均写开：</p>
+      <p>$$(T_{\pi'}v_\pi)(s)=\sum_a\pi'(a\mid s)q_\pi(s,a)=(1-\varepsilon)\max_a q_\pi(s,a)+\frac{\varepsilon}{|\mathcal A|}\sum_a q_\pi(s,a).$$</p>
+      <p>右边第一个系数来自"以 $1-\varepsilon$ 的概率贪心"，第二个系数来自"以 $\varepsilon$ 的概率均匀分配"。</p>
+      <p>第二步。任意一组非负且和为 1 的权重，其加权平均不超过最大值。取权重</p>
+      <p>$$w_a=\frac{\pi(a\mid s)-\varepsilon/|\mathcal A|}{1-\varepsilon}.$$</p>
+      <p>因为 $\pi$ 是 ε-soft，分子非负，所以每个 $w_a\ge0$；把它们加起来得 $(1-\varepsilon)/(1-\varepsilon)=1$。于是 $\max_a q_\pi(s,a)\ge\sum_a w_a q_\pi(s,a)$。</p>
+      <p>第三步。把第二步代回第一步：</p>
+      <p>$$\sum_a\pi'(a\mid s)q_\pi(s,a)\ge(1-\varepsilon)\sum_a w_a q_\pi(s,a)+\frac{\varepsilon}{|\mathcal A|}\sum_a q_\pi(s,a).$$</p>
+      <p>右边每个动作 $a$ 的系数可以并起来：</p>
+      <p>$$(1-\varepsilon)\cdot\frac{\pi(a\mid s)-\varepsilon/|\mathcal A|}{1-\varepsilon}+\frac{\varepsilon}{|\mathcal A|}=\pi(a\mid s).$$</p>
+      <p>所以右边正好是 $\sum_a\pi(a\mid s)q_\pi(s,a)=v_\pi(s)$，也就是 $(T_{\pi'}v_\pi)(s)\ge v_\pi(s)$。</p>
+      <p>第四步。剩下的推导与 0014 课定理 14.1 完全相同：$T_{\pi'}$ 是单调算子，把 $v_\pi\le T_{\pi'}v_\pi$ 反复套上去得到不减的链，再把 $T_{\pi'}^k v_\pi$ 展开成前 $k$ 步回报加上尾巴 $\gamma^k v_\pi(S_k)$，令 $k\to\infty$，尾巴趋于 0，就得到 $v_{\pi'}(s)\ge v_\pi(s)$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 16.4（ε 必须小于 1）</span>
+      <p>定理要求 $\varepsilon\lt1$。$\varepsilon=1$ 时新策略是均匀随机，第二步的权重出现除以零，结论也不再成立：把最优策略换成均匀随机，价值一般会下降。$\varepsilon=0$ 时 $w_a=\pi(a\mid s)$，定理退化成 0014 课的贪心版本。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. MC ε-greedy 算法</h2>
+    <p>把改进这一步从贪心换成 ε-greedy，探索起点假设就可以去掉了。策略自己在每个状态都留着 $\varepsilon/|\mathcal A|$ 的概率给每个动作，所以不需要人为安排起点，也不需要强迫策略去试某个动作：起点由环境给，覆盖由策略里的随机性慢慢补上。</p>
+    <div class="def">
+      <span class="label">算法 16.5（MC ε-greedy）</span>
+      <p>输入：初始的 ε-soft 策略 $\pi_0$（例如每个状态上均匀随机），探索率 $\varepsilon$。第 $k$ 轮：（i）用 $\pi_k$ 从环境给的起点跑若干条完整回合，把轨迹上每一对的回报记下来，用 0015 课的式 (15.3) 估出 $\hat q_{\pi_k}(s,a)$；（ii）对每个状态 $s$，把 $\pi_{k+1}$ 取成对 $\hat q_{\pi_k}(s,\cdot)$ 的 ε-greedy 策略，也就是式 (16.1) 的形式。策略不再改变就停。</p>
+    </div>
+    <p>与 MC Exploring Starts 相比，它少了"起点必须覆盖所有状态动作对"这条要求，代价是每轮策略都不再是纯贪心，行动带一点随机。</p>
+    <p>收敛（一轮轮算下去，数值不再明显变化，稳定下来了）这件事分两层说。第一层是单调性：由定理 16.3，每一轮的新策略都不劣于旧策略，所以价值序列逐点不减；策略的个数有限，改进到不再变化就停下来。第二层是停下来时停在哪：ε 固定不变时，算法停在 ε-soft 类里最好的那一类策略上，把最优性放宽成了"在这个带探索的类里最优"（标准结论，见 Sutton 与 Barto 第 2 版第 5.4 节与本书 §5.5，本课不重证）。想让最终的策略接近最优策略，就让 ε 随回合数逐步减小到 0，同时保证每个状态动作对被访问无数次；这条条件的严格陈述与证明属于随机逼近的范围，0017 课会用 Robbins-Monro 算法搭好工具。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="MC ε-greedy 不再需要指定起点，靠策略里的随机性保证覆盖">
+        <rect x="20" y="30" width="130" height="54" rx="5" class="box"/>
+        <text x="40" y="52" class="val-b">环境给的起点</text>
+        <text x="36" y="72" class="lbl">不需要自己指定</text>
+        <rect x="200" y="30" width="140" height="54" rx="5" class="box-a"/>
+        <text x="220" y="52" class="val-b">用 ε-greedy 跑回合</text>
+        <text x="216" y="72" class="lbl">每个动作都有正概率</text>
+        <rect x="390" y="30" width="130" height="54" rx="5" class="box"/>
+        <text x="416" y="52" class="val-b">回报求平均</text>
+        <text x="408" y="72" class="lbl">得到动作值</text>
+        <path d="M150 57 H188" class="arrow"/>
+        <path d="M181 52 l9 5 l-9 5" class="arrow"/>
+        <path d="M340 57 H378" class="arrow"/>
+        <path d="M371 52 l9 5 l-9 5" class="arrow"/>
+        <rect x="200" y="130" width="140" height="54" rx="5" class="box-a"/>
+        <text x="212" y="152" class="val-b">改成 ε-greedy 策略</text>
+        <text x="216" y="172" class="lbl">保证下一轮还探索</text>
+        <path d="M455 84 V157 H348" class="arrow-a"/>
+        <path d="M356 152 l-9 5 l9 5" class="arrow-a"/>
+        <path d="M270 184 V208 H86 V84" class="arrow"/>
+        <path d="M81 92 l5 -10 l5 10" class="arrow"/>
+        <text x="300" y="204" class="lbl">循环</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 16.3</span>
+        MC ε-greedy 的起点由环境决定，覆盖靠策略里的正概率。每轮结束都把策略改成对当前估计的
+        ε-greedy 策略，所以下一轮还会继续探索。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. 探索与利用的权衡</h2>
+    <p>ε-greedy 下的价值有个显式表达式。把式 (16.1) 代进状态值的定义 $v_\pi(s)=\sum_a\pi(a\mid s)q_\pi(s,a)$，得到一个"软价值"：</p>
+    <div class="eq">
+      <span class="eq-body">$$v_{\pi_\varepsilon}(s)=(1-\varepsilon)\max_a q_{\pi_\varepsilon}(s,a)+\frac{\varepsilon}{|\mathcal A|}\sum_a q_{\pi_\varepsilon}(s,a).$$</span>
+      <span class="eq-num">(16.4)</span>
+    </div>
+    <p>式中 $\pi_\varepsilon$ 表示 ε-greedy 策略，$q_{\pi_\varepsilon}$ 是它自己的动作值。这个式子与 0007 课讲的状态值、动作值关系是同一件事：状态值是动作值的加权平均。只是在 ε-greedy 下，最大的那一项只拿到 $1-\varepsilon$ 的权重，剩下的权重摊给了别的动作，所以它比 $\max_a q_{\pi_\varepsilon}(s,a)$ 低一点。差额可以算得很清楚：</p>
+    <p>$$v_{\pi_\varepsilon}(s)=\max_a q_{\pi_\varepsilon}(s,a)-\varepsilon\Big(\max_a q_{\pi_\varepsilon}(s,a)-\frac{1}{|\mathcal A|}\sum_a q_{\pi_\varepsilon}(s,a)\Big).$$</p>
+    <p>括号里是"最好的动作"比"平均动作"好多少。探索的代价就是这个差值乘上 ε。</p>
+    <div class="eg">
+      <span class="label">例 16.6（算一次软价值）</span>
+      <p>某个状态有 4 个动作，动作值是 1、0.6、0.4、0。取 $\varepsilon=0.2$。最好的动作拿 $1-0.2+0.2/4=0.85$ 的概率，其余三个各拿 $0.05$。软价值是</p>
+      <p>$$0.85\times1+0.05\times(0.6+0.4+0)=0.85+0.05=0.9.$$</p>
+      <p>平均动作值是 $(1+0.6+0.4+0)/4=0.5$，所以探索的代价是 $0.2\times(1-0.5)=0.1$，与 $1-0.9=0.1$ 对上了。ε 越小，这份代价就越小。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="软价值是把最大动作值的一部分权重分给其它动作后的加权平均">
+        <line x1="60" y1="150" x2="330" y2="150" class="axis-b"/>
+        <rect x="82" y="80" width="42" height="70" class="bar-hi"/>
+        <rect x="142" y="108" width="42" height="42" class="bar"/>
+        <rect x="202" y="122" width="42" height="28" class="bar"/>
+        <rect x="262" y="136" width="42" height="14" class="bar"/>
+        <text x="92" y="168" class="lbl">1.0</text>
+        <text x="152" y="168" class="lbl">0.6</text>
+        <text x="212" y="168" class="lbl">0.4</text>
+        <text x="272" y="168" class="lbl">0.0</text>
+        <line x1="60" y1="80" x2="350" y2="80" class="mark"/>
+        <text x="356" y="76" class="lbl">max 是 1.0</text>
+        <line x1="60" y1="87" x2="350" y2="87" class="mark"/>
+        <text x="356" y="104" class="lbl">软价值是 0.9</text>
+        <text x="60" y="196" class="lbl">柱高是四个动作的动作值；软价值比最高柱低的那一截就是探索的代价</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 16.4</span>
+        ε-greedy 下的状态值是四个动作值的加权平均：最好的动作拿走大部分权重，其它动作各分一点。
+        加权平均不会超过最大值，差出来的那一截随 ε 增大。</figcaption>
+    </figure>
+    <p>差距能有多大？下面这条界说明它随 ε 线性缩小。</p>
+    <div class="thm">
+      <span class="label">命题 16.7（ε-greedy 是最优策略的 ε-近似）</span>
+      <p>设奖励绝对值不超过 $R_{\max}$，$\pi_\varepsilon$ 是对自己动作值 $q_{\pi_\varepsilon}$ 的 ε-greedy 策略。那么</p>
+      <div class="eq">
+        <span class="eq-body">$$\big\|v^*-v_{\pi_\varepsilon}\big\|_\infty\le\frac{2\varepsilon R_{\max}}{(1-\gamma)^2}.$$</span>
+        <span class="eq-num">(16.5)</span>
+      </div>
+      <p>式中 $\|\cdot\|_\infty$ 是无穷范数，取所有状态里绝对值最大的那个。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记 $v_\varepsilon=v_{\pi_\varepsilon}$，并记 $M(s)=\max_a q_\varepsilon(s,a)$、$m(s)=\min_a q_\varepsilon(s,a)$。</p>
+      <p>第一步。由式 (16.4)，把中间的加权平均放缩到最小项：</p>
+      <p>$$v_\varepsilon(s)\ge(1-\varepsilon)M(s)+\varepsilon\,m(s)=M(s)-\varepsilon\big(M(s)-m(s)\big).$$</p>
+      <p>第二步。对每个动作，$|q^*(s,a)-q_\varepsilon(s,a)|=\gamma\big|\sum_{s'}p(s'\mid s,a)(v^*(s')-v_\varepsilon(s'))\big|\le\gamma\|v^*-v_\varepsilon\|_\infty$，所以</p>
+      <p>$$v^*(s)=\max_a q^*(s,a)\le M(s)+\gamma\|v^*-v_\varepsilon\|_\infty.$$</p>
+      <p>第三步。两式相减：$v^*(s)-v_\varepsilon(s)\le\gamma\|v^*-v_\varepsilon\|_\infty+\varepsilon(M(s)-m(s))$。由于每个动作值都是奖励的折扣和，$|q_\varepsilon|\le R_{\max}/(1-\gamma)$，所以 $M(s)-m(s)\le 2R_{\max}/(1-\gamma)$。对 $s$ 取最大，得</p>
+      <p>$$\|v^*-v_\varepsilon\|_\infty\le\gamma\|v^*-v_\varepsilon\|_\infty+\frac{2\varepsilon R_{\max}}{1-\gamma}.$$</p>
+      <p>把右边第一项移到左边，$(1-\gamma)\|v^*-v_\varepsilon\|_\infty\le 2\varepsilon R_{\max}/(1-\gamma)$，两边除以 $1-\gamma$ 即得式 (16.5)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 16.8（这条界很松，但方向对）</span>
+      <p>式 (16.5) 的用处是说明 ε 与 $1-\gamma$ 各自的影响：ε 越小、折扣因子（越往后的奖励，算进总分时权重越小）越远离 1，差距上界越小。它的数值偏保守，取 $R_{\max}=1$、$\gamma=0.9$ 时上界是 $200\varepsilon$，在 ε 较大时明显高估了真实差距。结论是定性的：ε 趋于 0 时，ε-greedy 策略的价值趋于最优价值。</p>
+    </div>
+    <p>把两端放在一起看，权衡就很清楚了。ε 取大：覆盖来得快，估计不容易有缺口，但行动经常偏离当前最好的选择，软价值低，学习期间拿到的分数少。ε 取小：分数拿得多，但没试过的动作要很久才有机会被试到，早期的一个错误判断可能被锁住很久。实践里的折中做法是让 ε 从 0.1 到 0.3 起步，随着回合数增加逐步减小，既保证前期覆盖，又让后期接近贪心。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="探索率增大时覆盖变好但软价值下降">
+        <line x1="70" y1="160" x2="500" y2="160" class="axis-b"/>
+        <line x1="70" y1="160" x2="70" y2="34" class="axis-b"/>
+        <text x="440" y="184" class="lbl">ε 增大</text>
+        <path d="M80 56 L160 62 L240 76 L320 98 L400 128 L480 152" class="curve"/>
+        <text x="300" y="70" class="lbl">实线：软价值下降</text>
+        <path d="M80 152 L160 132 L240 106 L320 84 L400 68 L480 58" class="curve2"/>
+        <text x="120" y="112" class="lbl">虚线：覆盖与稳健性上升</text>
+        <line x1="270" y1="34" x2="270" y2="160" class="mark"/>
+        <text x="200" y="196" class="lbl">折中区间：ε 在 0.1 到 0.3 附近</text>
+        <text x="70" y="212" class="lbl">横轴是探索率，纵轴是两条此消彼长的曲线</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 16.5</span>
+        ε 变大，覆盖与稳健性变好，软价值变差；ε 变小，分数拿得多，但覆盖变慢。
+        实践里让 ε 从中间起步、逐步减小，就是在两条曲线之间找位置。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>探索起点假设要求每一对都能当回合的起点，真实系统常常做不到。</li>
+      <li>ε-greedy 在每个动作上都留 $\varepsilon/|\mathcal A|$ 的概率，所以每个动作都会被持续尝试。</li>
+      <li>ε-greedy 的策略改进定理：ε-soft 的旧策略配上 ε-greedy 的新策略，价值逐点不降。证明比贪心版本多一步，要先把强制探索的权重减掉。</li>
+      <li>ε-greedy 下的价值是软价值，比最大动作值低 $\varepsilon$ 乘上"最大值与平均值之差"。</li>
+      <li>与最优价值的差距按 ε 线性缩小。实践里让 ε 从 0.1 到 0.3 起步并逐步减小。</li>
+    </ul>
+    <p>下一课把"把所有回报存起来求平均"换成"每来一个样本就改动一点估计"，那种一步一步逼近的做法叫 Robbins-Monro 算法，它是后面所有增量式方法的骨架。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 探索起点假设说的是什么？</p>
+      <ol class="mcq-options">
+        <li>每个回合都必须从目标状态附近开始</li>
+        <li>每个状态动作对都有机会当回合的起点</li>
+        <li>每个动作都必须被选到恰好一次</li>
+        <li>每个状态都要被访问恰好一次</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：这条假设只说"有机会"，它保证每个状态动作对都能收集到样本，动作值不会留下空白。</p>
+        <p>A 把起点限制在目标附近，反倒丢掉了远处的样本。C 与 D 要求"恰好一次"，比假设本身强得多，也没有必要。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. ε-greedy 策略里，动作值最大的那个动作被选中的概率是多少？</p>
+      <ol class="mcq-options">
+        <li>$1-\varepsilon$，只算贪心那一份</li>
+        <li>$\varepsilon$，就是探索率本身</li>
+        <li>$1-\varepsilon+\varepsilon/|\mathcal A|$，两份加起来</li>
+        <li>$\varepsilon/|\mathcal A|$，平均分到每个动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：见式 (16.1)。最大的动作既拿贪心那份 $1-\varepsilon$，又从平均分配里拿 $\varepsilon/|\mathcal A|$。</p>
+        <p>A 漏掉了平均分配那一份。B 把探索率当成了选中概率。D 是其它动作各拿到的概率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 定理 16.3 的证明里，用 $\sum_a w_a q_\pi(s,a)$ 去替换 $\max_a q_\pi(s,a)$ 时，对权重的要求是什么？</p>
+      <ol class="mcq-options">
+        <li>每个权重非负，并且加起来等于 1</li>
+        <li>每个权重都等于 1 除以动作个数</li>
+        <li>每个权重都不小于探索率 $\varepsilon$</li>
+        <li>权重必须按动作值从大到小排好</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：非负且和为 1 的权重构成一组概率，加权平均不会超过最大值，这是 0014 课就用过的那一步。</p>
+        <p>B 只是其中一种特殊取法，证明并不要求均匀。C 与 D 都不是加权平均不超过最大值的条件。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 证明里为什么要求旧策略 $\pi$ 满足 $\pi(a\mid s)\ge\varepsilon/|\mathcal A|$？</p>
+      <ol class="mcq-options">
+        <li>为了让旧策略一定是确定性的</li>
+        <li>为了让回报的期望一定存在</li>
+        <li>为了让 $\varepsilon\lt1$ 成立</li>
+        <li>为了让权重 $w_a$ 非负</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$w_a$ 的分子是 $\pi(a\mid s)-\varepsilon/|\mathcal A|$。只有旧策略在每个动作上都不少于探索份，分子才不会变负，$w_a$ 才是一组合法的概率权重。</p>
+        <p>A 说反了，ε-soft 策略通常不是确定性的。B 与这个条件无关，回报的期望只要奖励有界就存在。C 是定理的另一个前提，不是这里的理由。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 式 (16.4) 里，最大值那一项的系数为什么是 $1-\varepsilon$？</p>
+      <ol class="mcq-options">
+        <li>因为探索率通常取 0.1 到 0.3</li>
+        <li>因为 ε 份概率被平均分给了所有动作</li>
+        <li>因为折扣因子把这一项缩小了</li>
+        <li>因为动作值被归一化到了 0 到 1</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：ε-greedy 把 $1-\varepsilon$ 的概率留给贪心，把这部分单独提出来就是 $(1-\varepsilon)\max_a q$；剩下的 $\varepsilon$ 份在所有动作上平均分配，写成第二项。</p>
+        <p>A 把常见取值当成了来源。C 混进了折扣因子，式 (16.4) 里没有它。D 与归一化无关，动作值可以是任意实数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 如果取 $\varepsilon=1$，定理 16.3 的结论会怎样？</p>
+      <ol class="mcq-options">
+        <li>结论不变，新策略的价值仍然不降</li>
+        <li>结论变成新策略一定严格更优</li>
+        <li>结论只对不随机的策略成立</li>
+        <li>结论不再成立，均匀随机一般不优于旧策略</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\varepsilon=1$ 时新策略是均匀随机，第二步的权重出现除以零。把最优策略换成均匀随机，价值通常会掉下来，所以结论不成立。</p>
+        <p>A 与 B 都忽略了均匀随机会把最优动作的概率削小。C 与随机性无关，$\varepsilon=1$ 时新旧策略都带随机性。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 探索率固定成 0.1 一直不减小，算法最终会停在什么策略上？</p>
+      <ol class="mcq-options">
+        <li>ε-soft 策略类里最好的那一类策略</li>
+        <li>最优策略，与探索率无关</li>
+        <li>每个动作概率都相同的策略</li>
+        <li>初始的那套策略 $\pi_0$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：ε 固定时，每一轮都在 ε-soft 这个类里改进，类外的纯贪心策略进不来，所以停在这个类里最好的那一类上。</p>
+        <p>B 要有 ε 逐步减到 0 才谈得上。C 是 $\varepsilon=1$ 的极端，与 0.1 不符。D 忽略了每一轮都在改进这件事。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 某状态有 4 个动作，动作值是 1、0.6、0.4、0，取 $\varepsilon=0.2$。软价值是多少？</p>
+      <ol class="mcq-options">
+        <li>1.0，因为软价值就是最大的动作值</li>
+        <li>0.85，因为只算了贪心那一份</li>
+        <li>0.9，因为要加上探索份带来的那一点</li>
+        <li>0.5，因为四个动作平均下来是 0.5</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：最大动作的概率是 $1-0.2+0.05=0.85$，其余三个各 0.05，软价值是 $0.85\times1+0.05\times(0.6+0.4+0)=0.9$。</p>
+        <p>A 忘掉了探索份，把平均值当成了最大值。B 只算了第一项，漏掉第二项。D 算的是四个动作的算术平均，与加权平均不同。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">9. 某状态只有两个动作，动作值分别是 10 与 0，取 $\varepsilon=0.5$。软价值是多少？</p>
+      <ol class="mcq-options">
+        <li>7.5，按七成五与两成五加权</li>
+        <li>10，等于最大的动作值</li>
+        <li>5，等于两个动作值的平均</li>
+        <li>9.5，只扣掉一半的探索份</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两个动作时，最大动作拿 $1-0.5+0.25=0.75$ 的概率，另一个拿 0.25，软价值是 $0.75\times10+0.25\times0=7.5$。用代价公式验算：$0.5\times(10-5)=2.5$，$10-2.5=7.5$。</p>
+        <p>B 忽略了探索。C 用的是均匀权重，把最好的动作也压到平均线上。D 只扣了 $\varepsilon/2$ 那份，没有按 $\varepsilon$ 乘上"最大值减平均值"。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. 为什么实践中常常让探索率随回合数逐步减小？</p>
+      <ol class="mcq-options">
+        <li>因为 ε 太大会让奖励变成 0</li>
+        <li>因为前期需要覆盖，后期需要把分数拿满</li>
+        <li>因为 ε 减小时定理 16.3 才成立</li>
+        <li>因为折扣因子会随回合数变小</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：前期 ε 大，没试过的动作能尽快被试到，估计不会留缺口；后期估计稳了，ε 小一点可以让行动贴近当前最好的选择，少付探索的代价。</p>
+        <p>A 与环境的跳转无关，ε 只影响策略怎么选动作。C 说反了，定理对任何 $\varepsilon\lt1$ 都成立。D 没有这种自动机制，折扣因子是人设定的。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025, 第 5 章第 5.3–5.5 节。</p>
+      <p>ε-soft 策略与 ε-greedy 控制的经典表述见 R. S. Sutton 与 A. G. Barto, <em>Reinforcement Learning: An Introduction</em>, 第 2 版第 5.4 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问："把定理 16.3 的第三步用两个动作的例子再走一遍"，或者 "为什么 ε 固定时只能停在 ε-soft 类的最优策略上？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A06 · 把你的工作问题建模成 MDP — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A06" data-slug="modeling-your-problem" data-part="进阶篇 · 第一部分 · 基础概念">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第一部分 · 基础概念</p>
+    <h1>把你的工作问题建模成 MDP</h1>
+    <p class="lede">这一节解决一个问题：你手上有一个真实的业务问题，怎么把它写成一份能照着填的规格。
+      规格填得对，后面的算法才有的学；规格填错，训练跑通了也白搭。</p>
+    <p class="lede">这份规格的标准名字叫 MDP（Markov decision process）。
+      它指的是"规则明确、只看当前局面"的那类问题设定，好比一盘只看现在棋盘、不必回放全程的棋。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能把业务里的东西逐条填进五元组 (S, A, R, 折扣因子, 终止)：状态、动作、奖励、折扣、终止各写什么</li>
+        <li>能用"信息够不够做决定"这个标准检查状态设计，不必凭感觉堆特征</li>
+        <li>能说出奖励太稀疏、奖励被钻空子这两种毛病的来由，以及塑形为什么要保守</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>先写规格，再挑算法</h2>
+    <p>先把场景说具体。你在电商公司管库存，手下有几个仓库，每个仓库里都放着几十种商品。
+      每天早上你要决定一件事：每种商品今天补多少件。补多了，货压在仓库里占地方、占资金；
+      补少了，客户下单发现没货，订单和口碑一起丢。做这个决策的那一方，
+      在强化学习里叫<span class="term">智能体（做决策的那一方，就是你写的程序）</span>。
+      本节的任务，就是把"每天补多少货"这件事写成它能照着执行的规格。</p>
+    <p>先说结论：多数项目失败，问题不在算法，而在这份规格本身。
+      状态漏了关键信息，奖励和你想要的东西对不上，决策周期又定成业务执行不了的粒度，都会出问题。</p>
+    <p>算法可以换。建模错了，换什么算法都救不回来。</p>
+    <p>好消息是，要写清楚的只有五件事。而且这五件事都能在写代码之前，先用文字定下来。</p>
+  </section>
+
+  <section>
+    <h2>状态：做决策需要的信息</h2>
+    <p>状态 <var>s</var> 是此刻你能看到的信息，也就是你做决定的依据。
+      它不能只当成一张"观测列表"，它要装的是做决策所需的全部信息。</p>
+    <p>检验办法很朴素。如果两个状态在你眼里长得一模一样，未来却会走向不同的结果，
+      那你的状态就没满足<span class="term">马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关）</span>。</p>
+    <p>放在库存问题里看。库存都是 10 件，一个局面有一批货明天就到，另一个完全没有在途。
+      这两个局面写进规格是一样的，未来却完全不同。这就是状态漏了信息的样子。</p>
+    <p>正确做法是把在途、近七天销量这类量压缩进状态。这一步叫
+      <span class="term">特征工程（把原始信息加工成一组数字，供程序使用）</span>。
+      它是建模的一部分，不是随手调参数。</p>
+  </section>
+
+  <section>
+    <h2>动作：粒度和频率</h2>
+    <p>动作 <var>a</var> 是你这一步能做的选择。它还分两种：一种是离散的，比如从
+      "补 0 件、20 件、40 件、60 件"里挑一个；另一种是连续的，比如价格可以填任意一个数。</p>
+    <p>光有一个动作不够，你还需要一套规则来说明"看到什么情况就选什么动作"。
+      这套规则叫<span class="term">策略（一套"看到什么状态就选什么动作"的规则，相当于你的出招习惯）</span>。</p>
+    <p>动作是离散还是连续，决定了后面能选哪一族算法。选择不多的时候可以用表格法，
+      把每个状态每个动作该值多少分都记一个数；动作连续时，表格记不下，要用到
+      <span class="term">策略梯度（直接调整策略参数的那类方法，见 0027 课）</span>。</p>
+    <p><span class="term">决策周期（decision interval，就是多久做一次决策）</span>也要写进规格。
+      规格里写每小时调一次价，可业务只能每天改一次价，那这个动作空间就是假的，
+      学出来的东西在现实中按不下去。</p>
+  </section>
+
+  <section>
+    <h2>奖励：把目标翻译成一个数</h2>
+    <p>奖励 <var>r</var> 是环境对你刚做的动作打的分数，一个数。
+      它是这份规格里唯一装着目标的地方，所以两条要求必须同时满足：每一步都能算出来，
+      并且和你想要的结果一致。</p>
+    <p>回到补货业务。可以这样定每天的奖励：卖出一件货赚到的钱，减去补货成本，
+      减去没卖掉的货占用的钱，再减去缺货的损失。</p>
+    <p>为什么要专门扣压货和缺货这两笔？因为不扣的话，智能体会去钻空子。
+      只算赚到的钱，它就发现"进货越多、卖得越多"，于是拼命补货把仓库堆满。
+      加上压货成本，堆满仓库就要付代价；加上缺货损失，缺货也要付代价。两头都疼，它才愿意折中。</p>
+    <p>下面两种毛病最容易让人付出代价。</p>
+    <ul>
+      <li><span class="term">稀疏奖励（绝大多数步骤都拿不到奖励，只有极少数关键时刻有分）</span>：
+        整个回合里中间全是 0，只有最后通关才给一分。智能体在绝大多数步上都收不到任何反馈，
+        只能瞎猜，学习会慢到不可用。</li>
+      <li><span class="term">奖励黑客（你给的分数不是真目标，被智能体钻了空子）</span>：
+        比如只奖励销量，它就会疯狂压货冲销量，仓库和资金成本没人管。</li>
+    </ul>
+    <p>缓解稀疏奖励的常见做法叫<span class="term">奖励塑形（人为加一些中间奖励，让学习有路可走）</span>，
+      也就是给中间步骤也发一点分。</p>
+    <p>塑形有个讲究。公式 (6.1) 这种写法叫势函数形式。它给的分是两个数之差：
+      <var>γ</var> 是折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折），
+      <var>Φ</var> 是你给每个状态打的"局面分"。代入公式就是
+      <span class="math">γΦ(s') − Φ(s)</span>。
+      它只在状态确实变好时给正分，变差时给负分，来回横跳会互相抵消，
+      绕一圈回到原状态，一路上加的分正好归零，所以它不会改变原问题的最优策略。</p>
+    <p>反过来，随手加一条"离目标近就加分"，就可能把最优解改掉。
+      塑形必须保守，原因就在这里。</p>
+    <div class="eq">
+      <span class="eq-body">F(s, a, s') = γΦ(s') − Φ(s)</span>
+      <span class="eq-num">(6.1)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>折扣与终止：时间尺度</h2>
+    <p><span class="term">折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折）</span>
+      就是公式 (6.1) 里的 <var>γ</var>，它决定智能体看多远。取 <var>γ</var>=0.9 时，
+      10 步之后的奖励只剩 <span class="math">0.9<sup>10</sup> ≈ 0.35</span> 的权重，
+      也就是打了七八次对折之后剩下的那点分量。</p>
+    <p>设多大，看业务的现实周期。业务就是按一周来考核的，那就别把 <var>γ</var> 设成 0.999，
+      那等于让智能体去关心很远很远的未来。</p>
+    <p>还要分清两件事。任务真的结束了，比如这单货做完不再有后续，这叫
+      <span class="term">终止（termination）</span>。预算或时间用尽了，那只是被打断，
+      未来还会继续，这叫<span class="term">截断（truncation）</span>。</p>
+    <p>把截断当成终止，价值的含义就被悄悄改掉了：本来后面还有生意，你却当它再也不回来了。
+      Gymnasium 的 <code>Env</code> 接口把 <code>terminated</code> 和 <code>truncated</code>
+      分成两个字段，就是为了逼你想清楚这件事
+      <a class="cite" href="https://gymnasium.farama.org/">[Gymnasium Env API]</a>。</p>
+  </section>
+
+  <section>
+    <h2>一份可以照着填的检查表</h2>
+    <table>
+      <thead><tr><th>项目</th><th>要回答的问题</th><th>典型错误</th></tr></thead>
+      <tbody>
+        <tr><td>状态 S</td><td>它是否包含做决策所需的全部信息？</td><td>只看当前库存，漏掉在途订单</td></tr>
+        <tr><td>动作 A</td><td>粒度与频率是业务真能执行的吗？</td><td>每小时调价，业务却只能每天执行</td></tr>
+        <tr><td>奖励 R</td><td>能逐步计算吗？和真实目标一致吗？</td><td>只奖励销量，诱发压货与刷单</td></tr>
+        <tr><td>折扣 γ</td><td>你希望智能体看多远？</td><td>默认 0.99，却期望它只关心本周</td></tr>
+        <tr><td>终止</td><td>什么算真的结束，什么只是被打断？</td><td>把预算耗尽当成任务完成</td></tr>
+      </tbody>
+    </table>
+    <p>填完这张表，再回头问一句：我能安全地试错吗？如果不能，就先做仿真或
+      <span class="term">离线（不能与真实环境交互，只能用已经攒下来的历史数据学）</span>评估，
+      这属于第 <a href="A25-offline-imitation.html">0025 课</a>的范围。</p>
+  </section>
+
+  <figure class="sim" data-sim="gridworld" data-rows="4" data-cols="4" data-gamma="0.9" data-mode="policy"></figure>
+
+  <section>
+    <h2>从网格世界读出自己的规格</h2>
+    <p>上面的网格世界是一个"最小可运行建模"：格子是状态，四个方向是动作，
+      每走一步拿 −1 分是奖励，左上角是终止状态。拖动 <var>γ</var>，
+      你会看到规划视野跟着变，这就是"折扣决定看多远"的可见版本。
+      你自己的业务不会长成这样，但规格里的每一项都能对应上。</p>
+    <p>想更细地过一遍 MDP 的定义，回看 <a href="A03-mdp.html">0003 课</a>。
+      想知道已知模型之后怎么算最优策略，看 <a href="A05-dynamic-programming.html">0005 课</a>。
+      建模完成之后，从 <a href="A07-monte-carlo.html">0007 课</a>开始进入不用模型的做法，
+      用采样和 TD（temporal difference）更新代替模型。
+      它指的是不用等到一整局走完，用"走一步之后的新估计"来更新"走这一步之前的估计"。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 关于状态设计中的马尔可夫性，下列哪一项要求是准确的？</p>
+      <ol class="mcq-options">
+        <li>状态要尽量纳入所有可观测的历史记录，避免遗漏任何信息</li>
+        <li>状态必须包含做最优决策所需的全部信息，与更早历史无关</li>
+        <li>状态维度越高越好，特征越多越容易学到最优策略</li>
+        <li>状态只需包含当前时刻的原始传感器读数，不做任何加工</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：马尔可夫性的意思是，给了当前状态之后，未来会怎样与更早的历史无关。
+          它衡量的是"决策要用的信息齐不齐"，与信息多少无关。</p>
+        <p>A 错在把"全部历史"等同于"全部信息"：原始历史里大量冗余，直接堆进去只会让状态爆炸。
+          C 与 A 是同一个误解的另一面：维度高不等于信息全。D 恰好相反：原始读数往往缺关键信息
+          （比如库存在途、上一期动作）。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 补货系统只把销量写进奖励，训练后智能体疯狂压货冲销量。这属于什么问题？</p>
+      <ol class="mcq-options">
+        <li>稀疏奖励，导致智能体在绝大多数步上拿不到学习信号</li>
+        <li>折扣因子过小，导致智能体只盯着眼前一步的即时收益</li>
+        <li>奖励黑客，代理指标与真实目标不一致从而被钻了空子</li>
+        <li>探索不足，导致智能体从未尝试过其他可行的补货策略</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：销量是"卖得好"的代理指标，不是业务目标本身。压货能刷高销量，
+          却把库存和资金成本留给现实承担，这是奖励黑客的教科书症状。</p>
+        <p>A 说的是奖励太稀疏（这里每一步都有分，不稀疏）；B 说反了，折扣小只会让行为更短视，
+          而压货本来就是短期销量最优；D 是探索问题，智能体明明已经找到了一个"有效"的坏策略。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 势函数塑形 F(s, a, s') = γΦ(s') − Φ(s) 的作用是什么？</p>
+      <ol class="mcq-options">
+        <li>给每一步都加一个固定常数，抬高回报（从现在起把每一步奖励加起来的总分）数值，让它更快稳定下来</li>
+        <li>把稀疏奖励变密集，同时不改变原问题的最优策略集合</li>
+        <li>把长期回报截断成只看有限步，以此显著降低估计方差</li>
+        <li>直接修改环境的转移概率（做完动作之后跳到哪个状态，各带多大可能），让智能体更快到达目标状态</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：势函数形式给出的额外奖励，只在"状态按 Φ 变好"时为正，
+          绕一圈回到原状态会精确抵消，所以最优策略不变，但每一步都有梯度可用。</p>
+        <p>A 说成常数：常数奖励对所有策略一视同仁，改不了最优策略，也基本帮不上学习。
+          C 描述的是折扣或 n-step 截断，与塑形无关。D 混淆了奖励与模型：塑形只动奖励，不动转移概率。
+          另外，收敛就是"一轮轮算下去，数值不再明显变化，稳定下来了"，它跟奖励加不加常数没有关系。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 关于动作空间与决策周期，下列哪一种做法最合理？</p>
+      <ol class="mcq-options">
+        <li>动作连续时也必须先离散成几百个档位，以便使用表格方法</li>
+        <li>决策周期越短越好，这样智能体能更快地纠正自己的错误</li>
+        <li>只要状态设计得足够全，动作粒度设多大都不影响最终效果</li>
+        <li>动作粒度与业务实际能执行的操作对齐，并据此确定决策周期</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：规格里的动作必须是"部署之后真能按下去的按钮"。粒度与周期先由业务确定，
+          再倒推该用哪一族算法。</p>
+        <p>A 把连续动作硬离散成几百档，会让表格爆炸且丢失精度，通常应改用连续动作算法。
+          B 忽略了决策周期的业务约束与执行成本。C 说反了：状态信息再全，粒度失真的动作空间照样学不出可用的策略。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 关于终止（termination）与截断（truncation）的设计，哪一项说法正确？</p>
+      <ol class="mcq-options">
+        <li>预算或时间用尽只是被截断，并不等于这一回合真的结束</li>
+        <li>只要智能体不再获得任何奖励，就应当把它当作终止状态</li>
+        <li>连续型任务必须人为设定终止状态，否则无法用 TD 方法学习</li>
+        <li>终止状态的价值必须等于该回合最终获得的所有奖励之和</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：终止意味着"后面没有未来的价值了"，截断意味着"只是在时间上被切开"。
+          把两者混同，自举（用自己当前的估计去更新自己当前的估计）的目标里就会多算或少算一段未来，
+          价值的含义被悄悄改写。</p>
+        <p>B 把"暂时没奖励"当成结束，这在稀疏奖励任务里几乎每步都会误判。
+          C 说反了：连续型任务本来就不设终止，靠折扣来定义回报。
+          D 混淆了回报与价值：终止状态的价值通常定义为 0，回报是过程累积出来的。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0006-code-1">
+      <h3>代码题 1 · 把库存转移写成代码</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>本课要把库存补货业务写成一份 MDP 规格。<code>inventory_step</code> 是这份规格里的一步：早上看期初的在手库存，决定今天补多少货，当天需求发生之后把剩下的货结转到明天，同时算出这一步的收益。它相当于一个小型仿真器，评估某条补货规则时会反复调用它，把一天天推下去。现实里的对应是这样的：<code>on_hand</code> 是仓库里此刻真能拿出去卖的件数，<code>order</code> 是你今天下单补的件数，<code>demand</code> 是今天客户实际想要买的件数，<code>capacity</code> 是仓库最多能放多少件。返回值里的 <code>reward</code> 就是当天利润，已经扣掉补货成本、压货成本和缺货损失。</p>
+        <p>请实现 <code>inventory_step(on_hand, order, demand, capacity=50)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>on_hand</code>：int，当天期初在手库存（件）；</li>
+          <li><code>order</code>：int，当天决定的补货量（件），补货成本按它计算，被容量截掉的那部分照样计费；</li>
+          <li><code>demand</code>：int，当天真实需求（件）；</li>
+          <li><code>capacity</code>：int，仓库容量上限（件），默认 50。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回三元组 <code>(next_on_hand, reward, done)</code>；</li>
+          <li><code>next_on_hand</code>：int，即剩余库存，会带到下一天的期初。可售量取 <code>min(on_hand + order, capacity)</code>，售出取 <code>min(可售量, demand)</code>，剩余库存是可售量减售出，因此不会超过 <code>capacity</code>；</li>
+          <li><code>reward</code>：Python <code>float</code>，单日奖励为 <code>10 × 售出 − 2 × order − 1 × 剩余库存 − 5 × 缺货</code>，其中缺货是 <code>demand</code> 减售出；</li>
+          <li><code>done</code>：Python 的 <code>False</code>，走完一步流程不终止。测试用 <code>is</code> 判断，所以不能返回 numpy 布尔值。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>在手 10、补 20、需求 15 时返回 <code>(15, 95.0, False)</code>；没有货也没有补货、需求 5 时剩余为 0 且奖励为 −25；在手 40、补 40、需求 100 时触到容量 50 并全部售出，剩余 0、奖励 170；在手 45、补 45、需求 0 时剩余库存不能超过容量 50；不修改入参；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>第一步，算今天能拿出来卖的量：<code>available = min(on_hand + order, capacity)</code>。
+              <code>min(a, b)</code> 返回 a 与 b 里较小的那个，这里用来把补进来的货按仓库容量砍掉多出来的部分。</li>
+          <li>第二步，算实际卖出去多少：<code>sold = min(available, demand)</code>。
+              需求比货多时只能卖掉全部货，需求少时就按需求卖。</li>
+          <li>第三步，算缺了多少：<code>lost = demand - sold</code>，也就是客户想要却没买到的件数。</li>
+          <li>第四步，算明天还剩多少：<code>next_on_hand = available - sold</code>。
+              注意别写成 <code>on_hand + order - demand</code>，那样超过仓库容量的部分不会被截掉，数字会偏大。</li>
+          <li>第五步，按题面给的公式把四项成本加起来：<code>reward = 10.0 * sold - 2.0 * order - 1.0 * next_on_hand - 5.0 * lost</code>。
+              四个系数依次是每件售价、每件补货成本、每件压货成本、每件缺货损失，写成浮点数就行。</li>
+          <li>最后返回三元组 <code>(next_on_hand, reward, False)</code>。第三个位置必须是 Python 的
+              <code>False</code>，因为它不是 numpy 的布尔值，会判错。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def inventory_step(on_hand, order, demand, capacity=50):
+    # TODO: 按规格计算 (next_on_hand, reward, done)
+    return 0, 0.0, True
+</script>
+
+      <script type="text/x-python" data-role="tests">
+n, r, d = inventory_step(10, 20, 15)
+check(n == 15, f"在手 10 补 20 卖 15，剩余应为 15，实际 {n}")
+check(abs(r - 95.0) < 1e-9, f"本例奖励应为 10*15-2*20-1*15=95，实际 {r}")
+check(d is False, f"本步不终止，done 应为 False，实际 {d!r}")
+
+n, r, d = inventory_step(0, 0, 5)
+check(n == 0, f"没有货也没有补，剩余应为 0，实际 {n}")
+check(abs(r + 25.0) < 1e-9, f"缺货 5 件应被罚 5*5=25，实际奖励 {r}")
+
+n, r, d = inventory_step(40, 40, 100)
+check(n == 0, f"补货后触到容量 50 且全部售出，剩余应为 0，实际 {n}")
+check(abs(r - 170.0) < 1e-9, f"应为 10*50-2*40-0-5*50=170，实际 {r}")
+
+n, r, d = inventory_step(45, 45, 0)
+check(n == 50, f"在手加补货超过容量 50 时，剩余库存不应超过容量，实际 {n}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def inventory_step(on_hand, order, demand, capacity=50):
+    available = min(on_hand + order, capacity)
+    sold = min(available, demand)
+    lost = demand - sold
+    next_on_hand = available - sold
+    reward = 10.0 * sold - 2.0 * order - 1.0 * next_on_hand - 5.0 * lost
+    return next_on_hand, reward, False
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0006-code-2">
+      <h3>代码题 2 · 奖励写错会选出什么动作</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>同一个补货场景的简化版：期初没有库存，当天只补一次货，需求实现之后这批货要么卖掉要么压仓，不再有后续。题目演示奖励设计怎么决定行为，两个函数配合使用。<code>expected_profit</code> 给某个补货量打分，算出它在需求不确定时平均能赚多少；<code>best_order</code> 拿这个分数在候选补货量里挑最高的一个。业务上它就是"今天该订多少"的最小决策模块，也是把压货成本从 0 调到 8 之后、最优量会回落的对照实验。
+
+          这里第一次遇到两个基础说法。概率的意思是"平均一百次里大约发生几次"：需求是 80 和需求是 100 各占 0.5，就是平均一百天里大约五十天是 80、五十天是 100。期望的意思是"同一件事重复很多次之后的平均结果"：把两天的分数各乘 0.5 再加起来，得到的就是这个平均值，不需要真的掷骰子。</p>
+        <p>请实现 <code>expected_profit(q, holding_cost)</code> 与 <code>best_order(holding_cost)</code>。当天需求等概率地是 80 或 100，候选补货量取自 starter 里的 <code>GRID</code>（补货量取值表，<code>[0, 20, 40, 60, 80, 100]</code>）。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>expected_profit</code> 的 <code>q</code>：int，候选补货量（件）；<code>holding_cost</code>：float，每件压货的日成本，可以为 0；</li>
+          <li><code>best_order</code> 的 <code>holding_cost</code>：float，含义同上；</li>
+          <li><code>GRID</code>：starter 里给定的全局补货量取值表，取值见上；<code>best_order</code> 只在这个集合上挑选。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>expected_profit</code> 返回 Python <code>float</code>：在需求 80 与 100 各占 0.5 的分布下 <code>q</code> 的期望奖励，不要引入随机数。单个需求场景的奖励是 <code>10 × min(q, demand) − 2 × q − holding_cost × max(0, q − demand)</code>，缺货不罚；</li>
+          <li><code>best_order</code> 返回 int：<code>GRID</code> 里期望奖励最大的补货量，并列时返回较小的那个。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>expected_profit(0, 5.0)</code> 为 0；<code>expected_profit(100, 8.0)</code> 为 <code>620.0</code>；<code>best_order(0.0)</code> 为 100，压货零成本时最优决策顶到上限；<code>best_order(8.0)</code> 为 80，把压货成本算进去后最优补货量回落；<code>holding_cost = 8</code> 时 <code>q = 100</code> 的期望严格低于 <code>q = 80</code>；不修改 <code>GRID</code>；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li><code>expected_profit</code>：先设 <code>total = 0.0</code>，然后对 80 和 100 两个需求各算一遍单日奖励，
+              各乘 0.5 再累加进 <code>total</code>，最后返回它。不需要随机数。</li>
+          <li>单个需求下的奖励按题面分三步算：<code>sold = min(q, demand)</code> 是卖掉的件数，
+              <code>leftover = q - sold</code> 是压仓的件数，
+              再代入 <code>10.0 * sold - 2.0 * q - holding_cost * leftover</code>。</li>
+          <li><code>best_order</code>：先设 <code>best_q = GRID[0]</code>，
+              <code>best_v = float("-inf")</code>。负无穷比任何真实分数都小，保证第一次比较一定会被替换掉。</li>
+          <li>用 <code>for q in GRID</code> 遍历每个候选补货量，算出 <code>v = expected_profit(q, holding_cost)</code>。
+              如果 <code>v &gt; best_v</code>，就把 <code>best_v, best_q</code> 一起换成这一轮的值，
+              最后返回 <code>best_q</code>。用严格大于号，并列时就会留下较小的那个。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+GRID = [0, 20, 40, 60, 80, 100]
+
+def expected_profit(q, holding_cost):
+    # TODO: 对需求 80 / 100 各取 0.5 概率求期望
+    return 0.0
+
+def best_order(holding_cost):
+    # TODO: 在 GRID 上返回期望奖励最大的 q
+    return 0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+check(abs(expected_profit(0, 5.0)) < 1e-9, "补 0 时卖不出去也没成本，期望奖励应为 0")
+check(abs(expected_profit(100, 8.0) - 620.0) < 1e-9,
+      f"q=100、holding_cost=8 时期望应为 620，实际 {expected_profit(100, 8.0)}")
+check(best_order(0.0) == 100,
+      f"压货零成本时，最优决策应当顶到上限 100，实际 {best_order(0.0)}")
+check(best_order(8.0) == 80,
+      f"把压货成本算进去后，最优补货量应当回落到 80，实际 {best_order(8.0)}")
+check(expected_profit(100, 8.0) < expected_profit(80, 8.0),
+      "补过头（q=100）的期望奖励必须低于 q=80，奖励设计决定了最优行为")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+GRID = [0, 20, 40, 60, 80, 100]
+
+def expected_profit(q, holding_cost):
+    total = 0.0
+    for demand in (80, 100):
+        sold = min(q, demand)
+        leftover = q - sold
+        total += 0.5 * (10.0 * sold - 2.0 * q - holding_cost * leftover)
+    return total
+
+def best_order(holding_cost):
+    best_q, best_v = GRID[0], float("-inf")
+    for q in GRID:
+        v = expected_profit(q, holding_cost)
+        if v > best_v:
+            best_v, best_q = v, q
+    return best_q
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 3 章。
+        第 3.1–3.3 节给出了 (S, A, p, r, γ) 的正式定义与"状态必须包含决策所需全部信息"的准确表述，
+        第 3.3 节还讨论了奖励假设（reward hypothesis），本课奖励设计部分的理论依据就来自这里。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>接口层面请对照 <a class="cite" href="https://gymnasium.farama.org/">Gymnasium 的 Env API</a>：
+        它把 <code>terminated</code> 与 <code>truncated</code> 分开，是把规格写成可运行环境时最省事的一张模板。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。可以问：
+      "把我手头的 XX 业务照这张检查表逐项填一遍，哪些项最可能踩坑？"
+      或者把你写的奖励函数贴给它，让它专门找奖励黑客的入口。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

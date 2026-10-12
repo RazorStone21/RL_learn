@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0003 · 线性代数：向量、矩阵、范数与特征值 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0003" data-slug="linear-algebra" data-part="数学预备篇" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">数学预备 3</p>
+    <h1>线性代数：向量、矩阵、范数与特征值</h1>
+    <p class="lede">贝尔曼方程（把这一步的价值和下一步的价值连起来的等式）写到最后是一个矩阵等式
+      $v=r+\gamma P v$，未知量是一整列数，解它要用逆矩阵。本课把这件事需要的工具一次备齐：
+      向量与内积、矩阵乘法与它的不可交换、单位矩阵与逆矩阵、三种向量范数、特征值与谱半径。
+      最后说明 $v=(I-\gamma P)^{-1}r$ 是怎么来的。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能算内积与三种范数，并说清无穷范数在度量什么</li>
+        <li>能独立验证矩阵乘法不可交换，并证明结合律与 $(A B)^\top=B^\top A^\top$</li>
+        <li>能陈述范数的三条公理，并说明三种常用范数都满足它们</li>
+        <li>能算出小矩阵的特征值与谱半径，并证明 $\rho(A)\le\|A\|$</li>
+        <li>能说明 $v=(I-\gamma P)^{-1}r$ 为什么成立，依据是哪一个不等式</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 贝尔曼方程写成矩阵是什么样</h2>
+    <p>0002 课最后把贝尔曼方程写成了
+      $$v_\pi=r_\pi+\gamma P_\pi v_\pi,$$
+      式中 $v_\pi$ 是各状态的状态价值（只看状态、不管具体选哪个动作的那个价值）排成的列向量，
+      $r_\pi$ 是奖励期望排成的向量，$P_\pi$ 是状态转移（做完动作后环境跳到哪个状态）的概率排成的矩阵，
+      $\gamma$ 是折扣因子（越往后的奖励，权重越小）。这个式子里未知量是一整列数。</p>
+    <p>本课回答三件事：这样的方程怎么写、怎么解、解凭什么存在。
+      解的工具是逆矩阵，依据来自特征值与谱半径。
+      中途还要把范数讲清楚，0011 课要讲的压缩映射
+      （每迭代一次，两个估计之间的差距就缩小一点，所以最终必然稳定）要用无穷范数来陈述。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="矩阵乘向量时，结果的第 i 个分量只由矩阵第 i 行和向量决定">
+        <rect x="30" y="40" width="120" height="120" rx="4" class="box"/>
+        <line x1="90" y1="40" x2="90" y2="160" class="grid"/>
+        <line x1="30" y1="100" x2="150" y2="100" class="grid"/>
+        <text x="48" y="76" class="val">p₁₁</text>
+        <text x="106" y="76" class="val">p₁₂</text>
+        <text x="48" y="136" class="val">p₂₁</text>
+        <text x="106" y="136" class="val">p₂₂</text>
+        <text x="30" y="184" class="lbl">矩阵 P（每行和为 1）</text>
+        <text x="176" y="106" class="val-b">×</text>
+        <rect x="200" y="40" width="60" height="120" rx="4" class="box-a"/>
+        <text x="222" y="76" class="val">v₁</text>
+        <text x="222" y="136" class="val">v₂</text>
+        <text x="212" y="184" class="lbl">向量 v</text>
+        <text x="286" y="106" class="val-b">=</text>
+        <rect x="320" y="40" width="76" height="120" rx="4" class="box-a"/>
+        <text x="336" y="76" class="val">(Pv)₁</text>
+        <text x="336" y="136" class="val">(Pv)₂</text>
+        <text x="404" y="66" class="lbl">= p₁₁v₁ + p₁₂v₂</text>
+        <text x="404" y="126" class="lbl">= p₂₁v₁ + p₂₂v₂</text>
+        <text x="30" y="208" class="lbl">第 i 个分量只用到第 i 行，所以每一行对应一个状态</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 3.1</span>
+        矩阵乘向量的算法：结果的第 i 个分量只由矩阵的第 i 行与整个向量决定，是一组加权和。
+        因为 P 每行之和为 1，它就是"从该状态出发下一步价值的平均"。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 1.1（为什么值得换成矩阵写法）</span>
+      <p>逐元素写的话，$n$ 个状态就是 $n$ 条方程。换成矩阵以后，$n$ 条方程变成一个等式，求一次逆就解完了。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 向量与内积</h2>
+    <div class="def">
+      <span class="label">定义 2.1（向量）</span>
+      <p>$n$ 个实数排成一列叫一个 $n$ 维<em>向量</em>，$v=(v_1,\dots,v_n)^\top$，记作 $v\in\R^n$。
+        式中 $v_i$ 是第 $i$ 个分量，$\R^n$ 是所有 $n$ 维实向量组成的集合。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 2.2（内积）</span>
+      <p>两个 $n$ 维向量 $u,v$ 的内积是一个数：</p>
+      <div class="eq">
+        <span class="eq-body">$$\langle u,v\rangle=\sum_{i=1}^n u_i v_i.$$</span>
+        <span class="eq-num">(3.1)</span>
+      </div>
+      <p>由定义立刻得到三条性质：对称 $\langle u,v\rangle=\langle v,u\rangle$，
+        线性 $\langle au+bv,w\rangle=a\langle u,w\rangle+b\langle v,w\rangle$，
+        正定 $\langle v,v\rangle=\sum_iv_i^2\ge0$ 且等于 $0$ 只有 $v=0$ 这一种情况。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 2.3（手算一个内积）</span>
+      <p>取 $u=(1,2,2)$、$v=(2,-1,2)$，则 $\langle u,v\rangle=2-2+4=4$，
+        而 $\langle u,u\rangle=\langle v,v\rangle=9$，夹角余弦是 $4/(3\times3)=4/9\approx0.444$。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="内积等于一个向量在另一个向量方向上的投影长度乘以另一个向量的长度">
+        <line x1="60" y1="170" x2="500" y2="170" class="axis-b"/>
+        <line x1="80" y1="186" x2="80" y2="40" class="axis-b"/>
+        <path d="M80 170 L420 170" class="arrow-a"/>
+        <path d="M413 165 l9 5 l-9 5" class="arrow-a"/>
+        <path d="M80 170 L330 60" class="arrow-a"/>
+        <path d="M323 57 l11 -1 l-4 11" class="arrow-a"/>
+        <line x1="330" y1="60" x2="330" y2="170" class="mark"/>
+        <text x="428" y="176" class="val">v</text>
+        <text x="336" y="52" class="val">u</text>
+        <line x1="80" y1="192" x2="330" y2="192" class="arrow"/>
+        <path d="M80 188 l-9 4 l9 4" class="arrow"/>
+        <path d="M330 188 l9 4 l-9 4" class="arrow"/>
+        <text x="140" y="212" class="lbl">投影长度</text>
+        <text x="86" y="34" class="lbl">内积 = 投影长度 × ‖u‖，为负表示夹角超过 90°</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 3.2</span>
+        把 u 投影到 v 所在的直线上，投影长度乘上 v 的长度就是内积。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 2.4（内积与 2 范数的关系）</span>
+      <p>$\langle v,v\rangle=\sum_i v_i^2$ 等于 2 范数的平方，所以内积更基本：2 范数与夹角都由它定义，$\cos\theta=\langle u,v\rangle/(\|u\|_2\|v\|_2)$。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 矩阵乘法与它的不可交换</h2>
+    <div class="def">
+      <span class="label">定义 3.1（矩阵与矩阵乘法）</span>
+      <p>$m\times n$ 的矩阵 $A$ 是 $m$ 行 $n$ 列的数表，$A_{ij}$ 表示第 $i$ 行第 $j$ 列的元素。
+        两个矩阵相乘要求前一个的列数等于后一个的行数，结果第 $i$ 行第 $j$ 列的元素是</p>
+      <div class="eq">
+        <span class="eq-body">$$(A B)_{ij}=\sum_{k=1}^{n}A_{ik}B_{kj}.$$</span>
+        <span class="eq-num">(3.2)</span>
+      </div>
+      <p>式中求和遍历公共的那个下标 $k$。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.2（手算一次 2×2 乘法，顺便看不可交换）</span>
+      <p>取 $A=\begin{pmatrix}1&2\\3&4\end{pmatrix}$、$B=\begin{pmatrix}0&1\\1&0\end{pmatrix}$。按式 (3.2)，
+        $$A B=\begin{pmatrix}1\times0+2\times1&1\times1+2\times0\\3\times0+4\times1&3\times1+4\times0\end{pmatrix}
+          =\begin{pmatrix}2&1\\4&3\end{pmatrix},$$
+        同样按式 (3.2) 算 $B A$，得到 $\begin{pmatrix}3&4\\1&2\end{pmatrix}$。
+        两个结果不一样，所以对一般的方阵，$A B$ 与 $B A$ 通常不相等，矩阵乘法不可交换。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 3.3（结合律与分配律）</span>
+      <p>只要形状允许相乘，就有 $(A B)C=A(B C)$ 与 $A(B+C)=A B+A C$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（结合律）</span>
+      <p>思路：把两边的第 $(i,j)$ 个元素都展开成三重求和，再交换求和次序。</p>
+      <p>左边按式 (3.2) 展开两次，并把 $A_{ik}$ 提到内层求和外面：
+        $$((A B)C)_{ij}=\sum_l (A B)_{il}C_{lj}=\sum_k A_{ik}\Big(\sum_l B_{kl}C_{lj}\Big)=\sum_k A_{ik}(B C)_{kj},$$
+        最右边就是 $(A(B C))_{ij}$。对每个 $(i,j)$ 成立即得结合律；分配律把求和拆成两项即可。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.4（乘法顺序为什么重要）</span>
+      <p>$P v$ 与 $v P$ 是两个不同的东西。$P v$ 的第 $i$ 个分量是"从状态 $i$ 出发，下一步价值的加权平均"，
+        这是贝尔曼方程要的量，算成 $v P$ 就变成按列加权了。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 单位矩阵、逆矩阵与转置</h2>
+    <div class="def">
+      <span class="label">定义 4.1（单位矩阵）</span>
+      <p>$n\times n$ 的<em>单位矩阵</em> $I$ 是对角线上全是 1、其余全是 0 的矩阵。
+        对任意形状合适的 $A$ 都有 $A I=I A=A$，它扮演数字 1 的角色。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 4.2（逆矩阵）</span>
+      <p>对方阵 $A$，若存在方阵 $B$ 使 $A B=B A=I$，则称 $A$ <em>可逆</em>，
+        $B$ 叫它的<em>逆矩阵</em>，记作 $A^{-1}$，它扮演除法的角色。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 4.3（转置）</span>
+      <p>把 $A$ 的行与列互换得到的矩阵叫 $A$ 的<em>转置</em>，记作 $A^\top$，
+        即 $(A^\top)_{ij}=A_{ji}$。</p>
+    </div>
+    <div class="thm">
+      <span class="label">命题 4.4（乘积的转置要反序）</span>
+      <p>只要形状允许相乘，则</p>
+      <div class="eq">
+        <span class="eq-body">$$(A B)^\top=B^\top A^\top.$$</span>
+        <span class="eq-num">(3.3)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>比较两边的第 $(i,j)$ 个元素。左边用式 (3.2) 与转置的定义：
+        $((A B)^\top)_{ij}=(A B)_{ji}=\sum_k A_{jk}B_{ki}$。
+        右边同样展开：$(B^\top A^\top)_{ij}=\sum_k B_{ki}A_{jk}$。
+        两个和式的每一项只是乘法次序不同，数值相等，所以两个矩阵相等。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.5（$I-\gamma P$ 凭什么可逆）</span>
+      <p>一个方阵可逆的判据是它没有把非零向量映成零向量。第 6 节给出 $\rho(\gamma P)=\gamma\lt1$，
+        第 7 节再用 Neumann 级数证明 $I-\gamma P$ 可逆。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 向量范数：1 范数、2 范数与无穷范数</h2>
+    <div class="def">
+      <span class="label">定义 5.1（范数）</span>
+      <p>函数把向量映成实数，若满足三条就叫一个<em>范数</em>：
+        (i) 正定 $\|v\|\ge0$，且 $\|v\|=0$ 只有 $v=0$；
+        (ii) 齐次 $\|av\|=|a|\,\|v\|$；
+        (iii) 三角不等式 $\|u+v\|\le\|u\|+\|v\|$。
+        范数是"向量长度"这个概念的一般化。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 5.2（三种常用范数）</span>
+      <p>对 $v=(v_1,\dots,v_n)$，1 范数与 2 范数分别是
+        $$\|v\|_1=\sum_{i=1}^n|v_i|,\qquad \|v\|_2=\sqrt{\sum_{i=1}^n v_i^2},$$
+        前者是分量绝对值之和，后者是通常的欧氏长度。第三个叫<em>无穷范数</em>，只挑最大的分量：</p>
+      <div class="eq">
+        <span class="eq-body">$$\|v\|_\infty=\max_{1\le i\le n}|v_i|.$$</span>
+        <span class="eq-num">(3.4)</span>
+      </div>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.3（无穷范数度量的是最坏情况）</span>
+      <p>$\|v-w\|_\infty\le\varepsilon$ 表示每个分量的偏差都不超过 $\varepsilon$。
+        它还对随机矩阵特别好算：行和为 1 的 $P$ 满足 $\|P\|_\infty=1$。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="三种范数的单位球形状不同：菱形、圆、正方形">
+        <text x="34" y="20" class="val-b">1 范数：菱形</text>
+        <line x1="30" y1="110" x2="170" y2="110" class="grid"/>
+        <line x1="100" y1="40" x2="100" y2="180" class="grid"/>
+        <polygon points="100,60 150,110 100,160 50,110" class="box-a"/>
+        <text x="52" y="200" class="lbl">|x| + |y| ≤ 1</text>
+        <text x="216" y="20" class="val-b">2 范数：圆</text>
+        <line x1="210" y1="110" x2="350" y2="110" class="grid"/>
+        <line x1="280" y1="40" x2="280" y2="180" class="grid"/>
+        <circle cx="280" cy="110" r="50" class="box-a"/>
+        <text x="246" y="200" class="lbl">x² + y² ≤ 1</text>
+        <text x="396" y="20" class="val-b">无穷范数：正方形</text>
+        <line x1="390" y1="110" x2="530" y2="110" class="grid"/>
+        <line x1="460" y1="40" x2="460" y2="180" class="grid"/>
+        <rect x="410" y="60" width="100" height="100" class="box-a"/>
+        <text x="400" y="200" class="lbl">max(|x|, |y|) ≤ 1</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 3.3</span>
+        把长度不超过 1 的向量画出来，三种范数给出三种形状：菱形、圆、正方形。
+        形状不同，但都把原点包在里面，这就是三种度量接近程度的不同方式。</figcaption>
+    </figure>
+    <div class="eg">
+      <span class="label">例 5.4（三种范数各算一遍）</span>
+      <p>取 $v=(3,-4,1)$：$\|v\|_1=3+4+1=8$，$\|v\|_2=\sqrt{9+16+1}=\sqrt{26}\approx5.10$，
+        $\|v\|_\infty=\max(3,4,1)=4$。三个数满足 $\|v\|_\infty\le\|v\|_2\le\|v\|_1$。</p>
+    </div>
+    <div class="thm">
+      <span class="label">引理 5.5（柯西-施瓦茨不等式）</span>
+      <p>对任意 $u,v\in\R^n$ 有 $|\langle u,v\rangle|\le\|u\|_2\|v\|_2$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>若 $v=0$ 两边都是 $0$。否则对任意实数 $t$，
+        $0\le\|u-tv\|_2^2=\|u\|_2^2-2t\langle u,v\rangle+t^2\|v\|_2^2$。
+        右边是开口向上的二次函数且恒不为负，所以判别式不能为正，开方即得
+        $|\langle u,v\rangle|\le\|u\|_2\|v\|_2$。</p>
+      <span class="qed">∎</span>
+    </div>
+
+    
+    <div class="thm">
+      <span class="label">定理 5.6（三种都是范数）</span>
+      <p>定义 5.2 里的 1 范数、2 范数与无穷范数都满足定义 5.1 的三条公理。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>正定与齐次直接由绝对值的性质得到，下面只看三角不等式。</p>
+      <p>1 范数逐个分量用 $|u_i+v_i|\le|u_i|+|v_i|$ 再求和；无穷范数对每个 $i$ 有
+        $|u_i+v_i|\le\|u\|_\infty+\|v\|_\infty$，右边与 $i$ 无关，取最大即可。</p>
+      <p>2 范数把 $\langle u,v\rangle$ 用引理 5.5 换成 $\|u\|_2\|v\|_2$，再开方：
+        $\|u+v\|_2^2\le\|u\|_2^2+2\|u\|_2\|v\|_2+\|v\|_2^2=(\|u\|_2+\|v\|_2)^2$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">命题 5.7（矩阵的无穷范数等于最大绝对行和）</span>
+      <p>给定向量范数，矩阵范数定义为 $\|A\|=\max_{v\ne0}\|A v\|/\|v\|$，它满足
+        $\|A v\|\le\|A\|\,\|v\|$ 与 $\|A B\|\le\|A\|\,\|B\|$；对无穷范数，
+        $$\|A\|_\infty=\max_{1\le i\le m}\sum_{j=1}^{n}|A_{ij}|.$$</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>对任意 $v$ 有 $\|A v\|_\infty\le\max_i\sum_j|A_{ij}|\,\|v\|_\infty$，
+        所以 $\|A\|_\infty$ 不超过最大绝对行和。反过来让 $v_j$ 取第 $i^*$ 行元素的符号，
+        其中 $i^*$ 是达到最大行和的那一行，则 $\|v\|_\infty\le1$ 而 $(A v)_{i^*}$ 正好等于这个行和，
+        等号能取到。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. 特征值、特征向量与谱半径</h2>
+    <div class="def">
+      <span class="label">定义 6.1（特征值与特征向量）</span>
+      <p>对方阵 $A$，若非零向量 $v$ 与实数 $\lambda$ 满足</p>
+      <div class="eq">
+        <span class="eq-body">$$A v=\lambda v,$$</span>
+        <span class="eq-num">(3.5)</span>
+      </div>
+      <p>则称 $\lambda$ 是 $A$ 的<em>特征值</em>，$v$ 是对应的<em>特征向量</em>。
+        式 (3.5) 说：$A$ 作用在 $v$ 上不改变方向，只把长度乘了 $\lambda$ 倍。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="特征向量被矩阵作用后方向不变，长度按特征值缩放">
+        <line x1="60" y1="170" x2="500" y2="170" class="axis-b"/>
+        <line x1="270" y1="30" x2="270" y2="200" class="axis-b"/>
+        <path d="M270 140 L350 96" class="arrow-a"/>
+        <path d="M344 90 l10 2 l-6 9" class="arrow-a"/>
+        <text x="304" y="132" class="val-b">v</text>
+        <path d="M270 140 L490 19" class="arrow"/>
+        <path d="M483 13 l10 3 l-7 8" class="arrow"/>
+        <text x="410" y="70" class="val-b">A v</text>
+        <text x="70" y="196" class="lbl">A v 与 v 在同一条直线上，长度乘了 λ 倍；λ 为负时方向反过来</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 3.4</span>
+        特征向量是矩阵"只拉伸、不转向"的那些方向。这里 A v 的长度约是 v 的 2.75 倍，
+        对应的特征值约等于 2.75。</figcaption>
+    </figure>
+    <div class="eg">
+      <span class="label">例 6.2（手算两个特征值）</span>
+      <p>取 $A=\begin{pmatrix}2&1\\1&2\end{pmatrix}$。$A v=\lambda v$ 且 $v\ne0$ 等价于 $(A-\lambda I)v=0$ 有非零解，
+        要求行列式为零：$(2-\lambda)^2-1=0$，解得 $\lambda=1$ 与 $\lambda=3$。
+        对应特征向量是 $(1,-1)$ 与 $(1,1)$：$A(1,1)^\top=3(1,1)^\top$，$A(1,-1)^\top=1\cdot(1,-1)^\top$。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 6.3（谱半径）</span>
+      <p>若 $A$ 的特征值是 $\lambda_1,\dots,\lambda_n$，则 $\rho(A)=\max_i|\lambda_i|$ 叫 $A$ 的<em>谱半径</em>。
+        它衡量矩阵反复作用时最多能把长度放大多少。例 6.2 里 $\rho(A)=3$。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 6.4（谱半径不超过任何矩阵范数）</span>
+      <p>对任意方阵 $A$ 与任意由向量范数诱导的矩阵范数，</p>
+      <div class="eq">
+        <span class="eq-body">$$\rho(A)\le\|A\|.$$</span>
+        <span class="eq-num">(3.6)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>取绝对值最大的特征值 $\lambda$ 与对应的非零特征向量 $v$，两边取范数：
+        $|\lambda|\,\|v\|=\|A v\|\le\|A\|\,\|v\|$。因为 $\|v\|>0$，约掉它得 $|\lambda|\le\|A\|$；对每个特征值成立，取最大即得式 (3.6)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="特征值都落在单位圆内时谱半径小于一，反复迭代会把差距压小">
+        <line x1="80" y1="115" x2="460" y2="115" class="grid"/>
+        <line x1="270" y1="30" x2="270" y2="200" class="grid"/>
+        <circle cx="270" cy="115" r="72" class="box"/>
+        <circle cx="270" cy="115" r="3" class="dot"/>
+        <circle cx="228" cy="88" r="4.5" class="dot-a"/>
+        <circle cx="306" cy="146" r="4.5" class="dot-a"/>
+        <circle cx="322" cy="80" r="4.5" class="dot-a"/>
+        <text x="204" y="84" class="lbl">λ₁</text>
+        <text x="314" y="164" class="lbl">λ₂</text>
+        <text x="332" y="74" class="lbl">λ₃</text>
+        <text x="330" y="196" class="val-b">单位圆</text>
+        <text x="86" y="42" class="val-b">谱半径 ρ(A) = 最大的 |λ| ＜ 1</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 3.5</span>
+        把特征值画在复平面上，谱半径就是最远的特征值到原点的距离。
+        三个特征值都在圆内，说明谱半径小于 1，矩阵反复作用会把差距越压越小。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 6.5（随机矩阵的谱半径正好是 1）</span>
+      <p>$P$ 每行概率之和为 1，所以全 1 向量 $\mathbf{1}$ 满足 $P\mathbf{1}=\mathbf{1}$，1 是它的特征值；
+        而注记 5.3 给出 $\|P\|_\infty=1$。由式 (3.6) 得 $\rho(P)\le1$，两头一夹得 $\rho(P)=1$，于是 $\rho(\gamma P)=\gamma\lt1$。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>7. 回到贝尔曼方程：$v=(I-\gamma P)^{-1}r$ 的来历</h2>
+    <p>把 0002 课的矩阵形式搬过来：$v=r+\gamma P v$。用分配律把含 $v$ 的项并到一起，
+      得到 $(I-\gamma P)v=r$。要解出 $v$，就得把 $I-\gamma P$ 除到右边去，下面这条定理保证这件事做得成。</p>
+    <div class="thm">
+      <span class="label">定理 7.1（Neumann 级数）</span>
+      <p>设方阵 $A$ 满足 $\|A\|\lt1$，其中 $\|\cdot\|$ 取命题 5.7 里的矩阵范数。
+        则 $I-A$ 可逆，且</p>
+      <div class="eq">
+        <span class="eq-body">$$(I-A)^{-1}=\sum_{k=0}^{\infty}A^k=I+A+A^2+\cdots.$$</span>
+        <span class="eq-num">(3.7)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：先算部分和与 $(I-A)$ 的乘积，得到一个能直接取极限的式子。</p>
+      <p>记部分和 $S_n=I+A+\cdots+A^n$。把 $(I-A)S_n$ 逐项展开，中间项两两抵消，只剩首尾两项：
+        $(I-A)S_n=S_n(I-A)=I-A^{n+1}$。
+        由 $\|A^{n+1}\|\le\|A\|^{n+1}$ 与 $\|A\|\lt1$，这个量趋于零，所以每个元素都趋于零。
+        于是部分和收敛（收敛就是一轮轮算下去，数值不再明显变化，稳定下来了）到一个矩阵
+        $S=\sum_{k\ge0}A^k$，在等式两边取极限得 $(I-A)S=S(I-A)=I$，即 $S=(I-A)^{-1}$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>把定理 7.1 用到 $A=\gamma P$ 上：由命题 5.7 与注记 5.3，
+      $\|\gamma P\|_\infty=\gamma\|P\|_\infty=\gamma\lt1$，条件满足，所以 $I-\gamma P$ 可逆。
+      两边左乘它的逆，得到本课要的结论：</p>
+    <div class="eq">
+      <span class="eq-body">$$v=(I-\gamma P)^{-1}r=\sum_{k=0}^{\infty}\gamma^k P^k r.$$</span>
+      <span class="eq-num">(3.8)</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 7.2（右边的级数是什么含义）</span>
+      <p>$\sum_{k\ge0}\gamma^kP^kr$ 的第 $s$ 个分量是"从 $s$ 出发，第 $k$ 步拿到的奖励期望乘上 $\gamma^k$，
+        再把所有 $k$ 加起来"，与 0008 课把回报（从现在起把每一步奖励加起来的总分）展开后逐项取期望一致。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 7.3（0011 课会用到的两件事）</span>
+      <p>第一，$\|v-w\|_\infty$ 就是两个价值估计之间最大的状态偏差。
+        第二，压缩映射在无穷范数下写成 $\|T v-T w\|_\infty\le\gamma\|v-w\|_\infty$，两边都是数，逐状态验证很省事。
+        0011 课会证明这样的映射有唯一不动点（再迭代一次也不变的那种解）。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>内积 $\langle u,v\rangle=\sum_iu_iv_i$，2 范数是它的平方根，见式 (3.1)。</li>
+      <li>矩阵乘法按"行乘列"定义（式 (3.2)），一般不可交换，但满足结合律。</li>
+      <li>$(A B)^\top=B^\top A^\top$（式 (3.3)）；$\|A\|_\infty$ 是最大绝对行和，随机矩阵的它是 1。</li>
+      <li>无穷范数 $\|v\|_\infty=\max_i|v_i|$ 度量最坏分量，见式 (3.4)。</li>
+      <li>$\rho(A)\le\|A\|$（式 (3.6)）；$\|A\|\lt1$ 时 $(I-A)^{-1}=\sum_{k\ge0}A^k$（式 (3.7)），
+        于是 $v=(I-\gamma P)^{-1}r$，见式 (3.8)。</li>
+    </ul>
+    <p>下一课把"收敛"讲严格：一个序列收敛到极限是什么意思，柯西序列与完备性是什么，
+      随机序列的几种收敛方式谁强谁弱。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 关于内积与 2 范数，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>内积 $\langle u,v\rangle$ 等于这两个向量长度相乘的结果</li>
+        <li>$\langle u,u\rangle$ 等于 $\|u\|_2$，所以内积就是 2 范数的别名</li>
+        <li>$\langle u,u\rangle$ 等于 $\|u\|_2^2$，而内积本身是一个实数</li>
+        <li>内积可能取到负值，因此有人以为它不是一个实数，这是错的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由式 (3.1)，$\langle u,u\rangle=\sum_iu_i^2$，就等于 $\|u\|_2$ 的平方。
+          内积的输出是一个实数，可以正、可以负、也可以为零。</p>
+        <p>A 错在把内积与长度乘积混同，只有两个向量平行时二者才相等。
+          B 少了一次平方。D 自相矛盾：能取负值恰好说明它是实数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 关于无穷范数 $\|v\|_\infty$，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>它是分量里最大的那个绝对值，所以 $\|v\|_\infty\le\|v\|_2$</li>
+        <li>它是分量绝对值的总和，所以 $\|v\|_\infty$ 一定大于 $\|v\|_1$</li>
+        <li>它是所有分量的算术平均值，取值介于最小与最大之间</li>
+        <li>它等于 $\|v\|_2$ 除以维数的平方根，两者只差一个常数</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (3.4) 把它定义成 $\max_i|v_i|$。最大的那一项不超过平方和的平方根，
+          所以 $\|v\|_\infty\le\|v\|_2$，例 5.4 里 $4\le5.10$ 就是这种情况。</p>
+        <p>B 描述的是 1 范数，而且 1 范数只会更大，方向写反了。
+          C 与 D 都不是范数：它们不满足齐次性，把向量放大两倍时不会跟着放大两倍。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 证明结合律 $(A B)C=A(B C)$ 时，关键的一步是什么？</p>
+      <ol class="mcq-options">
+        <li>用 $A B=B A$ 这个等式把两个矩阵交换位置</li>
+        <li>把三重求和的下标重新分组，并交换求和次序</li>
+        <li>用每个矩阵都可逆这个事实把两边同时约掉</li>
+        <li>用内积的对称性把两个元素对调过来</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：证明把两边的第 $(i,j)$ 个元素都写成 $\sum_k\sum_l$ 的形式，
+          再交换求和次序、把公共因子提出来，两边就重合了。</p>
+        <p>A 直接把例 3.2 的结论否掉了：矩阵乘法不可交换。
+          C 用不到逆矩阵，而且方阵不一定可逆。D 内积与矩阵乘法是两套不同的运算。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 证明 $\rho(A)\le\|A\|$ 时，哪一步是关键？</p>
+      <ol class="mcq-options">
+        <li>用到方阵 $A$ 一定可逆这个事实，不然取不了范数</li>
+        <li>用到特征向量的长度一定等于 1，这样才好约掉</li>
+        <li>用到 $\|A v\|=\|A\|\,\|v\|$ 对任意向量都成立</li>
+        <li>用到 $\|A v\|\le\|A\|\,\|v\|$，再约掉正数 $\|v\|$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：对 $A v=\lambda v$ 两边取范数，左边是 $|\lambda|\|v\|$，
+          右边用 $\|A v\|\le\|A\|\|v\|$ 放大，再约掉 $\|v\|>0$ 就得到 $|\lambda|\le\|A\|$。</p>
+        <p>A 说反了：不可逆的矩阵照样有特征值。B 不需要，特征向量的长度可以任意。
+          C 是一个过强的式子，一般不成立，只有 $A$ 与 $v$ 恰好同向时才可能。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 证明 Neumann 级数定理时，先把 $(I-A)S_n$ 算成了什么？</p>
+      <ol class="mcq-options">
+        <li>等于 $I$，因为所有中间项都被消掉了</li>
+        <li>等于 $I-A^{n+1}$，只剩下首尾两项</li>
+        <li>等于 $A^{n+1}$，因为它只剩下了最后一项</li>
+        <li>等于 $I+A^{n+1}$，因为首尾两项相加</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把 $(I-A)(I+A+\cdots+A^n)$ 展开，正负号使中间项两两抵消，
+          只剩下首项 $I$ 与末项 $-A^{n+1}$。</p>
+        <p>A 是取极限之后的结果，不是部分和的式子。C 漏掉了 $I$，少了首项。
+          D 的符号错了：抵消以后末项带负号。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">6. 下面哪一对矩阵能说明 $A B$ 与 $B A$ 不相等？</p>
+      <ol class="mcq-options">
+        <li>$A=\begin{pmatrix}1&2\\3&4\end{pmatrix}$，$B=\begin{pmatrix}0&1\\1&0\end{pmatrix}$</li>
+        <li>$A=I$，$B=\begin{pmatrix}1&2\\3&4\end{pmatrix}$</li>
+        <li>$A=2I$，$B=\begin{pmatrix}1&2\\3&4\end{pmatrix}$</li>
+        <li>$A=\begin{pmatrix}1&0\\0&1\end{pmatrix}$，$B=\begin{pmatrix}2&0\\0&3\end{pmatrix}$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：例 3.2 算过这一对，$A B=\begin{pmatrix}2&1\\4&3\end{pmatrix}$，
+          而 $B A=\begin{pmatrix}3&4\\1&2\end{pmatrix}$，确实不同。</p>
+        <p>B 与 C 里 $A$ 是数量矩阵，与任何同阶方阵都可交换。D 里两个都是对角矩阵，
+          对角矩阵之间相乘也与次序无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 关于 $\|A\|_\infty$ 与 $I-A$ 的可逆性，哪个说法对？</p>
+      <ol class="mcq-options">
+        <li>只要 $A$ 的每个元素都小于 1，$I-A$ 就一定可逆</li>
+        <li>只要 $\|A\|_\infty\ge1$，$I-A$ 就一定不可逆</li>
+        <li>$I-A$ 可逆当且仅当 $A$ 是一个对称矩阵</li>
+        <li>只要 $\|A\|_\infty\lt1$，$I-A$ 就可逆，逆可由级数算出</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：这就是定理 7.1，条件 $\|A\|_\infty\lt1$ 足够保证 $(I-A)^{-1}=\sum_{k\ge0}A^k$ 成立。</p>
+        <p>A 只看元素大小不够：$A=\begin{pmatrix}0.5&0.5\\0.5&0.5\end{pmatrix}$ 的行和为 1，
+          虽然每个元素都小于 1，但 $\|A\|_\infty=1$，级数条件不满足。
+          B 把充分条件说成了必要条件，$\|A\|_\infty\ge1$ 时 $I-A$ 仍可能可逆。
+          C 与对称性毫无关系。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. 取 $v=(3,-4,1)$，$\|v\|_1$ 与 $\|v\|_\infty$ 分别是多少？</p>
+      <ol class="mcq-options">
+        <li>$6$ 与 $3$</li>
+        <li>$8$ 与 $4$</li>
+        <li>$8$ 与 $3$</li>
+        <li>$5$ 与 $4$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：1 范数把绝对值全加起来，$3+4+1=8$；
+          无穷范数挑最大的绝对值，$\max(3,4,1)=4$。两个数就是例 5.4 的结果。</p>
+        <p>A 漏掉了 $-4$ 的绝对值。C 把无穷范数看成了第一个分量。
+          D 给出的 $5$ 是 2 范数的近似值，不是 1 范数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 取 $\gamma=0.5$，$P=\begin{pmatrix}0.5&0.5\\0.5&0.5\end{pmatrix}$，$r=(1,1)^\top$，
+        那么 $v=(I-\gamma P)^{-1}r$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$(1,1)^\top$</li>
+        <li>$(1.5,1.5)^\top$</li>
+        <li>$(2,2)^\top$</li>
+        <li>$(4,4)^\top$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\gamma P$ 的每个元素都是 $0.25$，所以
+          $(I-\gamma P)^{-1}=\begin{pmatrix}1.5&0.5\\0.5&1.5\end{pmatrix}$，
+          乘上 $(1,1)^\top$ 得 $(2,2)^\top$。代回 $v=r+\gamma P v$ 也成立：
+          $(1,1)+0.5\times(2,2)=(2,2)$。</p>
+        <p>A 只取了即时奖励，忘记把下一步折现的价值加上。
+          B 相当于只做了一次迭代就停手。D 把折扣因子当成了 0.25。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 为什么 0011 课的压缩映射定理要用无穷范数来陈述？</p>
+      <ol class="mcq-options">
+        <li>因为它只看最大分量，逐状态验证最省事，随机矩阵在它下面的范数正好是 1</li>
+        <li>因为它数值最小，所以用它得到的压缩条件最强最有力</li>
+        <li>因为只有它才满足范数必须满足的那条三角不等式</li>
+        <li>因为它能保证贝尔曼算子一定是一个线性算子</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：压缩条件 $\|T v-T w\|_\infty\le\gamma\|v-w\|_\infty$ 两边都是数，
+          只要逐状态比较最大偏差就能验证，而 $\|P\|_\infty=1$ 让压缩常数正好落到 $\gamma$ 上。</p>
+        <p>B 把"最容易验证"说成了"条件最强"，而且无穷范数是最小的那一个。
+          C 错在三种范数都满足三角不等式。D 与范数的选择无关，
+          算子的线性与否是它自身的性质。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        附录 A「Preliminaries for Linear Algebra」。本课的矩阵写法、无穷范数与谱半径口径与之一致；
+        $v=(I-\gamma P)^{-1}r$ 的推导对应正文第 2.6 节。</p>
+      <p>想补更完整的线性代数，可读 Strang, <em>Introduction to Linear Algebra</em> 第 1、2、5、6 章，
+        或 Horn &amp; Johnson, <em>Matrix Analysis</em> 第 5 章（范数与谱半径的完整理论）。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "为什么无穷范数下矩阵范数等于最大绝对行和？用一个 2×2 的矩阵带我算一遍"，
+      或者 "谱半径小于 1 和矩阵范数小于 1，这两个条件谁更宽？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

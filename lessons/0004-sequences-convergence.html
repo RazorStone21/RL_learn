@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0004 · 序列与收敛：确定性序列与随机序列 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0004" data-slug="sequences-convergence" data-part="数学预备篇" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">数学预备 4</p>
+    <h1>序列与收敛：确定性序列与随机序列</h1>
+    <p class="lede">0001 课用"样本均值趋于期望"说明了平均的力量，但"趋于"三个字一直没有定义。
+      本课把收敛（一轮轮算下去，数值不再明显变化，稳定下来了）写成可以逐字验证的 $\varepsilon$-$N$ 语句，
+      补上柯西序列与完备性，再把随机序列的三种收敛方式摆清楚。
+      0017 到 0019 课的收敛结论都建立在这套语言上。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出数列收敛的 $\varepsilon$-$N$ 定义，并用它验证一个具体数列</li>
+        <li>能用定义说明 $(-1)^k$ 为什么不收敛，并证明极限唯一与收敛必有界</li>
+        <li>能说清柯西序列与完备性的区别，各举一个例子</li>
+        <li>能画出压缩映射的直觉图形，并证明它的不动点最多一个</li>
+        <li>能分清几乎必然收敛、依概率收敛与均方收敛，并说明谁推出谁</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 为什么要把"收敛"说严格</h2>
+    <p>强化学习里的算法几乎都长成迭代的样子。值迭代（不显式维护一套行动方案，直接把价值反复往最优方向推）每一步做
+      $$v_{k+1}=T v_k,$$
+      随机梯度下降每一步做
+      $$x_{k+1}=x_k-\alpha_k\,\nabla f(x_k),$$
+      式中 $v_k$ 是第 $k$ 轮的价值估计，$T$ 是贝尔曼算子，$\alpha_k$ 是第 $k$ 步的学习率
+      （每次更新时，往新信息的方向挪多远），$\nabla f(x_k)$ 是目标函数在这一点的梯度。</p>
+    <p>写代码时我们会盯着数值看："这一轮变化小于 0.001，就当它收敛了吧。"
+      这句话在工程上够用，在数学上不够：它没有说要跑多少步，也没有说会不会突然又跳出去。
+      本课把收敛讲成一句可以逐字验证的话，再把随机版本的收敛补齐。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="左边是收敛到零的数列，右边是来回跳动的数列">
+        <text x="30" y="20" class="val-b">收敛：xₖ = 1/k</text>
+        <line x1="30" y1="170" x2="250" y2="170" class="axis-b"/>
+        <line x1="30" y1="40" x2="30" y2="170" class="axis-b"/>
+        <line x1="30" y1="164" x2="250" y2="164" class="mark"/>
+        <text x="188" y="158" class="lbl">极限 0</text>
+        <circle cx="46" cy="60" r="3.5" class="dot-a"/>
+        <circle cx="72" cy="104" r="3.5" class="dot-a"/>
+        <circle cx="98" cy="132" r="3.5" class="dot-a"/>
+        <circle cx="124" cy="146" r="3.5" class="dot-a"/>
+        <circle cx="150" cy="154" r="3.5" class="dot-a"/>
+        <circle cx="176" cy="158" r="3.5" class="dot-a"/>
+        <circle cx="202" cy="160" r="3.5" class="dot-a"/>
+        <circle cx="228" cy="161" r="3.5" class="dot-a"/>
+        <text x="30" y="196" class="lbl">越往后越贴近极限</text>
+        <line x1="282" y1="30" x2="282" y2="196" class="grid"/>
+        <text x="306" y="20" class="val-b">不收敛：xₖ = (−1)ᵏ</text>
+        <line x1="300" y1="120" x2="530" y2="120" class="axis-b"/>
+        <line x1="300" y1="40" x2="300" y2="182" class="axis-b"/>
+        <text x="278" y="80" class="lbl">1</text>
+        <text x="268" y="168" class="lbl">−1</text>
+        <circle cx="324" cy="76" r="3.5" class="dot-a"/>
+        <circle cx="352" cy="164" r="3.5" class="dot-a"/>
+        <circle cx="380" cy="76" r="3.5" class="dot-a"/>
+        <circle cx="408" cy="164" r="3.5" class="dot-a"/>
+        <circle cx="436" cy="76" r="3.5" class="dot-a"/>
+        <circle cx="464" cy="164" r="3.5" class="dot-a"/>
+        <circle cx="492" cy="76" r="3.5" class="dot-a"/>
+        <text x="306" y="196" class="lbl">永远在 1 与 −1 之间跳，没有极限</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 4.1</span>
+        左边这个数列一次比一次靠近 0，而且再也没有跑开；右边这个数列始终在 1 与 −1 之间来回跳。
+        收敛不只是"越来越近"这种感觉，它要求从某一项起，所有项都待在极限的一个小邻域里。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 1.1（两类序列）</span>
+      <p>确定性序列的每一项都是一个确定的数，随机序列的每一项都是一个随机变量。
+        两者的收敛定义不一样：前者说"距离小于 $\varepsilon$"，后者要在"距离小于 $\varepsilon$"前面加一个概率。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 确定性序列的收敛：ε-N 语言</h2>
+    <div class="def">
+      <span class="label">定义 2.1（数列收敛）</span>
+      <p>数列 $x_1,x_2,\dots$ 收敛到 $x$，是指对任意给定的 $\varepsilon>0$，都存在一个正整数 $N$，
+        使得只要 $k\ge N$，就有 $|x_k-x|\lt\varepsilon$。写成式子就是</p>
+      <div class="eq">
+        <span class="eq-body">$$\lim_{k\to\infty}x_k=x\iff \forall\varepsilon>0,\ \exists N\in\mathbb{N},\ \forall k\ge N:\ |x_k-x|\lt\varepsilon.$$</span>
+        <span class="eq-num">(4.1)</span>
+      </div>
+      <p>式中 $\varepsilon$ 是事先指定的精度，$N$ 是"从第几项开始达标"的分界线。
+        记号 $\forall$ 读作"对任意"，$\exists$ 读作"存在"。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.2（ε 与 N 的先后不能换）</span>
+      <p>$\varepsilon$ 是别人给的，$N$ 是自己找的：先有精度，再找分界线。
+        把顺序换成"存在 $N$，使对任意 $\varepsilon$"，意思会变成"从第 $N$ 项起全都等于极限"，那是另一回事。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 2.3（用定义验证 $1/k$ 收敛到 0）</span>
+      <p>任给 $\varepsilon>0$，取 $N$ 为大于 $1/\varepsilon$ 的最小整数。当 $k\ge N$ 时
+        $1/k\le1/N\lt\varepsilon$，所以 $|x_k-0|\lt\varepsilon$ 成立。
+        例如 $\varepsilon=0.01$ 时 $N=101$，因为 $1/100$ 等于 $0.01$ 而不小于它，从第 101 项起才真正达标。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 2.4（用定义说明 $(-1)^k$ 不收敛）</span>
+      <p>假设它收敛到某个 $x$。取 $\varepsilon=1/2$，按定义存在 $N$，使 $k\ge N$ 时 $|x_k-x|\lt1/2$。
+        取一个偶数 $k\ge N$，得 $|1-x|\lt1/2$，即 $x>1/2$；再取一个奇数 $k\ge N$，
+        得 $|-1-x|\lt1/2$，即 $x\lt-1/2$。两个结论不能同时成立，所以假设错误。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 2.5（极限唯一）</span>
+      <p>若数列收敛，它收敛到的那个数只有一个。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>设 $x_k\to x$ 且 $x_k\to y$，而 $x\ne y$。取 $\varepsilon=|x-y|/2>0$。
+        由定义，存在 $N_1$ 使 $k\ge N_1$ 时 $|x_k-x|\lt\varepsilon$，
+        也存在 $N_2$ 使 $k\ge N_2$ 时 $|x_k-y|\lt\varepsilon$。
+        取 $k\ge\max(N_1,N_2)$，用三角不等式：
+        $|x-y|\le|x-x_k|+|x_k-y|\lt2\varepsilon=|x-y|$，即 $|x-y|\lt|x-y|$，矛盾。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 2.6（收敛必有界）</span>
+      <p>若 $x_k\to x$，则存在常数 $M$，使所有 $|x_k|\le M$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>取 $\varepsilon=1$，存在 $N$ 使 $k\ge N$ 时 $|x_k-x|\lt1$，于是 $|x_k|\lt|x|+1$。
+        前面只有 $N-1$ 项，取 $M=\max\{|x_1|,\dots,|x_{N-1}|,|x|+1\}$，它对所有 $k$ 都成立。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="给定精度 ε 后，从第 N 项起所有点都落在极限的 ε 邻域内">
+        <line x1="50" y1="180" x2="520" y2="180" class="axis-b"/>
+        <line x1="50" y1="36" x2="50" y2="180" class="axis-b"/>
+        <line x1="50" y1="110" x2="520" y2="110" class="mark"/>
+        <line x1="50" y1="86" x2="510" y2="86" class="grid"/>
+        <line x1="50" y1="134" x2="510" y2="134" class="grid"/>
+        <text x="466" y="104" class="val-b">x</text>
+        <text x="470" y="82" class="lbl">x+ε</text>
+        <text x="470" y="148" class="lbl">x−ε</text>
+        <circle cx="80" cy="60" r="3.5" class="dot"/>
+        <circle cx="106" cy="150" r="3.5" class="dot"/>
+        <circle cx="132" cy="72" r="3.5" class="dot"/>
+        <circle cx="158" cy="140" r="3.5" class="dot"/>
+        <circle cx="184" cy="94" r="3.5" class="dot"/>
+        <line x1="210" y1="46" x2="210" y2="164" class="arrow-a"/>
+        <text x="204" y="42" class="val-b">N</text>
+        <circle cx="240" cy="118" r="3.5" class="dot-a"/>
+        <circle cx="270" cy="104" r="3.5" class="dot-a"/>
+        <circle cx="300" cy="113" r="3.5" class="dot-a"/>
+        <circle cx="330" cy="107" r="3.5" class="dot-a"/>
+        <circle cx="360" cy="111" r="3.5" class="dot-a"/>
+        <circle cx="390" cy="108" r="3.5" class="dot-a"/>
+        <circle cx="420" cy="112" r="3.5" class="dot-a"/>
+        <circle cx="450" cy="109" r="3.5" class="dot-a"/>
+        <text x="56" y="206" class="lbl">N 之前允许跑出带子，N 之后必须全部落在 x 加减 ε 之内</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 4.2</span>
+        黑色点是 N 之前的项，它们跳出去无所谓；深色点从第 N 项开始，全部落在两条虚线之间。
+        换一个更小的 ε（事先指定的精度），两条虚线会靠得更近，N 也要往右挪，但总能找到这样的 N。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 柯西序列与完备性</h2>
+    <p>定义 2.1 要求事先知道极限是什么。很多时候我们只知道后面的项挤在一起了，
+      并不知道它们挤向哪里。柯西序列就是描述这件事的。</p>
+    <div class="def">
+      <span class="label">定义 3.1（柯西序列）</span>
+      <p>数列 $x_1,x_2,\dots$ 叫<em>柯西序列</em>，是指对任意 $\varepsilon>0$，存在 $N$，
+        使得只要 $m\ge N$ 且 $k\ge N$，就有 $|x_m-x_k|\lt\varepsilon$：</p>
+      <div class="eq">
+        <span class="eq-body">$$\forall\varepsilon>0,\ \exists N\in\mathbb{N},\ \forall m,k\ge N:\ |x_m-x_k|\lt\varepsilon.$$</span>
+        <span class="eq-num">(4.2)</span>
+      </div>
+      <p>它只谈序列内部两两之间的距离，完全不提极限。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 3.2（收敛一定柯西）</span>
+      <p>若 $x_k\to x$，则 $x_1,x_2,\dots$ 是柯西序列。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>任给 $\varepsilon>0$。由式 (4.1) 存在 $N$，使 $k\ge N$ 时 $|x_k-x|\lt\varepsilon/2$。
+        当 $m,k\ge N$ 时，用三角不等式
+        $|x_m-x_k|\le|x_m-x|+|x-x_k|\lt\varepsilon/2+\varepsilon/2=\varepsilon$，
+        所以它满足式 (4.2)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 3.3（实数完备性）</span>
+      <p>在 $\R$ 里反过来也成立：每个柯西序列都收敛，而且极限还是实数。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.4（这条定理是引用）</span>
+      <p>完备性的完整证明要用实数的构造或确界原理，属于数学分析的内容
+        （引用，见任意一本数学分析教材的实数完备性章节）。
+        它在后面的作用是把"证明收敛"拆成两半：先证序列是柯西的，再引用完备性得到收敛。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.5（完备性是空间的性质）</span>
+      <p>把数列 $1,\ 1.4,\ 1.41,\ 1.414,\dots$ 看作有理数序列，它在有理数范围内是柯西的，
+        但它的极限是 $\sqrt{2}$，不是有理数。所以"柯西推出收敛"在有理数集合里不成立，在实数里才成立。
+        这说明完备性属于空间，不属于序列本身。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 压缩映射的直觉</h2>
+    <p>强化学习里的迭代大多在算一个不动点（再迭代一次也不变的那种解），也就是找一个 $v$ 使 $T v=v$。
+      想让"反复迭代就会靠近它"成立，关键是迭代算子会把距离压缩。</p>
+    <div class="def">
+      <span class="label">定义 4.1（压缩性）</span>
+      <p>函数 $f$ 若存在常数 $\gamma\in[0,1)$，使对任意 $x,y$ 都有</p>
+      <div class="eq">
+        <span class="eq-body">$$|f(x)-f(y)|\le\gamma\,|x-y|,$$</span>
+        <span class="eq-num">(4.3)</span>
+      </div>
+      <p>则称 $f$ 是一个<em>压缩映射</em>（每迭代一次，两个估计之间的差距就缩小一点，所以最终必然稳定），
+        $\gamma$ 叫压缩系数。式中 $|\cdot|$ 表示取绝对值。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 4.2（不动点最多一个）</span>
+      <p>压缩映射最多有一个不动点。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>设 $x$ 与 $y$ 都是不动点。由式 (4.3)，
+        $|x-y|=|f(x)-f(y)|\le\gamma|x-y|$，移项得 $(1-\gamma)|x-y|\le0$。
+        因为 $\gamma\lt1$，所以 $|x-y|\le0$，即 $x=y$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">命题 4.3（差距按几何速度缩小）</span>
+      <p>若 $x^*$ 是压缩映射 $f$ 的一个不动点，迭代 $x_{k+1}=f(x_k)$ 满足</p>
+      <div class="eq">
+        <span class="eq-body">$$|x_k-x^*|\le\gamma^k\,|x_0-x^*|.$$</span>
+        <span class="eq-num">(4.4)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>对 $k$ 用归纳法。$k=0$ 时两边相等。若 $|x_k-x^*|\le\gamma^k|x_0-x^*|$，则
+        $|x_{k+1}-x^*|=|f(x_k)-f(x^*)|\le\gamma|x_k-x^*|\le\gamma^{k+1}|x_0-x^*|$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="压缩映射让两点每次迭代都更靠近，最终挤向不动点">
+        <line x1="60" y1="180" x2="500" y2="180" class="axis-b"/>
+        <line x1="270" y1="40" x2="270" y2="180" class="mark"/>
+        <text x="278" y="196" class="val-b">不动点</text>
+        <circle cx="140" cy="130" r="5" class="dot"/>
+        <circle cx="400" cy="130" r="5" class="dot"/>
+        <text x="128" y="118" class="val">x</text>
+        <text x="392" y="118" class="val">y</text>
+        <line x1="146" y1="152" x2="394" y2="152" class="arrow"/>
+        <path d="M146 148 l-9 4 l9 4" class="arrow"/>
+        <path d="M394 148 l9 4 l-9 4" class="arrow"/>
+        <circle cx="200" cy="88" r="4" class="dot-a"/>
+        <circle cx="340" cy="88" r="4" class="dot-a"/>
+        <line x1="206" y1="68" x2="334" y2="68" class="arrow-a"/>
+        <path d="M206 64 l-9 4 l9 4" class="arrow-a"/>
+        <path d="M334 64 l9 4 l-9 4" class="arrow-a"/>
+        <text x="216" y="60" class="lbl">|f(x) − f(y)| ≤ γ·|x − y|</text>
+        <text x="86" y="176" class="lbl">|x − y|</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 4.3</span>
+        上面两个深色点是迭代一次之后的位置，它们的距离比原来那两个点更近，比例不超过 γ（压缩系数）。
+        反复迭代，两点的距离按 γ 的幂次缩小，最终一起挤向中间的不动点。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 4.4（本课只铺直觉）</span>
+      <p>命题 4.3 有一个前提：不动点已经存在。存在性不是自动的，0011 课会用完备性证明
+        "压缩映射恰好有一个不动点"，并把这里的 $\gamma$ 换成贝尔曼算子的折扣因子（越往后的奖励，权重越小）。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 随机序列的三种收敛</h2>
+    <p>现在把每一项换成随机变量：$X_1,X_2,\dots$ 是随机序列，$X$ 是随机变量。
+      对固定的样本点，$X_1(\omega),X_2(\omega),\dots$ 就是一个普通数列。
+      随机序列的收敛，就是在说这些数列"绝大多数"都收敛。</p>
+    <div class="def">
+      <span class="label">定义 5.1（几乎必然收敛）</span>
+      <p>若使数列 $X_1(\omega),X_2(\omega),\dots$ 收敛到 $X(\omega)$ 的那些样本点的总概率为 1，
+        则称 $X_k$ <em>几乎必然收敛</em>到 $X$，记作 $X_k\to X$ a.s.：</p>
+      <div class="eq">
+        <span class="eq-body">$$P\Big(\lim_{k\to\infty}X_k=X\Big)=1.$$</span>
+        <span class="eq-num">(4.5)</span>
+      </div>
+      <p>式中 $P$ 是概率。它逐条样本路径下结论，是一条很强的要求。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 5.2（依概率收敛）</span>
+      <p>若对任意 $\varepsilon>0$ 都有 $\lim_k P(|X_k-X|>\varepsilon)=0$，则称 $X_k$ <em>依概率收敛</em>到 $X$：</p>
+      <div class="eq">
+        <span class="eq-body">$$\forall\varepsilon>0:\quad \lim_{k\to\infty}P\big(|X_k-X|>\varepsilon\big)=0.$$</span>
+        <span class="eq-num">(4.6)</span>
+      </div>
+      <p>它不追究某一条样本路径会不会跑偏，只管"跑偏得比较远的概率"在多步之后变小。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 5.3（均方收敛）</span>
+      <p>若 $\lim_k\E\big[|X_k-X|^2\big]=0$，则称 $X_k$ <em>均方收敛</em>到 $X$：</p>
+      <div class="eq">
+        <span class="eq-body">$$\lim_{k\to\infty}\E\big[|X_k-X|^2\big]=0.$$</span>
+        <span class="eq-num">(4.7)</span>
+      </div>
+      <p>式中 $\E$ 是期望。它用的是平均平方误差，偏差大但出现少的样本也会被算进去。</p>
+    </div>
+    <div class="thm">
+      <span class="label">引理 5.4（马尔可夫不等式）</span>
+      <p>若随机变量 $Z\ge0$ 且 $\E[Z]$ 有限，则对任意 $a>0$ 有</p>
+      <div class="eq">
+        <span class="eq-body">$$P(Z\ge a)\le\frac{\E[Z]}{a}.$$</span>
+        <span class="eq-num">(4.8)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>在事件 $\{Z\ge a\}$ 上 $Z\ge a$，在其他地方 $Z\ge0$，所以随机变量 $Z$ 处处不小于
+        $a$ 乘上这个事件的指示函数。两边取期望：
+        $\E[Z]\ge a\,\E[\mathbf{1}_{\{Z\ge a\}}]=a\,P(Z\ge a)$，两边除以 $a$ 即得式 (4.8)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 5.5（均方收敛推出依概率收敛）</span>
+      <p>若 $X_k$ 均方收敛到 $X$，则 $X_k$ 也依概率收敛到 $X$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>对任意 $\varepsilon>0$，把式 (4.8) 用到 $Z=|X_k-X|^2$ 与 $a=\varepsilon^2$ 上：
+        $$P\big(|X_k-X|>\varepsilon\big)=P\big(|X_k-X|^2>\varepsilon^2\big)
+          \le\frac{\E\big[|X_k-X|^2\big]}{\varepsilon^2}.$$
+        右边当 $k\to\infty$ 时趋于零，所以左边也趋于零，即式 (4.6)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 5.6（几乎必然收敛推出依概率收敛）</span>
+      <p>若 $X_k\to X$ 几乎必然，则 $X_k$ 也依概率收敛到 $X$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>任给 $\varepsilon>0$，记 $A_k=\{\sup_{j\ge k}|X_j-X|>\varepsilon\}$。这些事件随 $k$ 增大而变小，
+        它们的交是 $\{\limsup_j|X_j-X|>\varepsilon\}$，由式 (4.5) 知这个交的概率为零。
+        概率满足从上连续，所以 $P(A_k)\to P(\bigcap_kA_k)=0$。
+        又因为 $\{|X_k-X|>\varepsilon\}\subseteq A_k$，所以 $P(|X_k-X|>\varepsilon)\le P(A_k)\to0$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 200" role="img" aria-label="均方收敛与几乎必然收敛都能推出依概率收敛，反方向不成立">
+        <rect x="40" y="30" width="150" height="46" rx="6" class="box-a"/>
+        <text x="58" y="58" class="val-b">均方收敛</text>
+        <rect x="40" y="126" width="150" height="46" rx="6" class="box-a"/>
+        <text x="58" y="154" class="val-b">几乎必然收敛</text>
+        <line x1="115" y1="80" x2="115" y2="122" class="mark"/>
+        <text x="124" y="104" class="lbl">互不蕴含</text>
+        <rect x="350" y="78" width="160" height="46" rx="6" class="box"/>
+        <text x="366" y="106" class="val-b">依概率收敛</text>
+        <path d="M190 53 H270 V101 H344" class="arrow-a"/>
+        <path d="M337 96 l9 5 l-9 5" class="arrow-a"/>
+        <path d="M190 149 H270" class="arrow-a"/>
+        <text x="200" y="44" class="lbl">一定能推出</text>
+        <text x="212" y="176" class="lbl">反方向不成立，见例 5.7 与例 5.8</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 4.4</span>
+        均方收敛与几乎必然收敛都能推出依概率收敛，两条箭头都指向右边那个方框；
+        反方向都不成立，两者之间也没有一般的蕴含关系。所以依概率收敛是三者里最弱的一个。</figcaption>
+    </figure>
+    <div class="eg">
+      <span class="label">例 5.7（依概率收敛推不出均方收敛）</span>
+      <p>取 $X_k$ 以概率 $1/k$ 等于 $k$，以概率 $1-1/k$ 等于 $0$。对任意 $\varepsilon>0$，
+        当 $k>\varepsilon$ 时 $P(|X_k|>\varepsilon)=1/k\to0$，所以它依概率收敛到 $0$。
+        但 $\E[X_k^2]=k^2\cdot(1/k)=k\to\infty$，均方并不收敛。
+        偏差大而出现少的项，恰好是均方口径抓得住、依概率口径抓不住的东西。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.8（依概率收敛推不出几乎必然收敛）</span>
+      <p>在 $[0,1]$ 上按均匀分布取点，把 $[0,1]$ 依次切成 $2^m$ 个长度 $2^{-m}$ 的小区间，
+        第 $k=2^m+j$ 个随机变量取第 $j$ 个小区间上的指示函数。它取 1 的概率是 $2^{-m}\to0$，
+        所以依概率收敛到 $0$；但每个点都被这些小段盖住无穷多次，所以没有哪条样本路径收敛。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="多条样本路径：随步数增加，落在 ε 带外的路径越来越少">
+        <line x1="60" y1="180" x2="500" y2="180" class="axis-b"/>
+        <line x1="60" y1="36" x2="60" y2="180" class="axis-b"/>
+        <line x1="60" y1="110" x2="500" y2="110" class="mark"/>
+        <line x1="60" y1="80" x2="500" y2="80" class="grid"/>
+        <line x1="60" y1="140" x2="500" y2="140" class="grid"/>
+        <text x="504" y="114" class="val-b">X</text>
+        <text x="66" y="76" class="lbl">X+ε</text>
+        <text x="66" y="156" class="lbl">X−ε</text>
+        <path d="M64 44 C150 62 250 100 380 108 L494 110" class="curve"/>
+        <path d="M64 172 C150 152 250 122 380 112 L494 110" class="curve2"/>
+        <path d="M64 96 C120 44 170 156 230 122 C300 96 340 132 420 114 L494 110" class="curve"/>
+        <text x="120" y="204" class="lbl">步数 k 增大，跑出 ε 带的路径越来越少，概率随之趋于 0</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 4.5</span>
+        三条样本路径。左边步数少的时候，有的路径跑出 ε 带很远；步数增大以后它们都被拉回带子附近。
+        依概率收敛说的是"落在带外的路径所占的比例趋于零"，而不是"每条路径都不再跑出去"。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 5.9（三种收敛的强弱）</span>
+      <p>均方收敛与几乎必然收敛各自都能推出依概率收敛，反方向都不成立，两者之间也没有一般的蕴含关系。
+        所以依概率收敛最弱，也最容易证明。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>6. 为什么后续证明关心依概率收敛</h2>
+    <p>算法的输出是一串随机变量：每次跑实验，参数都落在不同的地方。
+      要求"某一条样本路径一定收敛"太强，算法保证不了；能保证的是"偏离目标的概率越来越小"，
+      这正好是依概率收敛。</p>
+    <p>0017 课的 Robbins-Monro 算法处理带噪声的根求解问题，结论写成估计值依概率收敛到真根；
+      0019 课的随机梯度下降用它推出参数依概率收敛到驻点。
+      这两处的证明都是先证误差的均方趋于零，再由定理 5.5 换成依概率收敛。</p>
+    <div class="rem">
+      <span class="label">注记 6.1（更强与更弱的结论）</span>
+      <p>0018 课的 Dvoretzky 定理给出的是几乎必然收敛，比依概率收敛更强，因为它对每条样本路径都下结论。
+        0001 课的弱大数定律给出的则是依概率收敛：样本均值偏离期望超过 $\varepsilon$ 的概率趋于零。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 6.2（想升级到几乎必然收敛要多加什么）</span>
+      <p>常见的一条路是 Borel-Cantelli 引理：若对每个 $\varepsilon>0$ 都有
+        $\sum_kP(|X_k-X|>\varepsilon)$ 有限，则 $X_k$ 几乎必然收敛到 $X$。0018 课会用到这个套路。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>收敛的 $\varepsilon$-$N$ 定义见式 (4.1)：先给精度，再找分界线，之后所有项都落在带内。</li>
+      <li>收敛序列的极限唯一、而且有界；柯西序列只谈内部两两距离，见式 (4.2)。</li>
+      <li>在实数里柯西等价于收敛，这条叫完备性（定理 3.3，引用）。</li>
+      <li>压缩映射把距离按 γ 缩小（式 (4.3)），差距按 γ 的幂次下降（式 (4.4)），不动点最多一个。</li>
+      <li>随机序列有几乎必然（式 (4.5)）、依概率（式 (4.6)）、均方（式 (4.7)）三种收敛。</li>
+      <li>均方与几乎必然各推出依概率，反方向都不成立；0017 到 0019 课的结论多用依概率收敛陈述。</li>
+    </ul>
+    <p>数学预备篇到这里结束。下一课开始进正文，从最基础的问题设定讲起。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. 在收敛的 $\varepsilon$-$N$ 定义里，$N$ 依赖什么？</p>
+      <ol class="mcq-options">
+        <li>$N$ 只依赖 $\varepsilon$，选定后对一切 $k\ge N$ 都成立</li>
+        <li>$N$ 依赖具体的 $k$，每一项都可以有自己的分界线</li>
+        <li>$N$ 就是序列最终收敛到的那个极限值本身</li>
+        <li>$N$ 必须正好等于 $1/\varepsilon$ 的整数部分</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (4.1) 的语序是先给 $\varepsilon$，再找 $N$，最后要求所有 $k\ge N$ 都达标。
+          一个 $N$ 要管住它后面的全部项，不能每项换一个。</p>
+        <p>B 把量词顺序颠倒了。C 混淆了分界线与极限。D 把例 2.3 里的一个具体取法当成了定义，
+          对别的数列根本不成立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 柯西序列的定义要求的是什么？</p>
+      <ol class="mcq-options">
+        <li>存在一个数，使序列的每一项都越来越接近它</li>
+        <li>只要项数足够靠后，任意两项之间的距离都小于 $\varepsilon$</li>
+        <li>序列的每一项都不超过某一个固定的常数上界</li>
+        <li>序列的相邻两项之差单调减小并且最终趋于零</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (4.2) 说的是"存在 $N$，使 $m,k\ge N$ 时 $|x_m-x_k|\lt\varepsilon$"，
+          只涉及序列内部的项，不需要事先知道极限。</p>
+        <p>A 描述的是收敛，多了一个柯西序列并不需要的对象。C 是有界性，例 2.4 里的
+          $(-1)^k$ 有界却不是柯西序列。D 太弱：$x_k=\sqrt{k}$ 的相邻差趋于零，但它不是柯西序列。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. 证明"收敛一定柯西"时，关键的不等式是哪一个？</p>
+      <ol class="mcq-options">
+        <li>用到序列一定有界这个结论，再把那个界代进去</li>
+        <li>用到压缩映射的定义，再让压缩系数逐步趋于 1</li>
+        <li>用三角不等式把差值拆成两段，各让它小于 $\varepsilon/2$</li>
+        <li>用柯西-施瓦茨不等式把两个差值直接乘起来</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$|x_m-x_k|\le|x_m-x|+|x-x_k|$，两项分别在 $m,k\ge N$ 时小于 $\varepsilon/2$，
+          加起来正好是 $\varepsilon$。</p>
+        <p>A 的有界性给不出"任意两项都靠近"。B 把两件事混在一起：证明柯西性质不需要压缩。
+          D 是内积的性质，与绝对值不等式无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 证明"均方收敛推出依概率收敛"时，用了哪个不等式？</p>
+      <ol class="mcq-options">
+        <li>三角不等式 $|a+b|\le|a|+|b|$，把偏差拆成两项</li>
+        <li>柯西-施瓦茨不等式 $\langle u,v\rangle\le\|u\|\,\|v\|$</li>
+        <li>压缩映射的定义，把两个估计的差距按压缩系数缩小</li>
+        <li>马尔可夫不等式 $P(Z\ge a)\le\E[Z]/a$，取 $Z$ 为平方误差</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把式 (4.8) 用到 $Z=|X_k-X|^2$ 与 $a=\varepsilon^2$ 上，
+          得到 $P(|X_k-X|>\varepsilon)\le\E[|X_k-X|^2]/\varepsilon^2$，
+          右边趋于零就把均方收敛换成了依概率收敛。</p>
+        <p>A 处理的是和的绝对值，这里要的是把一个尾部概率换成矩。B 是向量内积的性质。
+          C 与随机序列的收敛模式无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 证明压缩映射最多一个不动点时，关键一步是什么？</p>
+      <ol class="mcq-options">
+        <li>写出 $|x-y|\le\gamma|x-y|$，再移项并约掉 $\gamma\lt1$</li>
+        <li>用压缩映射一定是连续函数这个事实去取极限</li>
+        <li>用迭代出来的那个序列一定有界这个事实，再取极限</li>
+        <li>用压缩系数 $\gamma\ge1$ 这个条件</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两个不动点之间的距离不超过它自己的 $\gamma$ 倍，
+          移项得 $(1-\gamma)|x-y|\le0$，再由 $\gamma\lt1$ 得到距离为零。</p>
+        <p>B 与连续性无关。C 有界性在这里用不上。D 说反了：压缩映射要求 $\gamma$ 落在 $[0,1)$ 里。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 数列 $x_k=(-1)^k$ 为什么不收敛？</p>
+      <ol class="mcq-options">
+        <li>因为它没有上界，不满足"收敛必有界"这个必要条件</li>
+        <li>取 $\varepsilon=1/2$，任何 $N$ 之后总有靠近 1 与靠近 −1 的项</li>
+        <li>因为它的相邻两项之差始终等于 2，不可能变小</li>
+        <li>因为它是有界的序列，而有界的序列一定不会收敛</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：例 2.4 的做法是取 $\varepsilon=1/2$。若它收敛到 $x$，
+          偶数项要求 $x>1/2$，奇数项要求 $x\lt-1/2$，两者不可能同时成立。</p>
+        <p>A 说错了：这个数列有界。C 描述的是事实，但相邻差不为零并不妨碍收敛，
+          例如 $x_k=1/k$ 的相邻差也不为零。D 更错：有界序列可能收敛，例如常数数列。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">7. 关于依概率收敛与均方收敛的关系，哪个说法对？</p>
+      <ol class="mcq-options">
+        <li>依概率收敛一定推出均方收敛，反过来不成立</li>
+        <li>两者互相推出，只是说法不同</li>
+        <li>均方收敛一定推出依概率收敛，反过来不成立</li>
+        <li>两者没有关系，谁也推不出谁</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定理 5.5 给出了均方到依概率的那条箭头；
+          例 5.7 里的 $X_k$ 依概率收敛到 $0$，但二阶矩等于 $k$，所以反方向不成立。</p>
+        <p>A 把箭头方向写反了。B 忽略了例 5.7 这个反例。D 忽略了定理 5.5，
+          两者的关系是单向的，不是没有关系。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 数列 $x_k=1/k$，取 $\varepsilon=0.01$，要保证 $k\ge N$ 时 $|x_k|\lt\varepsilon$，
+        $N$ 最小可以取多少？</p>
+      <ol class="mcq-options">
+        <li>$99$</li>
+        <li>$100$</li>
+        <li>$101$</li>
+        <li>$1000$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：需要 $1/N\lt0.01$，也就是 $N>100$。$N=101$ 满足，
+          而 $1/100$ 正好等于 $0.01$，不满足严格小于。</p>
+        <p>A 与 B 都取了不满足严格小于的边界值。D 虽然也满足条件，但不是最小的那个。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 取 $X_k$ 以概率 $1/k$ 等于 1，以概率 $1-1/k$ 等于 0，则它怎样收敛？</p>
+      <ol class="mcq-options">
+        <li>$\E[X_k^2]=1/k^2$，所以均方收敛到 $0$</li>
+        <li>$\E[X_k^2]=1$，所以均方不收敛</li>
+        <li>$\E[X_k^2]=k$，所以均方不收敛</li>
+        <li>$\E[X_k^2]=1/k$，所以均方收敛到 $0$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$X_k$ 只取 0 与 1，所以 $X_k^2$ 与 $X_k$ 同分布，
+          $\E[X_k^2]=1\times(1/k)+0=1/k\to0$，均方收敛到 $0$。</p>
+        <p>A 把概率当成了平方。B 忘了乘概率，直接取成了 1。
+          C 是例 5.7 里那个取值为 $k$ 的版本，与本题的取值不同。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 为什么后续课（0017 到 0019）的收敛结论常写成依概率收敛或几乎必然收敛？</p>
+      <ol class="mcq-options">
+        <li>因为算法产生的是一串随机变量，没法要求某一条确定的路径收敛</li>
+        <li>因为依概率收敛是这三种收敛里最强的一种</li>
+        <li>因为只有依概率收敛才能和大数定律联系起来</li>
+        <li>因为均方收敛在实际问题里根本无法验证</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每次实验的参数都不同，能下结论的对象只能是"偏差较大的概率"或者"绝大多数路径"，
+          这两种说法分别对应依概率收敛与几乎必然收敛。</p>
+        <p>B 说反了，依概率收敛是最弱的一种。C 错在大数定律也给出几乎必然收敛的版本。
+          D 错在均方收敛是最常用来做中间步骤的工具，例 5.7 说明的只是它比依概率收敛更强。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        附录 C「Preliminaries for Stochastic Processes」。本课的确定性收敛、柯西序列、压缩映射直觉
+        与随机序列三种收敛口径与之一致；具体对应附录 C 第 1、2 节。</p>
+      <p>想补更完整的收敛理论，可读 Rudin, <em>Principles of Mathematical Analysis</em> 第 3 章，
+        以及 Durrett, <em>Probability: Theory and Examples</em> 第 2 章（收敛模式与 Borel-Cantelli 引理）。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把依概率收敛和几乎必然收敛的差别用一个掷骰子的例子讲一遍"，
+      或者 "为什么 $x_k=\\sqrt{k}$ 的相邻差趋于零却不收敛？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

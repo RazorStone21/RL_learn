@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0007 · 状态值：为什么回报重要、怎么算回报 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0007" data-slug="state-values" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 3 ／ 基础工具</p>
+    <h1>状态值：为什么回报重要、怎么算回报</h1>
+    <p class="lede">回报（从现在起一直到结束，把每一步奖励加起来的总分）是随机变量，同一套策略（一套"看到什么状态就选什么动作"的规则）走两遍，同一个起点可能拿到两个不同的数，直接比大小会被运气带偏。解决办法是对它取平均：这就是状态值（只看状态、不管具体选哪个动作的那个价值）。本课给出它的定义，在网格世界上把九个状态的值一个个算出来，再引入动作值，并证明两者之间的那条关系。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能说明为什么用单次回报比较策略不可靠，而要用它的期望</li>
+        <li>能写出状态值 $v_\pi(s)$ 的定义，并说明它依赖什么、不依赖什么</li>
+        <li>能在网格世界上手算全部九个状态的状态值</li>
+        <li>能写出动作值 $q_\pi(s,a)$ 的定义，并算出一个具体的 $q_\pi$</li>
+        <li>能证明 $v_\pi(s)=\sum_a\pi(a|s)q_\pi(s,a)$</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 为什么只看一次回报不够</h2>
+    <p>上一课算过回报：从 $s_1$ 出发走一条路拿到 9 分，走另一条路拿到 8 分。这两条路可能出自同一套策略，区别只在策略在 $s_1$ 上掷了不同的硬币。</p>
+    <p>本课继续用上一课那套策略：$s_5$ 上不动、$s_2$ 上向下、$s_4$ 上向右、$s_6$ 上向左、$s_8$ 上向上、$s_1$ 与 $s_3$ 上向下、$s_7$ 与 $s_9$ 上向上，越靠近 $s_5$ 越好。把它叫 $\pi$，它属于确定性策略（每个状态只固定选一个动作的策略）。</p>
+    <p>再取一套只在 $s_1$ 上不同的策略 $\pi'$，它属于随机策略（每个状态下按概率挑动作的策略）：在 $s_1$ 上以 0.5 的概率向下（到 $s_4$）、以 0.5 的概率向右（到 $s_2$），其余状态与 $\pi$ 相同。这时从 $s_1$ 出发有两条可能的轨迹。</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 220" role="img" aria-label="从 s1 出发有两条轨迹，一条回报 9，一条回报 8，平均是 8.5">
+        <rect x="30" y="86" width="70" height="42" class="box-a"/><text x="54" y="112" class="val-b">s1</text>
+        <path d="M104 96 H196" class="arrow-a"/><path d="M188 91 l10 5 l-10 5" class="arrow-a"/>
+        <text x="130" y="88" class="val-b">0.5 向下 a3</text>
+        <path d="M104 120 H196" class="arrow"/><path d="M188 115 l10 5 l-10 5" class="arrow"/>
+        <text x="130" y="140" class="val-b">0.5 向右 a2</text>
+        <rect x="204" y="70" width="120" height="42" class="box"/><text x="216" y="96" class="val">经过 s4 到 s5</text>
+        <rect x="204" y="118" width="120" height="42" class="box"/><text x="216" y="144" class="val">经过 s2 到 s5</text>
+        <text x="336" y="96" class="val-b">奖励 0, 1, 1, 1, …</text>
+        <text x="336" y="144" class="val-b">奖励 −1, 1, 1, 1, …</text>
+        <text x="336" y="118" class="lbl">两条路的奖励序列只差第一项</text>
+        <rect x="150" y="178" width="240" height="30" class="box-a"/>
+        <text x="164" y="198" class="val-b">平均 0.5 × 9 + 0.5 × 8 = 8.5</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 7.1</span>
+        同一套策略 $\pi'$ 在 $s_1$ 上掷一次硬币，走上面那条路拿 9，走下面那条路拿 8。只看一次结果，无法判断 $\pi'$ 到底好不好；把两条路的回报按概率加权平均，得到 8.5。</figcaption>
+    </figure>
+
+    <p>两条轨迹的回报分别是 $G_0=0+\gamma(1+\gamma+\gamma^{2}+\cdots)=9$ 与 $G_0=-1+\gamma(1+\gamma+\cdots)=8$，其中 $\gamma=0.9$。同一个起点、同一套策略，回报却不同，所以 $G_0$ 是随机变量。</p>
+    <div class="rem">
+      <span class="label">注记 7.1（为什么要取期望）</span>
+      <p>用一次回报去比较两套策略，等于用一次考试分数去比较两个学生，运气占了很大成分。
+        取期望之后得到的是一个确定的数，可以写方程、可以排序、可以做优化。
+        重复很多次取平均会越来越接近这个期望，这一点由预备篇讲的大数定律保证。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="把同一个状态跑很多次，回报有高有低，它们的平均就是状态值">
+        <text x="30" y="24" class="lbl">把同一个起点跑很多次，记录每次的回报</text>
+        <rect x="40" y="52" width="26" height="70" class="bar"/><text x="44" y="140" class="lbl">9</text>
+        <rect x="96" y="52" width="26" height="70" class="bar"/><text x="100" y="140" class="lbl">8</text>
+        <rect x="152" y="52" width="26" height="70" class="bar"/><text x="156" y="140" class="lbl">9</text>
+        <rect x="208" y="52" width="26" height="70" class="bar"/><text x="212" y="140" class="lbl">9</text>
+        <rect x="264" y="52" width="26" height="70" class="bar"/><text x="268" y="140" class="lbl">8</text>
+        <rect x="320" y="52" width="26" height="70" class="bar"/><text x="324" y="140" class="lbl">9</text>
+        <text x="40" y="166" class="lbl">第 1 次　第 2 次　第 3 次　…　每次数都不一样</text>
+        <path d="M368 88 H436" class="arrow-a"/><path d="M428 83 l10 5 l-10 5" class="arrow-a"/>
+        <text x="372" y="78" class="lbl">取平均</text>
+        <rect x="446" y="70" width="70" height="36" class="box-a"/><text x="458" y="94" class="val-b">8.5</text>
+        <text x="360" y="188" class="lbl">这个平均值就是 v(s1)</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 7.2</span>
+        单次回报忽高忽低，取平均之后稳定下来。状态值就是「从 $s$ 出发能拿到的回报的长期平均」，
+        它不再是随机变量，而是一个确定的数。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 状态值的定义</h2>
+    <div class="def">
+      <span class="label">定义 7.2（状态值）</span>
+      <p>状态值（只看状态、不管具体选哪个动作的那个价值）定义为式 (7.1)。</p>
+      <div class="eq">
+        <span class="eq-body">$$v_\pi(s)\doteq\E_\pi\!\left[G_t\mid S_t=s\right]$$</span>
+        <span class="eq-num">(7.1)</span>
+      </div>
+      <p>式中 $\E_\pi$ 表示「按策略 $\pi$ 与环境交互时求平均」，$s$ 是起点状态。$v_\pi(s)$ 是状态 $s$ 的状态值，
+        它是一个确定的数。把九个状态的 $v_\pi$ 排成一列，得到的函数叫价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）。</p>
+    </div>
+    <p>定义里有三件事要记住：它依赖起点 $s$；它依赖策略 $\pi$，换一套策略就换一组数；它不依赖时刻 $t$，第 3 步走到 $s_5$ 和第 100 步走到 $s_5$，状态值一样。第三条需要一点论证，先回顾上一课的两条背景条件：环境满足马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关），每一步的落点由转移概率（这个跳转不一定落到同一个格子，结果是一组各带概率的可能性）$p(s'|s,a)$ 描述，奖励的分布只由 $(s,a,s')$ 决定。</p>
+
+    <div class="thm">
+      <span class="label">命题 7.3（状态值与时刻无关）</span>
+      <p>若 $p$、$r$ 与 $\pi$ 都不随时刻变化，则 $\E_\pi[G_t\mid S_t=s]$ 与 $t$ 无关，见式 (7.1)。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（对时域长度归纳）</span>
+      <p>记截断回报 $G_t^{(N)}=\sum_{k=0}^{N-1}\gamma^{k}R_{t+k+1}$（只算前 $N$ 步），
+        以及 $v^{(N)}(s,t)=\E_\pi[G_t^{(N)}\mid S_t=s]$，
+        并记 $r_\pi(s)=\sum_a\pi(a|s)r(s,a)$ 与 $p_\pi(s'|s)=\sum_a\pi(a|s)p(s'|s,a)$。结论是 $v^{(N)}(s,t)$ 与 $t$ 无关。</p>
+      <p>$N=1$ 时，$v^{(1)}(s,t)=\E_\pi[R_{t+1}\mid S_t=s]=\sum_a\pi(a|s)r(s,a)=r_\pi(s)$，
+        这里用了 $A_t$ 只依赖 $S_t$、以及 $r$ 不随时刻变化，结果是 $s$ 的函数，与 $t$ 无关。</p>
+      <p>设结论对 $N$ 成立，看 $N+1$。由上一课的式 (6.6) 与期望的线性性，
+        $$v^{(N+1)}(s,t)=\E_\pi[R_{t+1}\mid S_t=s]+\gamma\,\E_\pi\!\left[G_{t+1}^{(N)}\mid S_t=s\right].$$
+        第一项是 $r_\pi(s)$。第二项用全期望公式先对 $S_{t+1}$ 求平均，再用马尔可夫性把
+        $S_t=s,A_t=a$ 之外的历史删掉：
+        $$\E_\pi\!\left[G_{t+1}^{(N)}\mid S_t=s\right]=\sum_{s'}p_\pi(s'|s)\,v^{(N)}(s',t+1).$$
+        由归纳假设 $v^{(N)}(s',t+1)=v^{(N)}(s')$ 与 $t$ 无关，代回得
+        $v^{(N+1)}(s,t)=r_\pi(s)+\gamma\sum_{s'}p_\pi(s'|s)v^{(N)}(s')$，右端与 $t$ 无关，归纳完成。</p>
+      <p>最后把 $N$ 放到无穷：由 $|R_{t+k+1}|\le R_{\max}$ 与 $\gamma\lt1$，
+        $|G_t-G_t^{(N)}|\le\gamma^{N}R_{\max}/(1-\gamma)\to0$，所以 $v^{(N)}(s)\to v_\pi(s)$，
+        极限也与 $t$ 无关。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 在网格世界上手算状态值</h2>
+    <p>继续用策略 $\pi$、折扣因子（越往后的奖励，算进总分时权重越小）$\gamma=0.9$ 以及上一课的转移表和奖励规则：走到 $s_5$ 得 $+1$，走到 $s_2$ 得 $-1$，其余得 $0$，撞边界留在原格。</p>
+    <p>算的入口是 $s_5$。它在 $\pi$ 下选择不动，所以每一步都拿 $+1$，由回报的递推关系 $G_t=R_{t+1}+\gamma G_{t+1}$ 在两边取期望，得
+      $$v_\pi(s_5)=1+\gamma\,v_\pi(s_5).$$
+      移项得 $v_\pi(s_5)=1/(1-\gamma)=1/0.1=10$。</p>
+    <p>其余状态用同一把钥匙。先算一步就能进入 $s_5$ 的四个状态：它们拿到的奖励都是 $+1$，下一步的状态值都是 10，于是
+      $$v_\pi(s_4)=v_\pi(s_6)=v_\pi(s_2)=v_\pi(s_8)=1+0.9\times10=10 .$$
+      再算剩下四个：从 $s_1,s_3,s_7,s_9$ 出发的第一步拿到 $0$，第二步落到上面那批值为 10 的状态，于是
+      $$v_\pi(s_1)=v_\pi(s_3)=v_\pi(s_7)=v_\pi(s_9)=0+0.9\times10=9 .$$</p>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="网格世界上九个状态的状态值：中间五个是 10，四个角上是 9">
+        <rect x="30" y="36" width="76" height="56" class="box"/><text x="66" y="70" class="val-b">9</text>
+        <rect x="106" y="36" width="76" height="56" class="box-a"/><text x="142" y="70" class="val-b">10</text>
+        <rect x="182" y="36" width="76" height="56" class="box"/><text x="218" y="70" class="val-b">9</text>
+        <rect x="30" y="92" width="76" height="56" class="box-a"/><text x="66" y="126" class="val-b">10</text>
+        <rect x="106" y="92" width="76" height="56" class="box-a"/><text x="142" y="126" class="val-b">10</text>
+        <rect x="182" y="92" width="76" height="56" class="box-a"/><text x="218" y="126" class="val-b">10</text>
+        <rect x="30" y="148" width="76" height="56" class="box"/><text x="66" y="182" class="val-b">9</text>
+        <rect x="106" y="148" width="76" height="56" class="box-a"/><text x="142" y="182" class="val-b">10</text>
+        <rect x="182" y="148" width="76" height="56" class="box"/><text x="218" y="182" class="val-b">9</text>
+        <text x="290" y="60" class="lbl">格子里写的是 v(s)，γ = 0.9</text>
+        <text x="290" y="86" class="lbl">s5 是目标区域，10 分</text>
+        <text x="290" y="112" class="lbl">一步能进 s5 的状态也是 10</text>
+        <text x="290" y="138" class="lbl">要绕一步的四个角上是 9</text>
+        <text x="290" y="164" class="lbl">离目标越远，值越低</text>
+        <text x="290" y="196" class="lbl">这些数只对策略 π 成立</text>
+        <text x="30" y="222" class="lbl">越靠近目标的格子，标签颜色越深</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 7.3</span>
+        策略 $\pi$ 下的九个状态值。$s_5$ 每步都拿 1 分，值最大；一步能进 $s_5$ 的四个状态也是 10；
+        剩下的四个角要绕一步，等于 $0.9\times10=9$。换一套策略，格子里就是另一批数。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 7.4（把算出来的数代回去验算）</span>
+      <p>手算容易出错，用上一课的式 (6.6) 与 $q_\pi$ 的定义逐格核对。以 $s_1$ 为例：$\pi$ 在 $s_1$ 上选向下，
+        到 $s_4$ 拿 $0$ 分，所以 $v_\pi(s_1)=0+\gamma v_\pi(s_4)=0+0.9\times10=9$，与图中一致。</p>
+      <p>再以 $s_3$ 为例：它向右会撞到场外，动作无效留在原格并拿 $0$ 分；策略给它的动作是向下，到 $s_6$ 拿 $0$ 分，
+        于是 $v_\pi(s_3)=0+0.9\times v_\pi(s_6)=9$。九个格子逐个代回都能对上。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 240" role="img" aria-label="从目标格 s5 的方程出发，一圈一圈往外算出 10 和 9">
+        <rect x="40" y="40" width="120" height="46" class="box-a"/>
+        <text x="52" y="68" class="val-b">v(s5) = 1 + γ · v(s5)</text>
+        <path d="M164 63 H232" class="arrow-a"/><path d="M224 58 l10 5 l-10 5" class="arrow-a"/>
+        <rect x="240" y="40" width="150" height="46" class="box"/>
+        <text x="252" y="68" class="val">解方程：1 / (1 − γ) = 10</text>
+        <path d="M315 90 V122" class="arrow-a"/><path d="M310 114 l5 10 l5 -10" class="arrow-a"/>
+        <rect x="40" y="128" width="200" height="46" class="box"/>
+        <text x="52" y="156" class="val">一圈邻居：1 + γ · 10 = 10</text>
+        <text x="252" y="156" class="lbl">s2 s4 s6 s8</text>
+        <path d="M240 151 H392" class="arrow-a"/><path d="M384 146 l10 5 l-10 5" class="arrow-a"/>
+        <path d="M140 178 V206" class="arrow-a"/><path d="M135 198 l5 10 l5 -10" class="arrow-a"/>
+        <rect x="40" y="212" width="200" height="26" class="box"/>
+        <text x="52" y="231" class="val">再外一圈：0 + γ · 10 = 9</text>
+        <text x="252" y="231" class="lbl">s1 s3 s7 s9</text>
+        <text x="404" y="60" class="lbl">先处理</text>
+        <text x="404" y="80" class="lbl">会自我循环的格子</text>
+        <text x="404" y="150" class="lbl">再一圈圈</text>
+        <text x="404" y="170" class="lbl">往外推</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 7.4</span>
+        手算的顺序：$s_5$ 的方程里两边都有 $v(s_5)$，先解出 10；一步进 $s_5$ 的四个状态各得
+        $1+\gamma\cdot10=10$；再往外一层得 $0+\gamma\cdot10=9$。这个「用邻居的值算自己的值」的思路，下一课会写成贝尔曼方程（把这一步的价值与下一步的价值连起来的等式）。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 7.5（这件工作叫策略评估）</span>
+      <p>给定策略，把它的价值算出来，这件事叫策略评估（给定一套策略，算出它到底值多少分）。
+        本课用的办法是手算线性方程组，状态一多就力不从心。第 0009 课会给出矩阵解法，第 0013 课起给出迭代解法。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 动作值与两者的关系</h2>
+    <p>状态值回答「站在这里好不好」，但没回答「这一步该往哪走」。把第一步的动作固定下来，就得到动作值。</p>
+    <div class="def">
+      <span class="label">定义 7.6（动作值）</span>
+      <p>动作值（先选定某个动作，之后再好好走）定义为式 (7.2)。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_\pi(s,a)\doteq\E_\pi\!\left[G_t\mid S_t=s,\ A_t=a\right]$$</span>
+        <span class="eq-num">(7.2)</span>
+      </div>
+      <p>式中 $a$ 是这一步先定下来的动作，之后各步仍按 $\pi$ 走。$q_\pi(s,a)$ 是 $(s,a)$ 这个配对的分数，
+        同一行里五个动作的分数一般不同。它依赖 $\pi$，因为第一步之后的走法由 $\pi$ 决定。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 7.7（算五个动作值）</span>
+      <p>在 $s_1$ 上把五个动作都试算一遍，$\gamma=0.9$，$v_\pi$ 用图 7.3 的数。
+        向右到 $s_2$ 拿 $-1$：$q_\pi(s_1,a_2)=-1+0.9\times v_\pi(s_2)=8$；
+        向下到 $s_4$ 拿 $0$：$q_\pi(s_1,a_3)=0+0.9\times v_\pi(s_4)=9$；
+        向上与向左都撞边界，留在 $s_1$ 拿 $0$：$q_\pi(s_1,a_1)=q_\pi(s_1,a_4)=8.1$；
+        不动同样留在 $s_1$：$q_\pi(s_1,a_5)=8.1$。
+        五个数里最大的是 9，对应向下，与 $\pi$ 在 $s_1$ 上的选择一致。</p>
+    </div>
+
+    <figure class="fig">
+      <svg viewBox="0 0 540 240" role="img" aria-label="从 s1 出发的五个动作各有动作值，按策略概率加权就得到状态值">
+        <rect x="30" y="96" width="72" height="44" class="box-a"/><text x="54" y="124" class="val-b">s1</text>
+        <path d="M106 100 H176" class="arrow"/><path d="M168 95 l10 5 l-10 5" class="arrow"/>
+        <path d="M106 112 H176" class="arrow-a"/><path d="M168 107 l10 5 l-10 5" class="arrow-a"/>
+        <path d="M106 124 H176" class="arrow"/><path d="M168 119 l10 5 l-10 5" class="arrow"/>
+        <path d="M106 136 H176" class="arrow"/><path d="M168 131 l10 5 l-10 5" class="arrow"/>
+        <rect x="184" y="34" width="150" height="30" class="box"/><text x="194" y="54" class="val">q(s1,a1) = 8.1</text>
+        <rect x="184" y="70" width="150" height="30" class="box"/><text x="194" y="90" class="val">q(s1,a2) = 8</text>
+        <rect x="184" y="106" width="150" height="30" class="box-a"/><text x="194" y="126" class="val-b">q(s1,a3) = 9</text>
+        <rect x="184" y="142" width="150" height="30" class="box"/><text x="194" y="162" class="val">q(s1,a4) = 8.1</text>
+        <rect x="184" y="178" width="150" height="30" class="box"/><text x="194" y="198" class="val">q(s1,a5) = 8.1</text>
+        <text x="184" y="226" class="lbl">每个动作都配一个分数</text>
+        <text x="356" y="90" class="lbl">策略 π 只挑</text>
+        <text x="356" y="110" class="lbl">向下这一个，所以</text>
+        <text x="356" y="132" class="val-b">v(s1) = q(s1,a3) = 9</text>
+        <text x="356" y="160" class="lbl">策略 π' 以 0.5 选 a3、</text>
+        <text x="356" y="180" class="lbl">0.5 选 a2，所以</text>
+        <text x="356" y="202" class="val-b">v(s1) = 0.5×9 + 0.5×8 = 8.5</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 7.5</span>
+        动作值把「这一步选哪个」单独拎出来打分。状态值则是这些分数按策略概率加权的结果：
+        确定性策略只取一个，随机策略按比例混合，所以同一个 $s_1$ 在两套策略下是不同的数。</figcaption>
+    </figure>
+
+    <div class="thm">
+      <span class="label">定理 7.8（状态值与动作值的关系）</span>
+      <p>对任意状态 $s$，式 (7.3) 成立。</p>
+      <div class="eq">
+        <span class="eq-body">$$v_\pi(s)=\sum_{a\in\mathcal{A}}\pi(a|s)\,q_\pi(s,a)$$</span>
+        <span class="eq-num">(7.3)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：把「第一步选哪个动作」当成一次分层，先固定动作求平均，再按策略的概率把各层加权合起来，这就是全期望公式。</p>
+      <p>固定 $s$，把 $A_t$ 的全部取值当作一组互不相交且覆盖所有可能的事件。按全期望公式，
+        $$\E_\pi[G_t\mid S_t=s]=\sum_{a\in\mathcal{A}}P(A_t=a\mid S_t=s)\,\E_\pi[G_t\mid S_t=s,\ A_t=a].$$
+        右边第一个因子就是 $\pi(a|s)$（定义在动作上，取遍 $\mathcal{A}$ 后概率和为 1），
+        第二个因子就是 $q_\pi(s,a)$ 的定义式 (7.2)。代回得
+        $$v_\pi(s)=\sum_{a\in\mathcal{A}}\pi(a|s)\,q_\pi(s,a),$$
+        即式 (7.3)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 7.9（用式 (7.3) 复核 8.5）</span>
+      <p>策略 $\pi'$ 在 $s_1$ 上以 0.5 选 $a_3$、0.5 选 $a_2$，其余动作概率为 0。
+        把例 7.7 的两个分数代进式 (7.3)：
+        $$v_{\pi'}(s_1)=0.5\times q_\pi(s_1,a_3)+0.5\times q_\pi(s_1,a_2)=0.5\times9+0.5\times8=8.5 .$$
+        这与图 7.1 里按两条轨迹的回报直接取平均得到的 8.5 一致。
+        确定性策略是特例，式 (7.3) 退化成 $v_\pi(s)=q_\pi(s,a^\ast)$，$a^\ast$ 是它在 $s$ 上唯一的动作。</p>
+    </div>
+
+    <div class="thm">
+      <span class="label">命题 7.10（动作值的展开式）</span>
+      <p>式 (7.4) 成立。</p>
+      <div class="eq">
+        <span class="eq-body">$$q_\pi(s,a)=r(s,a)+\gamma\sum_{s'\in\mathcal{S}}p(s'|s,a)\,v_\pi(s')$$</span>
+        <span class="eq-num">(7.4)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>由动作值的定义与上一课的回报递推关系 $G_t=R_{t+1}+\gamma G_{t+1}$：
+        $$q_\pi(s,a)=\E_\pi[R_{t+1}+\gamma G_{t+1}\mid s,a]=\E_\pi[R_{t+1}\mid s,a]+\gamma\,\E_\pi[G_{t+1}\mid s,a].$$
+        第一个因子就是上一课定义过的 $r(s,a)$。第二个因子先用全期望公式对 $S_{t+1}$ 分层，再用马尔可夫性把历史删掉：
+        $$\E_\pi[G_{t+1}\mid s,a]=\sum_{s'}p(s'|s,a)\,\E_\pi[G_{t+1}\mid S_{t+1}=s']=\sum_{s'}p(s'|s,a)\,v_\pi(s').$$
+        两段合起来就是式 (7.4)。这条式子把动作值拆成「即时奖励」加「打折后的下一步状态值」，
+        下一课把它按策略加权，就得到贝尔曼方程。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 7.11（用式 (7.4) 复算 $q_\pi(s_1,a_2)$）</span>
+      <p>$r(s_1,a_2)=-1$，从 $s_1$ 执行 $a_2$ 一定落到 $s_2$，所以求和只剩一项：
+        $q_\pi(s_1,a_2)=-1+0.9\times v_\pi(s_2)=-1+9=8$，与例 7.7 一致。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>单次回报是随机变量，比较策略要用它的期望，这就是状态值。</li>
+      <li>$v_\pi(s)=\E_\pi[G_t\mid S_t=s]$，见式 (7.1)：依赖 $s$ 与 $\pi$，不依赖时刻 $t$。</li>
+      <li>网格世界手算：$v_\pi(s_5)=1/(1-\gamma)=10$，一圈邻居是 10，四个角是 9。</li>
+      <li>$q_\pi(s,a)=\E_\pi[G_t\mid S_t=s,A_t=a]$，它把第一步的动作固定下来打分。</li>
+      <li>$v_\pi(s)=\sum_a\pi(a|s)q_\pi(s,a)$，见式 (7.3)，证明只用全期望公式。</li>
+      <li>$q_\pi(s,a)=r(s,a)+\gamma\sum_{s'}p(s'|s,a)v_\pi(s')$，见式 (7.4)。</li>
+    </ul>
+    <p>下一课把式 (7.3) 代进式 (7.4)，再把式 (7.4) 代回式 (7.1)，得到贝尔曼方程，
+      也就是「每一步的价值等于即时奖励加上打折后的下一步价值」这组自洽的等式。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 关于状态值 $v_\pi(s)$，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>它是从 $s$ 出发走一次实际拿到的那个回报</li>
+        <li>它是从 $s$ 出发按 $\pi$ 走下去能拿到的回报的期望</li>
+        <li>它是从 $s$ 出发能拿到的回报的最大值</li>
+        <li>它与策略无关，只由状态 $s$ 决定</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定义 7.2 写得很清楚，$v_\pi(s)=\E_\pi[G_t\mid S_t=s]$，是对所有可能轨迹的回报取平均。</p>
+        <p>A 把随机变量的一次实现当成了状态值，例 7.4 里同一个 $s_1$ 有 9 与 8 两个可能值。C 取最大值不是期望。D 说反了：图 7.5 里同一个 $s_1$ 在 $\pi$ 下是 9，在 $\pi'$ 下是 8.5，状态值必须带着策略的下标。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 关于动作值 $q_\pi(s,a)$ 与状态值 $v_\pi(s)$ 的区别，下列说法正确的是哪一个？</p>
+      <ol class="mcq-options">
+        <li>$q_\pi(s,a)$ 里第一步的动作也由 $\pi$ 随机挑，与 $v_\pi(s)$ 完全一样</li>
+        <li>$q_\pi(s,a)$ 不依赖策略，只依赖环境给出的转移概率</li>
+        <li>$q_\pi(s,a)$ 衡量的是回报的方差，$v_\pi(s)$ 衡量的是回报的期望</li>
+        <li>$q_\pi(s,a)$ 把第一步的动作先固定成 $a$，之后各步才按 $\pi$ 走</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定义 7.6 的条件里写着 $A_t=a$，动作被钉住了，剩下的路才交给 $\pi$。</p>
+        <p>A 少掉了「钉住动作」这一步，而这一点把两者区分开。B 说反了：第一步之后的走法由 $\pi$ 决定，所以 $q_\pi$ 带着 $\pi$ 的下标。C 把期望换成了方差，本课讨论的两个量都是回报的期望。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 证明 $v_\pi(s)=\sum_a\pi(a|s)q_\pi(s,a)$ 时，把 $\E_\pi[G_t\mid S_t=s]$ 写成对 $a$ 的加权和，用到了什么？</p>
+      <ol class="mcq-options">
+        <li>全期望公式，先按第一步的动作分层再按策略概率加权</li>
+        <li>马尔可夫性，把更早的历史从条件里删掉</li>
+        <li>期望的线性性，把常数提到期望号外面</li>
+        <li>回报的递推关系，把回报拆成两项</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：动作 $A_t$ 的取值把样本空间分成互不相交的几块，全期望公式允许先分块求平均再按概率合起来。</p>
+        <p>B 用不上：这一步没有历史可删，条件里只有 $S_t=s$。C 处理的是「加法能不能拆开」，这里没有加法拆项。D 是下一课推导贝尔曼方程时用的工具。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 命题 7.10 的证明里，把 $\E_\pi[G_{t+1}\mid s,a]$ 写成 $\sum_{s'}p(s'|s,a)v_\pi(s')$ 用到了什么？</p>
+      <ol class="mcq-options">
+        <li>只用全期望公式，不需要马尔可夫性</li>
+        <li>只用马尔可夫性，不需要全期望公式</li>
+        <li>全期望公式先对 $S_{t+1}$ 分层，马尔可夫性再把历史删掉</li>
+        <li>三角不等式与等比数列的求和公式</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：分层给出 $\sum_{s'}p(s'|s,a)\E_\pi[G_{t+1}\mid s,a,s']$，马尔可夫性把这个条件期望里的 $s,a$ 删掉，只剩 $S_{t+1}=s'$，那就是 $v_\pi(s')$。</p>
+        <p>A 与 B 都只说了两条性质中的一条。D 是上一课证明回报有限时用的工具，与此处无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 手算时写出 $v_\pi(s_5)=1+\gamma v_\pi(s_5)$ 这一步，用到了哪些性质？</p>
+      <ol class="mcq-options">
+        <li>回报的递推关系、期望的线性性，以及状态值与时刻无关</li>
+        <li>只用代数移项，把右边的 $v_\pi(s_5)$ 搬到左边</li>
+        <li>只用马尔可夫性，把 $s_5$ 的历史删掉</li>
+        <li>大数定律，跑足够多次就能得到这个等式</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：先在 $G_t=R_{t+1}+\gamma G_{t+1}$ 两边取条件期望，把期望拆成两项靠线性性；
+          再把 $\E_\pi[G_{t+1}\mid S_t=s_5]$ 换成 $v_\pi(s_5)$ 靠的是命题 7.3（值与时刻无关）。</p>
+        <p>B 是下一步的事：移项只把 $1+\gamma v=v$ 解成 $1/(1-\gamma)$，解释不了等式为什么成立。C 只说了一半，还缺期望的拆分。D 是采样估计的依据，与这条等式无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 有人拿一次实验的回报来比较两套策略，这样做的毛病是什么？</p>
+      <ol class="mcq-options">
+        <li>回报一定是负数，比大小会得到相反的结论</li>
+        <li>两套策略的回报都相同，比不出差别</li>
+        <li>回报是确定的数，比较它等于只看了即时奖励</li>
+        <li>回报是随机变量，同一起点同一策略也可能不同，运气会带偏结论</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：图 7.1 里同一套策略从 $s_1$ 出发就有 9 与 8 两种结果，用哪一次做比较结果都可能不同。</p>
+        <p>A 把「可能是负数」当成了「一定是负数」，例 6.11 里的 9 就是正数。B 与事实相反，两套策略常常有明显差别，只是单次实验测不出来。C 说反了：回报本身就是随机变量，而「只看即时奖励」是 $\gamma=0$ 时的特殊情形，不是这个毛病的根源。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">7. 取 $\gamma=0$ 时，$v_\pi(s)$ 等于下面哪一个？</p>
+      <ol class="mcq-options">
+        <li>等于 $0$，因为折扣因子取零，奖励全被打折打没了</li>
+        <li>等于 $\sum_a\pi(a|s)r(s,a)$，也就是这一步奖励的期望</li>
+        <li>等于所有动作值里最大的那一项，与策略无关</li>
+        <li>无法定义，因为 $\gamma=0$ 时回报变成了无限和</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$G_t=R_{t+1}+0\cdot R_{t+2}+\cdots=R_{t+1}$，取期望就只剩这一步的奖励，即 $r_\pi(s)=\sum_a\pi(a|s)r(s,a)$。</p>
+        <p>A 弄错了折扣的对象：$\gamma$ 乘的是后面的项，首项 $R_{t+1}$ 不打折。C 是取最大值，期望里没有取最大值这一步。D 说反了：$\gamma=0$ 时和只有一项，更容易定义。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 策略 $\pi'$ 在 $s_1$ 上以 0.5 选向下、0.5 选向右，其余状态与图 7.3 的 $\pi$ 相同。
+        已知 $q_\pi(s_1,a_3)=9$、$q_\pi(s_1,a_2)=8$，则 $v_{\pi'}(s_1)$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>等于 $8$，因为最坏的那条路最该被记住</li>
+        <li>等于 $9$，因为最好的那个动作决定了状态值</li>
+        <li>等于 $8.5$，由 $0.5\times9+0.5\times8$ 算得</li>
+        <li>等于 $17$，由 $9+8$ 算得</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：按式 (7.3)，状态值是动作值按策略概率加权求和，两个动作各占一半。</p>
+        <p>A 取的是较差的那一支，忽略了另一半概率。B 只有在策略确定性地选 $a_3$ 时才成立。D 忘了乘概率，把加权和当成了普通加法。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">9. 在网格世界中，已知 $v_\pi(s_2)=10$、$r(s_1,a_2)=-1$、$\gamma=0.9$，
+        且从 $s_1$ 执行 $a_2$ 一定落到 $s_2$。$q_\pi(s_1,a_2)$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>等于 $10$，因为下一步的状态值就是动作值</li>
+        <li>等于 $-1$，因为即时奖励是负数</li>
+        <li>等于 $8.1$，由 $-1\times0.9+9$ 算得</li>
+        <li>等于 $8$，由 $-1+0.9\times10$ 算得</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：按式 (7.4)，求和只有 $s_2$ 一项，$q_\pi(s_1,a_2)=r(s_1,a_2)+\gamma v_\pi(s_2)=-1+9=8$。</p>
+        <p>A 丢掉了即时奖励 $-1$ 那一步。B 只看即时奖励，丢掉了打折后的未来。C 把折扣乘在了错误的位置，$\gamma$ 乘的是未来的状态值，不是当前的即时奖励。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">10. 为什么衡量一个状态好不好要用回报的期望，而不是某一次回报？</p>
+      <ol class="mcq-options">
+        <li>因为期望比单次回报更容易用手算出来</li>
+        <li>因为单次回报可能为负，而期望一定是正的</li>
+        <li>因为单次回报带着运气，期望才稳定，且它是确定的数，可以用来排序与优化</li>
+        <li>因为期望等于所有可能回报里最大的那一个</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：图 7.2 里同一个起点跑出来的数时高时低，取平均才稳定；而且期望是一个确定的数，
+          能写进方程、能排序，后面才可能对它做优化。</p>
+        <p>A 不是理由，手算期望有时反而更难，本课是借网格世界才手算出来。
+          B 说错了：奖励可以是负数，期望也可以是负数，比如一直撞禁止区的策略。
+          D 把期望与最大值混为一谈，期望是所有可能值按概率加权，不是取最大的那个。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025, 第 2 章第 2.1–2.3 节。状态值、动作值的定义与两者关系的推导口径与之一致，网格世界的九个数值由本课程逐步解方程并代回验算。</p>
+      <p>关于价值函数与最优性的更多讨论，见 R. S. Sutton &amp; A. G. Barto, <em>Reinforcement Learning: An Introduction</em>（第 2 版）第 3.5–3.6 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问："把 $s_5$ 那个方程 $v=1+\gamma v$ 用文字再解释一遍"，或者 "为什么动作值要带着策略的下标？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A23 · SAC：最大熵强化学习 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A23" data-slug="sac" data-part="进阶篇 · 第五部分 · 连续控制与最大熵">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第五部分 · 连续控制与最大熵</p>
+    <h1>SAC：最大熵强化学习</h1>
+    <p class="lede">这一节讲 SAC（soft actor-critic，软演员-评论家），连续控制里最常用的算法之一。
+      连续控制里的算法分两类。一类学<span class="term">确定性策略（deterministic policy）</span>：每个状态只输出一个动作，
+      这类做法统称<span class="term">策略梯度（policy gradient）</span>：直接算"参数往哪调能让总分更高"，
+      第 22 课的 TD3（twin delayed deep deterministic policy gradient，双延迟深度确定性策略梯度）就是其中一支。
+      另一类学的是随机策略（每次给出每个动作的概率，挑一个执行），SAC 属于这一支。
+      它把随机性直接写进优化目标，读完你能写出它的软 Q 目标，
+      说清温度（一个决定"随机性值多少分"的旋钮）在调什么，
+      也能判断什么时候该用 SAC、什么时候该用 TD3。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出最大熵目标与软贝尔曼方程，解释 <var>α</var><sub>ent</sub>（温度系数）在权衡什么</li>
+        <li>能写出高斯策略的对数概率，并检查 tanh 的雅可比项有没有写反</li>
+        <li>能说出 SAC 样本效率高的两个具体来源，而不只是"它更强"</li>
+      </ul>
+    </div>
+  </header>
+
+    <section>
+    <h2>把随机性写进目标里</h2>
+    <p>先看 TD3 的探索方式：策略（一套"看到什么状态就选什么动作"的规则）本身是确定的，随机性从外面加。
+      这有个副作用：噪声大小成了纯手调的旋钮，调小了探索不够，调大了学到的东西被噪声冲掉。</p>
+    <p>SAC 换个思路：把随机性直接写进优化目标。它输出的不再是一个动作，
+      而是一个概率分布（每个可能的结果各自有多大可能）：每个动作各有一个被选中的概率。
+      除了回报（从现在起一直到结束，把每一步奖励加起来的总分），
+      还要求策略（一套"看到什么状态就选什么动作"的规则）尽量不确定：</p>
+    <div class="eq">
+      <span class="eq-body"><var>J</var>(<var>π</var>) = Σ<sub><var>t</var></sub> 𝔼<sub>(<var>s</var><sub><var>t</var></sub>,<var>a</var><sub><var>t</var></sub>)~<var>ρ</var><sub><var>π</var></sub></sub> [ <var>r</var>(<var>s</var><sub><var>t</var></sub>, <var>a</var><sub><var>t</var></sub>) + <var>α</var><sub>ent</sub> <var>H</var>( <var>π</var>(·|<var>s</var><sub><var>t</var></sub>) ) ]</span>
+      <span class="eq-num">(23.1)</span>
+    </div>
+    <p>式中 ρ 是状态访问分布，意思是训练时各个状态被访问到的频繁程度。
+      式子里的 Σ 是求和号，意思是把每一步 t 的括号内容加起来；
+      𝔼（期望，同一件事重复很多次之后的平均结果）表示对右边的内容取平均。</p>
+    <p>括号里第二项是 α<sub>ent</sub> 乘上熵（衡量"选择有多随机、多分散"，熵大代表还敢试）。
+      熵越大，说明策略越愿意把概率摊到多个动作上。</p>
+    <p>这就是最大熵（maximum entropy）目标。它带来两个实际好处：
+      几个动作的<span class="term">动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）</span>接近时，
+      策略会把概率摊开，探索自动发生；概率不被压在一个动作上，执行有偏差时行为也不至于完全走样。</p>
+    <p>本课程按 <a href="../reference/notation.html">符号表</a> 的约定把温度记作 α<sub>ent</sub>。
+      文献里常写成 α，别和学习率（每次更新时往新信息的方向挪多远）搞混。
+      术语对照见 <a href="../reference/glossary.html">术语表</a>。</p>
+  </section>
+
+    <section>
+    <h2>温度 α_ent：探索换收益的汇率</h2>
+    <p>α<sub>ent</sub> 是温度系数（熵那一项前面的系数，决定"一个单位的熵值多少回报"）。
+      它是一个要你自己设定的数，也就是超参（需要你自己设定、而不是训练学出来的参数）。
+      它接近 0 时，熵那一项几乎消失，就退回只看回报的目标；
+      它太大，策略会为了熵而牺牲收益，最后学出一个"平均动作"。</p>
+    <p>手调它很烦，所以 SAC 的第二个版本让 α<sub>ent</sub> 自动调节：
+      先设一个目标熵 Ĥ（通常取 −dim(A)，也就是每个动作维度平均保留 e 的随机性水平），
+      然后对 α<sub>ent</sub> 本身做梯度下降：</p>
+    <div class="eq">
+      <span class="eq-body"><var>J</var>(<var>α</var><sub>ent</sub>) = 𝔼 [ −<var>α</var><sub>ent</sub> ( log <var>π</var><sub><var>θ</var></sub>(<var>a</var>|<var>s</var>) + <span class="math">Ĥ</span> ) ]</span>
+      <span class="eq-num">(23.2)</span>
+    </div>
+    <p>式中 θ 是策略参数。</p>
+    <p>它是个负反馈：实际熵低于目标就增大 α<sub>ent</sub>，鼓励多探索；高于目标就减小。
+      于是你只要指定"我想要多随机"，不必手调尺度。</p>
+  </section>
+
+    <section>
+    <h2>软 Q 与软贝尔曼方程</h2>
+    <p>把熵项并进价值里，就得到<span class="term">软 Q 函数（soft Q-function）</span>，就是"价值里已经含了熵那一项"的 Q。
+      它的目标是在 TD3 的<span class="term">双 Q（用两套估计分别负责挑动作和打分，压住总是高估的毛病）</span>
+      目标上再加一个熵奖励：</p>
+    <div class="eq">
+      <span class="eq-body"><var>y</var> = <var>r</var> + <var>γ</var> ( min<sub><var>i</var>=1,2</sub> <var>Q</var><sub><var>φ</var><sup>−</sup><sub><var>i</var></sub></sub>(<var>s</var>′, <var>a</var>′) − <var>α</var><sub>ent</sub> log <var>π</var><sub><var>θ</var></sub>(<var>a</var>′|<var>s</var>′) ),&nbsp;&nbsp;<var>a</var>′ ~ <var>π</var><sub><var>θ</var></sub>(·|<var>s</var>′)</span>
+      <span class="eq-num">(23.3)</span>
+    </div>
+    <p>式中 φ 是价值网络参数，γ 是折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折），
+      π 是策略。</p>
+    <p>注意中间那个减号。log π 读作对数概率（把概率取对数；概率很小的时候也不会变成 0，方便计算）：
+      它越低，说明这个动作越不可能被选中，−α<sub>ent</sub> log π 就越大，目标越高。
+      这等于给"在 s′ 处选了个冷门动作"发奖励，也就是熵奖励在实现里的样子。</p>
+    <p>两处容易写错：符号写反（变成惩罚探索，策略会迅速变确定），
+      以及用了目标动作采样（按概率抽一个数）却用了当前策略的对数概率。</p>
+    <p>critic（打分的那一方，负责估计局面值多少分，所以也叫价值网络）的学习还要用到两个老工具：它靠
+      <span class="term">自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）</span>，
+      所以需要一份<span class="term">目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑）</span>，
+      同步时用<span class="term">软更新（每次只把参数往新参数挪一点点，慢慢跟上，不要猛跳）</span>。
+      自举带来的<span class="term">过估计（因为总是取最大值，估计出来的分数系统性地偏高）</span>由双 Q 压住。</p>
+  </section>
+
+    <section>
+    <h2>重参数化：让采样可以求导</h2>
+    <p>策略网络也叫 actor（出招的那一方，负责决定这一步做什么动作）。
+      它要输出一个分布而不是一个动作，具体做法是：网络输出均值和标准差，
+      再从对应的<span class="term">高斯分布（最常见的那个钟形分布）</span>里采样（按概率抽一个数）。
+      高斯分布中间高、两边低，大多数取值落在均值附近；
+      标准差（衡量波动大小）决定它摊得多开。</p>
+    <p>要对参数 θ 求梯度，就不能把采样当成黑箱。SAC 用
+      <span class="term">重参数化技巧（reparameterization trick）</span>：把随机性挪到外部噪声上，再对参数求导。</p>
+    <div class="eq">
+      <span class="eq-body"><var>a</var> = tanh( <var>μ</var><sub><var>θ</var></sub>(<var>s</var>) + <var>σ</var><sub><var>θ</var></sub>(<var>s</var>) ⊙ <var>ξ</var> ),&nbsp;&nbsp;<var>ξ</var> ~ <var>N</var>(0, <var>I</var>)</span>
+      <span class="eq-num">(23.4)</span>
+    </div>
+    <p>式中 μ 是策略输出的均值，σ 是标准差，ξ 是标准高斯噪声。符号 ⊙ 表示逐元素相乘。</p>
+    <p>现在 ξ 与 θ 无关，动作 a 对 θ 就逐点可微了。这种梯度叫路径导数，
+      它比把 ∇<sub>θ</sub> log π 当权重的那种<span class="term">得分函数估计（score function estimator）</span>低很多，
+      也就是波动小很多。它加上 off-policy（边学的那套策略不是产生数据的那套，等于看别人的录像学自己的打法）
+      的经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用），
+      就是 SAC 样本效率（拿到同样多的经验能学多好，效率高就是"更省数据"）高的两个具体来源。</p>
+  </section>
+
+    <section>
+    <h2>tanh 的雅可比：最容易静默写错的一处</h2>
+    <p>动作被 tanh 压到 [−1, 1] 之后，概率密度也变了。
+      按变量替换公式，对数概率必须补上雅可比项。注意它前面是加号：
+      log(1 − tanh²u) 本身已经带负号，写成相减会得到另一个值。</p>
+    <div class="eq">
+      <span class="eq-body">log <var>π</var>(<var>a</var>|<var>s</var>) = log <var>N</var>(<var>u</var>; <var>μ</var>, <var>σ</var>) + Σ<sub><var>j</var></sub> log ( 1 − tanh²(<var>u</var><sub><var>j</var></sub>) ),&nbsp;&nbsp;<var>u</var> = 前激活值</span>
+      <span class="eq-num">(23.5)</span>
+    </div>
+    <p>式子里的 u 是 tanh 之前的前激活值，u<sub>j</sub> 是它的第 j 个维度。
+      漏掉这一项、或者把符号写成减，训练不会报错：损失照降，梯度照走，只是熵的估计整个偏了。
+      所以这类代码必须像代码题 1 那样逐项数值核对，
+      不能"跑起来能收敛（一轮轮算下去，数值不再明显变化，稳定下来了）就行"。</p>
+  </section>
+
+    <section>
+    <h2>SAC 还是 TD3</h2>
+    <table>
+      <thead><tr><th>维度</th><th>SAC</th><th>TD3</th></tr></thead>
+      <tbody>
+        <tr><td>策略</td><td>随机，熵项内建</td><td>确定，噪声外挂</td></tr>
+        <tr><td>样本效率</td><td>通常更高（低方差的路径梯度加上自动探索）</td><td>略低，探索不足时更明显</td></tr>
+        <tr><td>超参敏感度</td><td>较低，温度可以自动调</td><td>中，噪声尺度要调</td></tr>
+        <tr><td>推理成本</td><td>要采样，动作不可复现</td><td>一次前向，可复现</td></tr>
+        <tr><td>典型选择</td><td>连续控制默认首选</td><td>要确定性、便宜推理时</td></tr>
+      </tbody>
+    </table>
+    <p>一个常见症状：策略训练早期就变得几乎确定，这叫熵塌缩。
+      先查式 (23.3) 的符号，再看 α<sub>ent</sub> 是不是被自动调节压到接近 0，最后才去动学习率。</p>
+    <p>顺带说一个容易混的词：<span class="term">策略评估（给定一套策略，算出它到底值多少分）</span>。
+      SAC 不做精确的策略评估，它靠采样估计，这也是它能省数据的原因之一。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">1. 最大熵目标（式 23.1）加上的熵项，给训练带来什么？</p>
+      <ol class="mcq-options">
+        <li>它把奖励的尺度统一到固定区间，让不同任务能共用一套学习率</li>
+        <li>它让 Q 值的估计变成无偏的，从而消除自举带来的过估计</li>
+        <li>它保证策略一定收敛到全局最优，代价是需要更多次环境交互</li>
+        <li>它内建了探索与鲁棒性，策略在等价动作之间会主动分摊概率</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：熵项奖励"不确定性"。当多个动作的价值接近时，
+          策略会把概率摊开，于是探索自动发生；同时它不会把全部概率压在一个动作上，
+          执行偏差或环境噪声不至于让行为完全走样。</p>
+        <p>A 是奖励归一化的事，与熵项无关。B 说反了因果：软 Q 目标里依然有取较小值和自举，
+          过估计只是被双 Q 压制，不是被熵项消除。C 是过强的承诺：熵项不保证全局最优，
+          SAC 依然是带函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去猜价值）的
+          actor-critic，没有这种理论保证。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 温度系数 α_ent 太大会出现什么典型症状？</p>
+      <ol class="mcq-options">
+        <li>策略过早变确定，熵迅速塌缩，探索不足而卡在次优解</li>
+        <li>策略为了熵而牺牲收益，动作接近噪声，学出一个平均解</li>
+        <li>critic 的目标值不断变大，Q 值单调发散，训练直接失败</li>
+        <li>目标熵会自动上调，温度随即回落，因此没有可观察的影响</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：α<sub>ent</sub> 是"熵值多少回报"的汇率。汇率给得太高，
+          策略宁愿要随机性也不要收益，最后输出一个高熵的平均动作，
+          看起来"学不动"，实际是目标函数就该这么解。</p>
+        <p>A 是 α<sub>ent</sub> 太小的症状，方向反了。
+          C 与熵项没有直接关系，Q 值发散通常来自自举、学习率或奖励尺度。
+          D 把自动调节的方向说反了：实际熵高于目标时，α<sub>ent</sub> 是被减小的，
+          而且这个过程有可观察的滞后，不是瞬时的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 式 (23.3) 里为什么是减去 α_ent log π，而不是加上？</p>
+      <ol class="mcq-options">
+        <li>log π 越负说明动作越冷门，减去它等价于给冷门动作发熵奖励</li>
+        <li>减去是为了让目标值保持在奖励量级内，避免数值溢出与截断</li>
+        <li>减去等价于对高概率动作额外奖励，从而加快策略的收敛速度</li>
+        <li>正负号只是文献习惯，两种写法训练出来的策略在数学上等价</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：对数的取值范围是 (−∞, 0]，动作越"冷门"，log π 越负，
+          −α<sub>ent</sub> log π 就越大。所以减号的效果是：在 s′ 处选了不常见的动作就加分，
+          这就是熵奖励在贝尔曼目标里的形态。</p>
+        <p>B 是靠数值手段解决的问题，不是靠翻转符号。
+          C 说反了：减号奖励的是低概率动作，不是高概率动作。
+          D 错在"等价"二字：换成加号会把目标改成惩罚探索，策略会迅速变确定，那是另一个算法。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 重参数化技巧（式 23.4）在这里解决了什么问题？</p>
+      <ol class="mcq-options">
+        <li>它把连续动作离散化，让 DQN（deep Q-network，深度 Q 网络）一族的算法也能用于连续控制</li>
+        <li>它把目标网络的参数更新变成软更新，从而稳定自举的目标</li>
+        <li>它把随机性挪到与参数无关的噪声上，使动作对参数可微</li>
+        <li>它把策略的熵写成闭式解，从而不需要再采样估计对数概率</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：采样本身是随机操作，不可导。
+          写成 a = tanh(μ<sub>θ</sub>(s) + σ<sub>θ</sub>(s) ⊙ ξ) 之后，
+          随机性只来自外部噪声 ξ，a 对 θ 逐点可导，于是能得到方差很低的路径导数。</p>
+        <p>A 与重参数化无关，它属于动作空间（所有可能动作组成的集合）怎么表示的问题。
+          B 说的是软更新，是目标网络的技巧。
+          D 不成立：SAC 依然要靠采样估计对数概率，
+          重参数化改变的是"如何对采样结果求导"，不是"要不要采样"。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. SAC 样本效率高的两个具体来源是什么？</p>
+      <ol class="mcq-options">
+        <li>它不需要目标网络，并且每一步都用全部数据做一次精确的策略评估</li>
+        <li>路径导数方差低，且 off-policy 的经验回放让每条数据被反复利用</li>
+        <li>它把动作空间裁剪到 [−1, 1]，并且用 tanh 让梯度不会爆炸或消失</li>
+        <li>它用确定性策略省掉采样开销，并且用双 Q 把过估计压到零</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：低方差的路径导数让每个梯度步的信息量更大；
+          off-policy 加上经验回放让同一条交互数据被反复使用。
+          两者叠加，就是"同样的交互预算下通常学得更快"的直接解释。</p>
+        <p>A 与实现不符：SAC 有目标网络，也不做精确的策略评估，精确评估是动态规划才有的能力。
+          C 描述的是动作表示与数值技巧，它们让训练更稳，但不是样本效率的来源。
+          D 把 SAC 说成了确定性策略算法，那是 TD3；双 Q 也只是压制上偏，压不到零。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0023-code-1">
+      <h3>代码题 1 · 实现高斯策略的对数概率与重参数化（numpy）</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这是 SAC 策略链路上的三个零件，动作维度是 D，一批的样本数是 B。
+        策略网络输出高斯分布的均值和对数标准差：<code>sample_action</code> 在收集数据时生成动作，
+        两个对数概率函数在算熵项与 actor 的损失时被调用。
+        输入是分布参数与噪声，输出是逐样本的动作或对数概率。</p>
+        <p>请实现 <code>gaussian_log_prob(x, mu, log_std)</code>、<code>squashed_log_prob(x, mu, log_std)</code> 与 <code>sample_action(mu, log_std, noise)</code>。① 高斯对数概率按维求和：</p>
+        <div class="eq">
+          <span class="eq-body">log <var>N</var>(<var>x</var>; <var>μ</var>, <var>σ</var>²) = −½ Σ<sub><var>j</var></sub> [ ( (<var>x</var><sub><var>j</var></sub>−<var>μ</var><sub><var>j</var></sub>)/<var>σ</var><sub><var>j</var></sub> )² + 2 log <var>σ</var><sub><var>j</var></sub> + log 2<var>π</var> ]</span>
+        </div>
+        <p>式子里的 Σ 是求和号，意思是把每个动作维度 j 的那一项加起来；log 是自然对数。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>x</code>：形状 <code>(B, D)</code> 的浮点数组，采样值；在 ② 里是 tanh 之前的前激活值 u。形状就是"几行几列"。</li>
+          <li><code>mu</code>：形状 <code>(B, D)</code> 的浮点数组，分布的均值。</li>
+          <li><code>log_std</code>：形状 <code>(B, D)</code> 的浮点数组，对数标准差；对它取 exp 就得到标准差。</li>
+          <li><code>noise</code>：形状 <code>(B, D)</code> 的浮点数组，由测试传入，不要调用随机数。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>gaussian_log_prob</code> 返回形状 <code>(B,)</code> 的浮点数组，每个样本一个标量。</li>
+        </ul>
+        <p>② <code>squashed_log_prob</code> 返回形状 <code>(B,)</code>：把上式用在 u 上，再按式 (23.5) 加上 tanh 的雅可比修正，得到压缩后动作的 log π(a|s)：</p>
+        <div class="eq">
+          <span class="eq-body">log <var>π</var>(<var>a</var>|<var>s</var>) = log <var>N</var>(<var>u</var>; <var>μ</var>, <var>σ</var>²) + Σ<sub><var>j</var></sub> log ( 1 − tanh²(<var>u</var><sub><var>j</var></sub>) )</span>
+        </div>
+        <p>修正项本身已经带负号，方向就是式中的加号，写成相减会得到另一个值。</p>
+        <ul>
+          <li>③ <code>sample_action</code> 返回与 <code>mu</code> 同形状 <code>(B, D)</code> 的动作，按式 (23.4) 得到 tanh(μ + exp(log_std) ⊙ noise)。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试用手算值核对两种对数概率（含 u = 0 处两者相等），
+        并确认修正量正好是加上去的逐维和，写成减号会得到另一个值；
+        动作检查形状与 <code>mu</code> 一致、严格落在 (−1, 1)、逐个元素取 tanh，以及 <code>mu</code> 与噪声为 0 时动作也为 0。
+        噪声用传入的 <code>noise</code>，不要调用随机数；只用标准库和 numpy，不要改写入参。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先算 <code>z = (x - mu) / np.exp(log_std)</code>。<code>np.exp</code> 返回逐元素的 e 的幂，
+              这里把对数标准差还原成标准差。
+              再对最后一维求和：<code>-0.5 * np.sum(z**2 + 2*log_std + np.log(2*np.pi), axis=-1)</code>，
+              <code>axis=-1</code> 表示"最后一维"，求和后这一维就没了，所以结果是 <code>(B,)</code>。</li>
+          <li>雅可比项本身就是 <code>log(1 - tanh(u)**2)</code>，直接加在高斯对数概率上：
+              <code>corr = np.log(1 - np.tanh(u)**2)</code>，再用 <code>np.sum(corr, axis=-1)</code> 加到 base 上。
+              <code>np.tanh</code> 返回逐元素的 tanh 值。</li>
+          <li><code>sample_action</code> 里不要调用随机数，噪声由 tests 传进来，这样结果才可复现。</li>
+          <li>形状对不上时先打印 <code>np.asarray(x).shape</code> 看一眼，别猜。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def gaussian_log_prob(x, mu, log_std):
+    # TODO: 逐维求和的高斯对数概率
+    return np.zeros(np.asarray(x).shape[0])
+
+
+def squashed_log_prob(x, mu, log_std):
+    # TODO: 高斯对数概率再加上 tanh 的雅可比修正 log(1 - tanh(u)**2)
+    return np.zeros(np.asarray(x).shape[0])
+
+
+def sample_action(mu, log_std, noise):
+    # TODO: tanh(mu + exp(log_std) * noise)
+    return np.zeros_like(np.asarray(mu, dtype=float))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+import numpy as np
+
+mu = np.zeros((2, 2))
+ls = np.zeros((2, 2))
+lp = np.asarray(gaussian_log_prob(mu, mu, ls), dtype=float)
+lognorm = 0.5 * np.log(2 * np.pi)
+check(lp.shape == (2,), f"应返回形状 (2,)，实际 {lp.shape}")
+check(abs(lp[0] - (-2 * lognorm)) < 1e-9,
+      f"标准正态原点处每维 -0.5*log(2pi)，两维共 {2*(-lognorm):.4f}，实际 {lp[0]:.4f}")
+
+mu1 = np.array([[1.0, 2.0]])
+x1 = np.array([[2.0, 0.0]])
+ls1 = np.array([[0.0, 0.0]])
+expect = -0.5 * ((1.0 ** 2 + 2.0 ** 2) + 2 * np.log(2 * np.pi))
+got = float(np.asarray(gaussian_log_prob(x1, mu1, ls1), dtype=float)[0])
+check(abs(got - expect) < 1e-9, f"标准差为 1 时的手算值应为 {expect:.4f}，实际 {got:.4f}")
+
+mu2 = np.zeros((1, 1))
+x2 = np.array([[3.0]])
+ls2 = np.array([[np.log(2.0)]])
+expect2 = -0.5 * (1.5 ** 2 + 2 * np.log(2.0) + np.log(2 * np.pi))
+got2 = float(np.asarray(gaussian_log_prob(x2, mu2, ls2), dtype=float)[0])
+check(abs(got2 - expect2) < 1e-9,
+      f"sigma=2 时应在 z=1.5 处取密度，期望 {expect2:.4f}，实际 {got2:.4f}")
+
+u = np.array([[0.5, -0.3], [0.0, 0.0]])
+s = np.asarray(squashed_log_prob(u, mu, ls), dtype=float)
+corr = np.log(1 - np.tanh(u) ** 2)
+expect3 = np.asarray(gaussian_log_prob(u, mu, ls), dtype=float) + np.sum(corr, axis=-1)
+check(np.allclose(s, expect3, atol=1e-9),
+      f"tanh 修正项应加上 log(1-tanh^2) 的逐维和，实际 {s} 应为 {expect3}")
+check(abs(float(s[1]) - float(np.asarray(gaussian_log_prob(u, mu, ls), dtype=float)[1])) < 1e-12,
+      "u=0 处雅可比 log(1-tanh^2(0)) = 0，两种对数概率应当相等")
+diff = np.asarray(s, dtype=float) - np.asarray(gaussian_log_prob(u, mu, ls), dtype=float)
+check(abs(diff[0] - (-0.32891055)) < 1e-6 and abs(diff[1]) < 1e-12,
+      f"修正量必须正好等于 sum(log(1-tanh^2 u))：[0.5,-0.3] 行应为 -0.32891，[0,0] 行应为 0，实际 {diff}")
+
+u4 = np.array([[0.7, 1.4]])
+s4 = float(np.asarray(squashed_log_prob(u4, mu, ls), dtype=float)[0])
+base4 = float(np.asarray(gaussian_log_prob(u4, mu, ls), dtype=float)[0])
+corr4 = float(np.sum(np.log(1.0 - np.tanh(u4) ** 2)))
+check(abs(s4 - (base4 + corr4)) < 1e-9,
+      f"单样本手算：base {base4:.5f} + 修正 {corr4:.5f} = {base4+corr4:.5f}，实际 {s4:.5f}")
+check(abs(s4 - (base4 - corr4)) > 1e-6,
+      "雅可比项必须是加上 log(1-tanh^2 u)（它本身已带负号），写成减号会得到另一个值")
+
+noise = np.zeros((1, 2))
+a0 = np.asarray(sample_action(np.zeros((1, 2)), np.zeros((1, 2)), noise), dtype=float)
+check(np.allclose(a0, 0.0), f"mu=0 且噪声为 0 时动作应为 0，实际 {a0}")
+
+mu3 = np.array([[1.0, -1.0]])
+ls3 = np.array([[np.log(2.0), np.log(0.5)]])
+nz = np.array([[0.5, -1.0]])
+a3 = np.asarray(sample_action(mu3, ls3, nz), dtype=float)
+raw = mu3 + np.exp(ls3) * nz
+check(np.allclose(a3, np.tanh(raw), atol=1e-12),
+      f"应为 tanh(mu + sigma*noise)：期望 {np.tanh(raw)}，实际 {a3}")
+check(np.all(np.abs(a3) < 1.0), "tanh 之后的动作必须严格落在 (-1, 1) 内")
+
+np.random.seed(0)
+big = np.random.randn(50, 3)
+abig = np.asarray(sample_action(np.zeros((50, 3)), np.zeros((50, 3)), big), dtype=float)
+check(abig.shape == (50, 3), f"输出形状应与 mu 一致，实际 {abig.shape}")
+check(np.allclose(np.linalg.norm(np.tanh(big), axis=1), np.linalg.norm(abig, axis=1), atol=1e-9),
+      "输出必须是逐个元素的 tanh，不能做任何归一化或额外缩放")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def gaussian_log_prob(x, mu, log_std):
+    x = np.asarray(x, dtype=float)
+    mu = np.asarray(mu, dtype=float)
+    log_std = np.asarray(log_std, dtype=float)
+    z = (x - mu) / np.exp(log_std)
+    return -0.5 * np.sum(z ** 2 + 2.0 * log_std + np.log(2.0 * np.pi), axis=-1)
+
+
+def squashed_log_prob(x, mu, log_std):
+    u = np.asarray(x, dtype=float)
+    base = gaussian_log_prob(u, mu, log_std)
+    correction = np.log(1.0 - np.tanh(u) ** 2)
+    return base + np.sum(correction, axis=-1)
+
+
+def sample_action(mu, log_std, noise):
+    mu = np.asarray(mu, dtype=float)
+    log_std = np.asarray(log_std, dtype=float)
+    noise = np.asarray(noise, dtype=float)
+    return np.tanh(mu + np.exp(log_std) * noise)
+</script>
+    </div>
+
+<div class="code-ex" data-code="0023-code-2">
+      <h3>代码题 2 · 算软 Q 目标并验证温度退化为 0</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这两个函数用在 SAC 的 critic 更新上。
+        目标网络给出下一状态两个 critic 的值和策略的对数概率，温度系数 <code>alpha_ent</code> 把对数概率折成熵奖励，
+        再按贝尔曼备份得到软 Q 目标；<code>soft_value</code> 单独算 q_min 减去 α<sub>ent</sub> 乘 log π，
+        actor 的损失里也用它来估 V。
+        输入是一个 batch（一批样本）的目标网络输出，输出是逐样本的目标值与软价值。</p>
+        <p>请实现 <code>soft_q_target(rewards, dones, next_q1, next_q2, log_prob, alpha_ent, gamma)</code> 与 <code>soft_value(q_min, log_prob, alpha_ent)</code>。① 软 Q 目标逐样本按式 (23.3) 计算，第一个 critic 的输出记为 Q1，第二个记为 Q2：</p>
+        <div class="eq">
+          <span class="eq-body"><var>y</var><sub><var>i</var></sub> = <var>r</var><sub><var>i</var></sub> + (1 − done<sub><var>i</var></sub>) <var>γ</var> ( min( <var>Q</var><sub>1</sub>, <var>Q</var><sub>2</sub> )<sub><var>i</var></sub> − <var>α</var><sub>ent</sub> · log <var>π</var><sub><var>i</var></sub> )</span>
+        </div>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：长度 <code>B</code> 的浮点数组，即时奖励。</li>
+          <li><code>dones</code>：长度 <code>B</code> 的布尔数组，表示这条样本是不是一局的最后一步。</li>
+          <li><code>next_q1</code>、<code>next_q2</code>、<code>log_prob</code>：长度 <code>B</code> 的浮点数组，都在同一个 a′ ~ π(·|s′) 处取好。</li>
+          <li><code>alpha_ent</code>：Python <code>float</code>，温度系数 α<sub>ent</sub>；<code>gamma</code> 是折扣因子。两个函数共用 <code>alpha_ent</code>。</li>
+          <li><code>q_min</code>（<code>soft_value</code>）：浮点数组，两个 critic 的逐元素较小值。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>soft_q_target</code> 返回形状 <code>(B,)</code> 的浮点数组，第 i 项按上面的式子算：
+              终止样本只留 <code>rewards</code>，不带自举项；<code>alpha_ent = 0</code> 时熵项归零，退化成标准双 Q 目标。</li>
+          <li><code>soft_value</code> 返回与 <code>q_min</code> 形状相同的浮点数组，元素为 <code>q_min − alpha_ent * log_prob</code>；
+              <code>alpha_ent = 0</code> 时等于 <code>q_min</code> 本身。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试检查终止项、<code>alpha_ent = 0</code> 时两个函数的退化结果，
+        以及 log 概率越低熵奖励越大、目标越高。只用标准库和 numpy，不要改写入参。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先算 <code>q_min = np.minimum(next_q1, next_q2)</code>，它返回逐元素较小值的新数组；
+              再算熵奖励 <code>-alpha_ent * log_prob</code>，两者相加，最后乘折扣。</li>
+          <li>注意符号方向：目标是 <code>q_min - alpha_ent * log_prob</code>。
+              log 概率为负，减去一个负数等于加分，所以越冷门的动作目标越高。</li>
+          <li><code>(~dones)</code> 是布尔数组，可以直接乘在自举项上，终止样本那一项就变成 0。</li>
+          <li><code>alpha_ent = 0</code> 时整个熵项归零，目标退化成普通双 Q 目标，测试会专门检查这一点。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def soft_q_target(rewards, dones, next_q1, next_q2, log_prob, alpha_ent, gamma):
+    # TODO: y = r + (1-done) * gamma * (min(Q1,Q2) - alpha_ent * log_prob)
+    return np.zeros(len(rewards))
+
+
+def soft_value(q_min, log_prob, alpha_ent):
+    # TODO: 返回 q_min - alpha_ent * log_prob
+    return np.asarray(q_min, dtype=float)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+r = np.array([1.0, 0.0, 2.0])
+done = np.array([False, True, False])
+q1 = np.array([4.0, 100.0, 1.0])
+q2 = np.array([2.0, 0.0, 5.0])
+lp = np.array([-1.0, -0.5, 0.0])
+y = np.asarray(soft_q_target(r, done, q1, q2, lp, 0.1, 0.9), dtype=float)
+check(y.shape == (3,), f"返回形状应为 (3,)，实际 {y.shape}")
+check(abs(y[0] - (1.0 + 0.9 * (2.0 + 0.1))) < 1e-12,
+      f"应取 min(4,2)=2 再减 0.1*(-1)：1 + 0.9*2.1 = 2.89，实际 {y[0]:.4f}")
+check(abs(y[1] - 0.0) < 1e-12,
+      f"终止转移的目标就是 r，不能带任何自举项，实际 {y[1]:.4f}")
+check(abs(y[2] - (2.0 + 0.9 * 1.0)) < 1e-12,
+      f"log 概率为 0 时熵项不生效：2 + 0.9*1 = 2.9，实际 {y[2]:.4f}")
+
+y_zero = np.asarray(soft_q_target(r, done, q1, q2, lp, 0.0, 0.9), dtype=float)
+y_plain = r + 0.9 * np.minimum(q1, q2) * (~done)
+check(np.allclose(y_zero, y_plain, atol=1e-12),
+      f"alpha_ent=0 时必须退化成标准双 Q 目标：期望 {y_plain}，实际 {y_zero}")
+
+y_hi = np.asarray(soft_q_target(np.zeros(1), np.array([False]),
+                                np.array([1.0]), np.array([1.0]),
+                                np.array([-3.0]), 0.5, 1.0), dtype=float)
+y_lo = np.asarray(soft_q_target(np.zeros(1), np.array([False]),
+                                np.array([1.0]), np.array([1.0]),
+                                np.array([-0.1]), 0.5, 1.0), dtype=float)
+check(y_hi[0] > y_lo[0],
+      f"动作越冷门（log 概率越低）熵奖励越大，目标应更高：{y_hi[0]:.4f} vs {y_lo[0]:.4f}")
+check(abs(y_hi[0] - (1.0 + 1.5)) < 1e-12,
+      f"手算 1 + 1*(1 - 0.5*(-3)) = 2.5，实际 {y_hi[0]:.4f}")
+
+sv = np.asarray(soft_value(q2, lp, 0.1), dtype=float)
+check(np.allclose(sv, [2.1, 0.05, 5.0], atol=1e-12),
+      f"软价值应为 q_min - 0.1*log_prob，实际 {sv}")
+check(np.allclose(np.asarray(soft_value(q2, lp, 0.0), dtype=float), q2),
+      "alpha_ent=0 时软价值应等于 q_min 本身")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def soft_q_target(rewards, dones, next_q1, next_q2, log_prob, alpha_ent, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    q_min = np.minimum(np.asarray(next_q1, dtype=float), np.asarray(next_q2, dtype=float))
+    entropy_bonus = -alpha_ent * np.asarray(log_prob, dtype=float)
+    return rewards + gamma * (q_min + entropy_bonus) * (~dones)
+
+
+def soft_value(q_min, log_prob, alpha_ent):
+    q_min = np.asarray(q_min, dtype=float)
+    log_prob = np.asarray(log_prob, dtype=float)
+    return q_min - alpha_ent * log_prob
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>原始论文：Haarnoja et al., <em>Soft Actor-Critic: Off-Policy Maximum Entropy Deep
+        Reinforcement Learning with a Stochastic Actor</em>（ICML 2018），
+        <a class="cite" href="https://arxiv.org/abs/1801.01290">arXiv 1801.01290</a>
+        给出式 (23.1)(23.3)；温度自动调节来自同一作者的后续工作
+        <em>Soft Actor-Critic Algorithms and Applications</em>，
+        <a class="cite" href="https://arxiv.org/abs/1812.05905">arXiv 1812.05905</a>，即式 (23.2)。</p>
+      <p>强化学习（RL）的实现口径（log_std 的裁剪范围、目标熵取 −dim(A)、双 Q 的用法）对照
+        <a class="cite" href="https://spinningup.openai.com/en/latest/algorithms/sac.html">Spinning Up in Deep RL · SAC</a>，
+        它明确列出了每一步的更新顺序，照着抄不会漏项。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "用 numpy 把式 (23.3) 和 (23.5) 串成一个完整的 SAC 更新步骤给我看。"
+      或者 "我的 SAC 熵一路掉到接近 0，按这课的排查顺序帮我定位是符号写反还是温度调坏了。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

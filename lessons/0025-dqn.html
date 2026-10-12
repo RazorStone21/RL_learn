@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0025 · DQN：基本思想与经验回放 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0025" data-slug="dqn" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法 6 ／ 第 25 课</p>
+    <h1>DQN：基本思想与经验回放</h1>
+    <p class="lede">上一课留下一个麻烦：Q-learning 把函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值）、
+      自举（用自己当前的估计去更新自己当前的估计）、异策略（边学的那套策略不是产生数据的那套）三件事凑齐了，参数可能发散。
+      它们要学的对象是策略（一套"看到什么状态就选什么动作"的规则）对应的动作价值（在某个状态下先选某个具体动作，
+      之后再好好走，能拿多少总分）。这里讲 DQN（deep Q-network，深度 Q 网络，把 Q-learning 的动作价值交给神经网络来算）
+      怎么用两个工程手段把它按住，并写出它的损失函数与训练循环。</p>
+    <div class="objectives">
+      <h2>学完之后你会</h2>
+      <ul>
+        <li>能说清 DQN 为什么需要经验回放与目标网络</li>
+        <li>能写出 DQN 的损失函数，并指出式中哪些量被当成常数</li>
+        <li>能按顺序复述一遍 DQN 的训练循环</li>
+        <li>能说清 DQN 缓解了致命三元组里的哪几条通路，以及哪一条没有根治</li>
+        <li>能判断一个改动会不会破坏 DQN 的稳定机制</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 两个具体麻烦</h2>
+    <p>先把上一课的两个麻烦落成具体的话，后面才知道两个手段各自在压什么。
+      时序差分（用"走一步之后的新估计"来更新"走这一步之前的估计"）的学习依赖样本的分布，
+      而直接从一条轨迹上顺序取样本，会有两个问题。</p>
+    <p>第一个问题是样本高度相关。同一条轨迹上相邻两步的状态几乎一样，奖励也来自同一段过程。
+      拿这种数据去做随机梯度下降，等于每一步都在看同一类样本，
+      单步更新的方向会在同一批状态动作对上反复加强，误差无法被别的状态平均掉。
+      这属于数据分布（你手头这批数据是什么样的、偏向哪些情况）出了问题。</p>
+    <p>第二个问题是目标自己在动。函数逼近、自举（用自己当前的估计去更新自己当前的估计）、
+      异策略三者同时出现就是上一课的致命三元组：Q-learning 正好三者齐备，参数可能发散。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="顺序样本高度相关，随机抽样把它们打散">
+        <text x="20" y="20" class="val-b">顺序取样本：相邻样本几乎一样</text>
+        <circle cx="40" cy="60" r="11" class="dot-a"/>
+        <circle cx="76" cy="62" r="11" class="dot-a"/>
+        <circle cx="112" cy="61" r="11" class="dot-a"/>
+        <circle cx="148" cy="63" r="11" class="dot-a"/>
+        <circle cx="300" cy="60" r="11" class="dot"/>
+        <circle cx="336" cy="62" r="11" class="dot"/>
+        <circle cx="372" cy="61" r="11" class="dot"/>
+        <circle cx="408" cy="63" r="11" class="dot"/>
+        <line x1="26" y1="90" x2="162" y2="90" class="mark"/>
+        <line x1="286" y1="90" x2="422" y2="90" class="mark"/>
+        <text x="26" y="110" class="lbl">一段刚走过的经历</text>
+        <text x="286" y="110" class="lbl">同一段的后半截</text>
+        <text x="180" y="60" class="val">→</text>
+        <text x="450" y="64" class="lbl">都来自同一条轨迹</text>
+
+        <line x1="20" y1="132" x2="540" y2="132" class="grid"/>
+
+        <text x="20" y="158" class="val-b">随机抽一批：来源被摊开</text>
+        <circle cx="46" cy="182" r="11" class="dot"/>
+        <circle cx="112" cy="182" r="11" class="dot-a"/>
+        <circle cx="178" cy="182" r="11" class="dot"/>
+        <circle cx="244" cy="182" r="11" class="dot-a"/>
+        <circle cx="310" cy="182" r="11" class="dot-a"/>
+        <circle cx="376" cy="182" r="11" class="dot"/>
+        <circle cx="442" cy="182" r="11" class="dot-a"/>
+        <text x="46" y="212" class="lbl">深色 = 从池子里被抽中的样本</text>
+        <text x="300" y="212" class="lbl">彼此来自不同时刻，相关性被削弱</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 25.1</span>
+        同一条轨迹上的样本按时间排成一串，相邻的几乎一样。直接按这个顺序训练，
+        每次更新看到的都是同一批状态动作对。随机抽样把顺序打乱，
+        抽出来的一批更像是从这段历史里独立取出的样本，更新的方向才不会被少数状态主导。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 经验回放</h2>
+    <div class="def">
+      <span class="label">定义 2.1（把经历存起来反复用）</span>
+      <p>经验回放是把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用。
+        池子叫回放缓冲区，容量固定，写满之后新样本覆盖最旧的样本。
+        缓冲区里存的是四元组 $(S,A,R,S')$，也就是这一步的状态、动作、奖励与下一步状态。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.2（它压的是哪一条）</span>
+      <p>上一课说采样分布会随参数改变，这是三根支柱里松动的那一根。
+        经验回放把它按住：训练用的样本来自一个不随参数变化的池子，
+        更新的对象在一段时间内稳定。同时它顺带解决了数据效率（拿到同样多的经验能学多好）的问题，
+        每一步经历可以被用很多次，这与 0018 课讲 mini-batch（一小批样本）的做法接得上。</p>
+    </div>
+    <div class="def">
+      <span class="label">定义 2.3（均匀采样）</span>
+      <p>记缓冲区里的样本集合为 $\mathcal{D}$。训练时每次独立地、等概率地从 $\mathcal{D}$ 中取 $B$ 个样本，
+        其中 $B$ 是采样个数。若缓冲区里一共有 $N$ 条样本，每条被取到的概率都是 $1/N$，
+        且两次抽样之间相互独立。这样得到的一批样本，被当成对某个固定分布的独立观测。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.4（为什么用"均匀"这两个字要小心）</span>
+      <p>均匀采样保证抽中的概率相等，不保证样本在状态空间（所有可能状态的集合）里分布均匀。
+        缓冲区里哪一类状态多，抽出来的那一类就多，这个偏向由行为策略与任务本身决定。
+        所以经验回放解决的是"顺序相关"，不是"覆盖不全"。覆盖不全要靠探索手段去补，
+        不是靠抽样方式去补。这两件事经常被混为一谈。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 230" role="img" aria-label="经历存进回放缓冲区，训练时随机抽一小批">
+        <text x="20" y="20" class="val-b">与环境交互</text>
+        <rect x="20" y="40" width="140" height="40" class="box-a"/>
+        <text x="38" y="65" class="val">(s, a, r, s′)</text>
+        <path d="M160 60 H216" class="arrow-a"/>
+        <path d="M210 56 l9 4 l-9 4" class="arrow-a"/>
+        <text x="162" y="50" class="lbl">存进池子</text>
+
+        <rect x="220" y="34" width="150" height="52" class="box"/>
+        <text x="234" y="56" class="val">回放缓冲区</text>
+        <text x="234" y="76" class="lbl">容量固定，满了覆盖最旧的</text>
+
+        <rect x="240" y="106" width="18" height="16" class="box-a"/><rect x="264" y="106" width="18" height="16" class="box-a"/>
+        <rect x="288" y="106" width="18" height="16" class="box"/><rect x="312" y="106" width="18" height="16" class="box-a"/>
+        <rect x="336" y="106" width="18" height="16" class="box"/><rect x="360" y="106" width="18" height="16" class="box-a"/>
+        <line x1="206" y1="140" x2="400" y2="140" class="mark"/>
+        <text x="206" y="160" class="lbl">随机抽一小批，深色的是被抽中的</text>
+
+        <path d="M388 120 H450" class="arrow-a"/>
+        <path d="M444 116 l9 4 l-9 4" class="arrow-a"/>
+        <text x="404" y="110" class="lbl">送去训练</text>
+        <rect x="452" y="96" width="88" height="48" class="box-a"/>
+        <text x="464" y="118" class="val">算损失</text>
+        <text x="464" y="136" class="lbl">更新参数</text>
+
+        <text x="20" y="204" class="lbl">池子越大，样本来源越杂，相关性越弱；代价是旧样本可能已经过时</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 25.2</span>
+        每一步经历先存进池子，训练时再从中随机抽一小批。写和读分开，
+        于是同一条经历可以被反复使用，抽取的顺序也不再受时间顺序约束。
+        缓冲区容量是个权衡：大了样本来源杂、相关性弱，但里面可能存着很久以前旧策略产生的样本。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 目标网络</h2>
+    <p>第二个麻烦是目标自己在动。上一课讲过，函数逼近下的半梯度更新会把目标里的参数当常数，
+      可那个参数实际上每一步都在变，于是"预测"与"靶子"同时移动，误差被反复重估，训练像在追一个一直往前跑的目标。</p>
+    <div class="def">
+      <span class="label">定义 3.1（另存一份算目标）</span>
+      <p>目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次）的用法是：避免追着自己跑。
+        记当前网络的参数为 $w$，目标网络的参数为 $w^-$。每一步更新只改 $w$，
+        目标里的估计用 $w^-$ 算。每隔 $C$ 步执行一次同步</p>
+      <div class="eq">
+        <span class="eq-body">$$w^-\leftarrow w$$</span>
+        <span class="eq-num">(25.1)</span>
+      </div>
+      <p>式中 $C$ 是同步周期，是一个需要自己设定的超参（需要你自己设定、而不是训练学出来的参数）。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 3.2（$w^-$ 为什么被当成常数）</span>
+      <p>把它当常数是半梯度的直接延续：上一课定义 4.3 里"不把目标里的参数当变量"讲的就是这个动作，
+        只不过那里当常数的是同一个 $w$ 在下一步的取值，这里干脆换成一个不同步更新的副本 $w^-$。
+        两次同步之间 $w^-$ 一步不动，于是损失函数对 $w$ 而言是一个形状固定的最小二乘问题，
+        每一步都是朝它的谷底走，不会出现靶子同时跑掉的情况。这就是上一课说的"削弱正反馈"。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="目标网络的参数在一段区间内不动，误差反馈被截断">
+        <text x="20" y="20" class="val-b">没有目标网络</text>
+        <line x1="30" y1="70" x2="250" y2="70" class="axis-b"/>
+        <path d="M40 70 C70 40 100 100 130 46 C160 96 190 44 220 66" class="curve"/>
+        <text x="34" y="60" class="lbl">目标每一步都变，预测追不上</text>
+
+        <line x1="20" y1="110" x2="540" y2="110" class="grid"/>
+
+        <text x="20" y="140" class="val-b">有目标网络</text>
+        <line x1="30" y1="190" x2="500" y2="190" class="axis-b"/>
+        <path d="M40 190 H180" class="curve2"/>
+        <path d="M180 190 V150" class="curve2"/>
+        <path d="M180 190 H320" class="curve2"/>
+        <path d="M320 190 V150" class="curve2"/>
+        <path d="M320 190 H460" class="curve2"/>
+        <path d="M40 190 C70 168 120 178 170 186" class="curve"/>
+        <path d="M180 186 C230 172 280 182 315 188" class="curve"/>
+        <path d="M320 188 C370 176 420 184 458 188" class="curve"/>
+        <line x1="180" y1="128" x2="180" y2="200" class="mark"/>
+        <line x1="320" y1="128" x2="320" y2="200" class="mark"/>
+        <text x="146" y="122" class="lbl">同步</text>
+        <text x="286" y="122" class="lbl">同步</text>
+        <text x="30" y="214" class="lbl">实线：预测；虚线阶梯：目标。每段台阶内目标不动</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 25.3</span>
+        上面是两套估计同时移动时的样子，目标曲线一直在变，预测只能一路追。
+        下面把目标换成阶梯状的副本：每个同步周期内目标固定不动，预测朝它走过去，
+        到同步点再换一个新目标。同步周期越短越接近上面的情形，越长则目标越陈旧。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 3.3（同步周期怎么取）</span>
+      <p>$C$ 太小等于没有目标网络，靶子还在快速移动；$C$ 太大则目标长时间停留在旧参数上，
+        学出的估计会落后于当前策略。它和缓冲区容量一样属于要靠试验调整的超参。
+        也有把式 (25.1) 换成软更新（目标网络的参数不直接复制，每次只往新网络挪一点点）的做法，
+        每一步执行 $w^-\leftarrow\tau w+(1-\tau)w^-$，式中 $\tau$ 是一个很小的正数。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. DQN 的损失函数与训练循环</h2>
+    <p>把两个手段装进 Q-learning，再写明"哪些量当常数"，就得到 DQN 的损失函数。</p>
+    <div class="def">
+      <span class="label">定义 4.1（DQN 的损失函数）</span>
+      <p>从缓冲区里抽一批样本，定义</p>
+      <div class="eq">
+        <span class="eq-body">$$L(w)=\E\Big[\big(r+\gamma\max_{a'}q(s',a';w^-)-q(s,a;w)\big)^2\Big]$$</span>
+        <span class="eq-num">(25.2)</span>
+      </div>
+      <p>式中 $s,a,r,s'$ 是样本里的四元组，$\gamma$ 是折扣因子（越往后的奖励，算进总分时权重越小），
+        $q(\cdot,\cdot;w)$ 是当前网络给出的动作价值，$q(\cdot,\cdot;w^-)$ 是目标网络给出的动作价值，
+        $\max_{a'}$ 表示在所有可选动作里挑最大的那个估计值。期望是对缓冲区里样本的分布取的。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.2（式 (25.2) 里哪些是常数）</span>
+      <p>求梯度时把整个括号里的 $r+\gamma\max_{a'}q(s',a';w^-)$ 当成常数，只有 $q(s,a;w)$ 带梯度。
+        于是梯度是
+        $$\nabla_wL(w)=\E\Big[2\big(q(s,a;w)-r-\gamma\max_{a'}q(s',a';w^-)\big)\nabla_wq(s,a;w)\Big],$$
+        这与上一课式 (24.4) 的更新方向一致，只是目标里的参数换成了副本 $w^-$。
+        目标是"半个"常数：它在两次同步之间对 $w$ 不变，但通过式 (25.1) 间接跟着 $w$ 走。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.3（损失函数写的是期望，实际用一批平均）</span>
+      <p>式 (25.2) 里的期望在实现时用一批样本的平均代替，这就是 0019 课讲的 mini-batch（一小批样本）做法。
+        批的大小也是一个超参：太小则一批样本的噪声大，太大则每次更新慢、内存压力大。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 620 320" role="img" aria-label="DQN 训练循环：交互、存档、抽样、算目标、更新、定期同步">
+        <rect x="30" y="20" width="180" height="46" class="box-a"/>
+        <text x="52" y="48" class="val">与环境交互一步</text>
+        <path d="M210 43 H330" class="arrow-a"/>
+        <path d="M324 39 l9 4 l-9 4" class="arrow-a"/>
+        <rect x="334" y="20" width="180" height="46" class="box"/>
+        <text x="352" y="48" class="val">存入回放缓冲区</text>
+
+        <path d="M424 66 V106" class="arrow-a"/>
+        <path d="M420 100 l4 9 l4 -9" class="arrow-a"/>
+        <rect x="334" y="110" width="180" height="46" class="box-a"/>
+        <text x="352" y="138" class="val">随机抽一个 mini-batch</text>
+
+        <path d="M334 133 H214" class="arrow-a"/>
+        <path d="M220 129 l-9 4 l9 4" class="arrow-a"/>
+        <rect x="30" y="110" width="180" height="46" class="box-a"/>
+        <text x="46" y="132" class="val">算目标 r + γ max q(s′,a′; w⁻)</text>
+        <text x="46" y="150" class="lbl">用目标网络算</text>
+
+        <path d="M120 156 V196" class="arrow-a"/>
+        <path d="M116 190 l4 9 l4 -9" class="arrow-a"/>
+        <rect x="30" y="200" width="180" height="46" class="box-a"/>
+        <text x="52" y="228" class="val">算损失、更新 w</text>
+
+        <path d="M210 223 H424 V166" class="arrow"/>
+        <path d="M420 172 l4 -9 l4 9" class="arrow"/>
+        <text x="240" y="242" class="lbl">回到交互，继续收集</text>
+
+        <rect x="334" y="200" width="200" height="46" class="box"/>
+        <text x="348" y="222" class="val">每 C 步：w⁻ ← w</text>
+        <text x="348" y="240" class="lbl">目标网络定期同步</text>
+        <path d="M334 223 H300" class="arrow-a"/>
+        <path d="M306 219 l-9 4 l9 4" class="arrow-a"/>
+
+        <text x="30" y="286" class="lbl">整条循环里，参数只在"算损失、更新 w"这一步被改动</text>
+        <text x="30" y="306" class="lbl">目标网络、缓冲区容量、批大小、同步周期都需要自己设定</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 25.4</span>
+        DQN 的一轮循环分成六步：与环境交互、把经历存进缓冲区、随机抽一小批、用目标网络算目标、
+        算损失并更新当前网络、每隔 $C$ 步把当前网络复制给目标网络。写和读分开是关键，
+        同一条经历会被反复抽到，而目标在两次同步之间保持不动。</figcaption>
+    </figure>
+    <div class="def">
+      <span class="label">定义 4.4（DQN 的训练循环）</span>
+      <p>逐步说明如下。
+        第一步，随机初始化当前网络的参数 $w$ 与目标网络的参数 $w^-$，并令 $w^-=w$。
+        第二步，开始一个新回合，从初始状态出发。
+        第三步，用 $\varepsilon$-贪心（在当前估计里挑看起来最好的那个）选动作 $a$：以探索率（每次决策时有多大比例的概率去做"随便试一个"）$\varepsilon$ 随机挑一个动作，
+        其余时候按贪心（在当前估计里挑看起来最好的那个）挑；执行它，观察到奖励 $r$ 与下一个状态 $s'$。
+        第四步，把四元组 $(s,a,r,s')$ 存进回放缓冲区。
+        第五步，从缓冲区里随机抽一批样本。
+        第六步，对每个样本算目标值 $y=r+\gamma\max_{a'}q(s',a';w^-)$。
+        第七步，把损失 $\frac{1}{B}\sum_i\big(y_i-q(s_i,a_i;w)\big)^2$ 对 $w$ 求梯度，
+        沿负梯度方向更新 $w$。这里的梯度只穿过 $q(s_i,a_i;w)$ 那一项，$y$ 被当作常数。
+        第八步，每隔 $C$ 步执行一次 $w^-\leftarrow w$，然后回到第三步继续收集。</p>
+    </div>
+    <div class="thm">
+      <span class="label">命题 4.5（两个手段各自缓解了致命三元组的哪一条）</span>
+      <p>经验回放削弱的是"数据分布跟着参数跑"这条通路：抽样来自固定池子，
+        一批样本的来源被摊开，相关性下降。目标网络削弱的是"误差经目标回流"这条通路：
+        两次同步之间目标不动，正反馈被截成有限长的链条。
+        两者都不改变 DQN 仍然同时具备函数逼近、自举与异策略这个事实。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.6（没有根治的那一条）</span>
+      <p>式 (25.2) 里的期望取在历史数据分布上，它由行为策略决定，而 $\max$ 里的动作由当前估计决定，
+        两边仍然错配。这说明上一课的第三条通路只是被削弱。具体表现是过估计
+        （因为总是取最大值，估计出来的分数整体偏高）：$\max$ 挑中的往往是噪声抬得最高的那个动作。
+        DQN 原论文的做法是配一个目标网络来减慢偏差累积，更完整的修正要用双 Q
+        （用两套估计分别负责"挑动作"和"打分"，压住总是高估的毛病），那是 0027 课的内容。
+        经验回放也有代价：池子里的样本由旧策略产生，用它们更新当前策略，等于一直在做异策略学习。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 装在网格世界上是什么样</h2>
+    <p>把上面的循环放到一个具体任务里，就能看清两个手段各自在做什么。
+      取一个 $20\times20$ 的网格世界：智能体（做决策的那一方，就是你写的程序）每步往上下左右走一格，
+      碰到障碍就留在原地，走到目标格拿到奖励 $+1$，每走一步另外拿到 $-0.01$ 作为时间代价，
+      折扣因子取 $0.95$。状态是智能体所在的格子，动作是四个方向。</p>
+    <div class="eg">
+      <span class="label">例 5.1（表格法与函数逼近的规模对比）</span>
+      <p>表格法要给每个状态动作对留一格，一共 $20\times20\times4=1600$ 格，这个规模还能接受。
+        把棋盘换成 $100\times100$，格子数涨到 $40000$，仍然能存，但每个格子都需要被访问足够多次才能学好，
+        而随机走一遍很难均匀覆盖。若状态再带上剩余时间、库存量这类连续量，格子数就无法枚举了。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.2（用函数逼近表示动作价值）</span>
+      <p>把状态写成两个归一化坐标 $s=(i/20,\;j/20)$，用一个两隐层的小网络输出四个动作的价值，
+        或者取线性特征 $\phi(s,a)=\big(1,\;i,\;j,\;\text{该动作是否朝目标}\big)$。
+        后者只有四个参数，一次更新会同时改动所有格子的估计，所以那些没走到的格子也能得到估计，
+        代价是这张"平面"拟合不了复杂地形。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.3（这类任务上会看到什么）</span>
+      <p>在小网格上，DQN 通常比表格 Q-learning 学得更快到达可用水平，
+        因为它把经验铺到了相邻格子上，不必逐格试错。但它也会出现一路向下掉的情况：
+        参数更新幅度过大导致价值被冲垮，这时候降低学习率（每次更新时往新信息的方向挪多远）、增大缓冲区、延长同步周期往往能救回来。
+        这说明稳定手段是训练能否跑通的关键，而它们都是削弱，不是保证。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="网格世界中两个手段分别改变什么">
+        <text x="20" y="20" class="val-b">没有经验回放：数据来自一小段轨迹</text>
+        <rect x="24" y="40" width="220" height="140" class="box"/>
+        <path d="M40 160 L70 150 L100 118 L130 122 L150 96 L182 88 L210 62 L228 54" class="curve"/>
+        <circle cx="40" cy="160" r="5" class="dot-a"/><circle cx="228" cy="54" r="5" class="dot-a"/>
+        <text x="34" y="200" class="lbl">只沿这一条路更新，别的格子没被碰过</text>
+
+        <text x="290" y="20" class="val-b">有经验回放：池子里的样本来自很多段</text>
+        <rect x="294" y="40" width="220" height="140" class="box"/>
+        <path d="M310 160 L340 150 L370 118 L400 122 L420 96 L452 88 L480 62 L498 54" class="curve2"/>
+        <path d="M310 60 L348 92 L380 78 L416 110 L446 132 L480 156" class="curve"/>
+        <path d="M310 120 L360 156 L400 62 L440 150 L480 100" class="curve2"/>
+        <text x="304" y="200" class="lbl">多条轨迹的样本混在一批里，覆盖面更宽</text>
+
+        <text x="20" y="216" class="lbl">目标网络的作用不在这张图上：它让每次更新的靶子在若干步内不动</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 25.5</span>
+        左图是顺序训练时的样子：更新只沿着刚走过的那条路进行，远处格子长时间得不到修正。
+        右图是经验回放之后的样子：一批样本来自不同时刻、不同轨迹，一次更新同时覆盖多个区域。
+        覆盖面变宽不等于覆盖均匀，哪一类状态被访问得多，抽出来的样本仍然偏哪一类。</figcaption>
+    </figure>
+    <div class="rem">
+      <span class="label">注记 5.4（本文的边界）</span>
+      <p>这里只讲了 DQN 的两个核心技巧与训练循环，没有展开网络结构怎么设计、
+        目标值超出范围时怎么处理、训练不收敛（一轮轮算下去，数值不再明显变化）时按什么顺序排查。
+        关于过估计的修正（双 Q）与更高效的抽样（优先经验回放，抽样时不均匀抽，
+        优先抽那些"误差大、还没学会"的样本），那是后面课的内容。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>顺序采样让样本高度相关，自举让目标跟着预测一起动，这是 DQN 要处理的两个麻烦。</li>
+      <li>经验回放把经历存进固定容量的池子，训练时随机抽一批，压的是数据分布那条通路。</li>
+      <li>目标网络另存一份参数算目标，每隔 $C$ 步才同步一次，两次同步之间 $w^-$ 对 $w$ 是常数。</li>
+      <li>DQN 的损失函数是式 (25.2)，求梯度时只穿过当前网络那一项，目标整体被当成常数。</li>
+      <li>两个手段都在削弱致命三元组，没有把它消掉：期望仍然取在历史数据分布上，过估计仍然存在。</li>
+    </ul>
+    <p>下一课换一条路：不再估价值，直接学策略。那里会先解决一个表示问题，
+      也就是怎么把一个策略写成可调参数的函数，以及用什么指标衡量它好不好。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. DQN 里经验回放要解决的直接问题是哪一个？</p>
+      <ol class="mcq-options">
+        <li>状态太多，表格存不下所有状态动作对</li>
+        <li>奖励太稀疏，绝大多数步骤拿不到分数</li>
+        <li>顺序采样的样本高度相关，更新被少数状态主导</li>
+        <li>动作空间（所有可行动作的集合）太大，取最大值要算很多次</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：同一条轨迹上相邻样本几乎相同，按顺序训练等于反复看同一批数据。
+          随机抽样把来源摊开，一次更新覆盖更多状态动作对。</p>
+        <p>A 是使用函数逼近的理由。B 属于稀疏奖励（绝大多数步骤都拿不到奖励，只有极少数关键时刻有分）的问题，要靠奖励塑形（人为加一些中间奖励，让学习有路可走）或探索解决。
+          D 与抽样方式没有关系。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">2. 目标网络 $w^-$ 在式 (25.2) 里为什么可以当成常数？</p>
+      <ol class="mcq-options">
+        <li>因为它与当前网络共享参数，改动会同时生效</li>
+        <li>因为它每隔 $C$ 步才同步，两次同步之间不随 $w$ 变</li>
+        <li>因为它只用来选动作，不参与目标值的计算</li>
+        <li>因为它的学习率被设成了零，永远停在初始值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两次同步之间 $w^-$ 一步不动，损失函数对 $w$ 就是一个形状固定的最小二乘问题，
+          梯度里不会出现目标对参数的导数。</p>
+        <p>A 错在两套参数是分开存的。C 错在目标值要用它来算。D 错在 $w^-$ 会被同步更新，
+          不是永远停在初始值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. DQN 的损失函数写成期望，式中的期望是对什么分布取的？</p>
+      <ol class="mcq-options">
+        <li>对当前策略在最新状态下产生的样本分布取的</li>
+        <li>对目标策略在所有状态上均匀铺开的分布取的</li>
+        <li>对当前网络输出价值的分布取的</li>
+        <li>对回放缓冲区里已存样本的分布取的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：损失里的期望在实现时用一批平均代替，那一批是从缓冲区里随机抽的，
+          所以对应的分布是历史样本的分布，它与当前的参数无关，这是经验回放带来的性质。</p>
+        <p>A 错在这种情形就是没有经验回放。B 错在均匀铺开与实际抽样不符。
+          C 错在网络输出是函数值，不是样本的分布。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 容量为 $N$ 的缓冲区每步独立均匀抽 1 条样本，第 $k$ 条被抽中的概率是多少？</p>
+      <ol class="mcq-options">
+        <li>$1/N$，与它存进去的早晚没有关系</li>
+        <li>与它的时序差分误差成正比，误差大的概率高</li>
+        <li>与它存进去的时间成反比，越新越容易被抽到</li>
+        <li>等于 $1/B$，$B$ 是每次抽样的个数</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：均匀采样给每条样本相同的概率 $1/N$，这就是它区别于优先经验回放的地方。</p>
+        <p>B 描述的是优先经验回放的做法。C 描述的是按时间加权的抽样，均匀采样没有这一项。
+          D 错在把单条被抽中的概率与一次抽几条混为一谈。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 把同步周期 $C$ 设成 1，DQN 会退化成什么？</p>
+      <ol class="mcq-options">
+        <li>退化成蒙特卡洛（把一整局走完再估价值）方法</li>
+        <li>退化成只更新目标网络的参数，当前网络不动</li>
+        <li>失去目标网络的作用，目标每一步都跟着 $w$ 变</li>
+        <li>退化成同策略算法，行为策略必须等于目标策略</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$C=1$ 意味着每步都执行 $w^-\leftarrow w$，两套参数始终相同，
+          目标又变回随预测一起移动的形态，目标网络就不再提供稳定性。</p>
+        <p>A 错在更新仍然是每步一次，与回合结束无关。蒙特卡洛指的是把一整局走完，用真实拿到的总分来估计价值，B 错在同步的方向是当前网络复制给目标网络。
+          D 错在抽样方式与同策略、异策略的划分是两件事。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 式 (25.2) 对 $w$ 求梯度时，下面哪一项会被当成常数？</p>
+      <ol class="mcq-options">
+        <li>当前网络的输出 $q(s,a;w)$</li>
+        <li>目标值 $r+\gamma\max_{a'}q(s',a';w^-)$</li>
+        <li>折扣因子 $\gamma$ 与奖励 $r$ 的乘积</li>
+        <li>损失对参数的偏导数 $\nabla_wq(s,a;w)$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：半梯度的做法就是把目标整体当常数，梯度只穿过当前网络给出的那一个估计。</p>
+        <p>A 是要求导的那一项。C 只说了目标里的一部分，丢掉的是 $\max$ 那一项。
+          D 本身就是梯度的组成部分。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 均匀采样是否保证抽出来的一批样本均匀覆盖状态空间？</p>
+      <ol class="mcq-options">
+        <li>保证，因为每条样本被抽中的概率都相同</li>
+        <li>保证，因为抽样次数足够多时会遍历整个缓冲区</li>
+        <li>不保证，但只要把缓冲区容量调大就能保证</li>
+        <li>不保证，缓冲区里哪一类状态多，抽出来就偏哪一类</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：均匀指抽中概率相等，不指状态分布均匀。缓冲区里存了什么，取决于行为策略走过哪里，
+          这个偏向会被照原样带进每一批样本。</p>
+        <p>A 错在把"概率相等"与"覆盖均匀"当成一回事。B 错在遍历缓冲区不会改变各状态的占比。
+          C 错在容量变大只让样本来源更杂，不能消除偏向。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 为什么 DQN 从缓冲区里随机抽，而不是按时间顺序取最近的样本？</p>
+      <ol class="mcq-options">
+        <li>因为最近的样本彼此高度相关，一批里的信息量被高估</li>
+        <li>因为最近的样本一定比旧样本的奖励更小，会带偏估计</li>
+        <li>因为旧样本更接近目标策略的分布，用它们学得更准</li>
+        <li>因为按时间取会让缓冲区溢出更快，浪费存储空间</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：相邻样本来自同一段经历，内容几乎重复。随机抽把不同时刻的经历混在一批里，
+          更新的方向更接近在所有经历过的情况上取平均。</p>
+        <p>B 错在奖励的大小与新旧没有这种关系。C 错在旧样本由更早的策略产生，反而更偏离当前策略。
+          D 错在取样方式不影响缓冲区何时写满。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 下面哪种改动会明显破坏 DQN 的稳定机制？</p>
+      <ol class="mcq-options">
+        <li>把缓冲区容量从一万条调到五万条</li>
+        <li>把同步周期从一千步调到五千步</li>
+        <li>把同步周期改成每步执行一次同步</li>
+        <li>把批大小从三十二调到一百二十八</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每步同步让两套参数完全一致，目标随预测同时移动，目标网络提供的稳定性消失。</p>
+        <p>A、B、D 都是在合理范围内的超参调整，会改变训练速度与稳定性程度，
+          但不会把机制本身取消掉。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. DQN 相比表格 Q-learning，在算法层面新增的是哪一部分？</p>
+      <ol class="mcq-options">
+        <li>把取最大值改成用行为策略选出的动作</li>
+        <li>用带参数的估计配上目标网络与经验回放</li>
+        <li>把折扣因子改成随训练进度递减的系数</li>
+        <li>把探索率固定为零，训练时完全按当前估计选动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：DQN 的骨架就是 Q-learning，新增的是参数化的动作价值、目标网络与经验回放，
+          这三样合起来把致命三元组的破坏力压到可用水平。</p>
+        <p>A 描述的是 Sarsa 的目标，Q-learning 用的仍然是取最大值。
+          C 错在折扣因子不是这样改的，它衡量的是未来奖励的权重。D 错在探索率（每次决策时有多大比例的概率去做"随便试一个"）一旦为零，探索就停止，会一直按当前估计走。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 8 章第 4 节。这里的损失函数写法、目标网络的同步方式与训练循环的口径与之一致。</p>
+      <p>DQN 的原始论文是 V. Mnih 等,
+        <em>Human-level control through deep reinforcement learning</em>, Nature, 2015；
+        经验回放最早由 L. Lin 在 1992 年提出。关于过估计的系统分析见 H. van Hasselt 等,
+        <em>Deep Reinforcement Learning with Double Q-learning</em>, 2016。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把目标网络的同步周期取几个不同值，分别会发生什么"，
+      或者 "经验回放缓冲区里的样本越来越旧，为什么还能用？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

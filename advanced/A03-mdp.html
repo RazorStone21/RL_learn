@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A03 · 马尔可夫决策过程 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A03" data-slug="mdp" data-part="进阶篇 · 第一部分 · 基础概念">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第一部分 · 基础概念</p>
+    <h1>马尔可夫决策过程</h1>
+    <p class="lede">上一节讲的是每次选择互不影响的情况，现实中这个假设很少成立。
+      这一节把"选择会改变下一步局面"的问题写成一套标准格式，并给你一把尺子，
+      用来检查自己定义的状态够不够用。状态定错，后面所有算法都会稳定地学出错误行为。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 MDP 五元组，并解释 p(s′,r|s,a) 里每个符号在代码里对应什么</li>
+        <li>能用"给定状态后未来与历史无关"检验自己的状态设计</li>
+        <li>能算出一串奖励的折扣回报，并说清 γ（折扣因子）取 0.9 与 0.99 的实际差别</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>从老虎机到"有后果的选择"</h2>
+    <p>第 <a href="A02-bandits.html">0002 课</a>里的老虎机假设每次选择互不影响。现实里这个假设几乎从不成立：
+      你今天给用户推了低价商品，他明天对价格的预期就变了；你这条产线降了库存，下个月的缺货率跟着上升。
+      选择会改变你下一步面对的局面，所以需要一个带状态的模型。</p>
+    <p><span class="term">马尔可夫决策过程（Markov decision process, MDP）</span>：规则明确、只看当前局面就能决定下一步的那类问题设定。
+      它把一步交互写成五元组 <span class="math">(S, A, P, R, γ)</span>。</p>
+    <p>五元组逐项看：<var>S</var> 是状态集合，也叫状态空间（所有可能局面的集合）；
+      <var>A</var> 是动作集合，也叫动作空间（你这一步能做的选择有多少种）；
+      <var>P</var> 是状态转移（你做完动作之后，环境从当前状态跳到下一个状态）的规律；
+      <var>R</var> 是奖励（每个动作得几分）；<var>γ</var> 是折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折）。
+      前四个描述"世界怎么运转"，最后一个描述"你多看重未来"。</p>
+  </section>
+
+  <section>
+    <h2>一步交互的定义</h2>
+    <p>在时刻 <var>t</var>，<span class="term">智能体（做决策的那一方，就是你写的程序）</span>看到状态 <var>St</var>，
+      选一个动作 <var>At</var>。环境随后给出奖励 <var>R<sub>t+1</sub></var>，并把局面转移到 <var>S<sub>t+1</sub></var>。
+      环境的全部规律就是下面这一个条件概率：</p>
+    <div class="eq">
+      <span class="eq-body">p(s′, r | s, a) = ℙ[ S<sub>t+1</sub> = s′, R<sub>t+1</sub> = r | S<sub>t</sub> = s, A<sub>t</sub> = a ]</span>
+      <span class="eq-num">(3.1)</span>
+    </div>
+    <p>式子读作"在状态 s、做了动作 a 之后，落到状态 s′ 并且拿到奖励 r 的概率是多少"。
+      概率就是"平均一百次里大约发生几次"：0.3 就是大约一百次里三十次。
+      注意它是联合分布：下一状态和奖励是一起给出的。写成代码，就是一张查表
+      <code>p[(s, a)] → [(概率, s′, r), …]</code>，每一行的概率加起来等于 1。</p>
+    <p>一个常见错误是只写 <code>P[s′|s,a]</code>，再单独配一个平均奖励。那样你就丢掉了"奖励和状态一起变化"的相关性，
+      后面算期望时会出错。</p>
+    <p>写代码时还有一个偷懒但正确的等价形式：把奖励并进转移，
+      用 <span class="math">r(s,a) = Σ<sub>s′,r</sub> r · p(s′,r|s,a)</span> 表示期望即时奖励。
+      这里的 Σ 是求和号，意思是把后面那串东西全加起来。表格法常用 <code>R[s][a]</code> 这种写法。</p>
+  </section>
+
+  <section>
+    <h2>马尔可夫性：状态必须"够用"</h2>
+    <p>MDP 成立的前提是<span class="term">马尔可夫性（Markov property，下一个状态只取决于当前状态和动作，与更早的历史无关）</span>。
+      用一句大白话说：只看现在的局面就能决定下一步，不必把之前的每一步都回放一遍。
+      状态是决策所需的全部信息，历史里没有更多有用的东西。</p>
+    <p>这一条最容易被轻视，代价也最大。库存问题里，只把"当前库存量"当状态就不满足它：
+      在途订单、最近七天的销量、季节性都会改变未来的缺货分布。你的算法不会报错，
+      它只会稳定地学出一个不够好的策略（一套"看到什么状态就选什么动作"的规则），而且你很难从曲线上看出原因。</p>
+    <div class="note">
+      <p><em>应用向的检验办法：</em>把数据按"你的状态表示"分组，
+        看同一个状态下的下一步结果分布是否一致。若某个状态里还藏着一组明显不同的未来分布，
+        你就漏了信息。第 0006 课会把这件事做成一份建模检查表。</p>
+    </div>
+    <p>反过来说，<em>完整观测</em>并不等于<em>马尔可夫状态</em>。视频游戏里单帧画面看不到速度，
+      所以工程上会堆叠最近几帧；这不优雅，但它把"速度"这个隐含变量重新塞回了状态。</p>
+  </section>
+
+  <section>
+    <h2>回报与折扣因子</h2>
+    <p>要最大化的东西叫<span class="term">回报（从现在起一直到结束，把每一步奖励加起来的总分）</span>：</p>
+    <div class="eq">
+      <span class="eq-body">G<sub>t</sub> = R<sub>t+1</sub> + γR<sub>t+2</sub> + γ²R<sub>t+3</sub> + … = Σ<sub>k=0</sub><sup>∞</sup> γ<sup>k</sup> R<sub>t+k+1</sub></span>
+      <span class="eq-num">(3.2)</span>
+    </div>
+    <p>公式里的 Σ 是求和号，意思是把后面那串东西全加起来；<var>γ</var><sup>k</sup> 是 γ 连乘 k 次。
+      因为越靠后的奖励都要打折，这个量也常被叫成<span class="term">折扣回报（从此刻起，把后面每一步奖励打折后加起来的总分）</span>。</p>
+    <p><var>γ</var> ∈ [0, 1] 是<span class="term">折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折）</span>。
+      它的数量级值得记一下：<var>γ</var> = 0.9 时，10 步之后的奖励权重只剩 <span class="math">0.9<sup>10</sup> ≈ 0.35</span>；
+      换成 0.99，同样 10 步的权重是 <span class="math">0.99<sup>10</sup> ≈ 0.90</span>。
+      所以 γ 直接决定你的智能体看多远：0.9 大致关心未来十步，0.99 关心未来上百步。</p>
+    <p>当 <var>γ</var> &lt; 1 且每一步的奖励有上限时，无限项的回报仍然是有限的：每步都拿 1 的话，
+      总和不超过 <span class="math">1/(1−γ)</span>；γ = 0.9 时这个上界是 10。
+      这种"再算下去也基本不变"的状态就叫收敛（一轮轮算下去，数值不再明显变化，稳定下来了）。
+      这也是"延迟满足"的数值体现：<em>γ 越小，策略越短视、越急于兑现眼前收益</em>。</p>
+  </section>
+
+  <section>
+    <h2>episodic、continuing 与策略</h2>
+    <p>任务按是否自然结束分两类。<span class="term">分幕任务（episodic task，从开始到结束是一整局，结束后重置）</span>
+      有终止状态，比如一盘棋、一次会话；<span class="term">持续任务（continuing task，永不终止、一直进行下去）</span>
+      没有终止状态，比如长期运行的推荐系统或库存控制。两类任务都可以用 <var>γ</var> &lt; 1，
+      但持续任务必须用 γ &lt; 1（否则回报可能发散），而分幕任务允许 γ = 1。</p>
+    <p>智能体行为规则叫<span class="term">策略（policy，一套"看到什么状态就选什么动作"的规则）</span>，记作
+      <span class="math">π(a|s)</span>：在状态 <var>s</var> 下选动作 <var>a</var> 的概率。
+      当每个状态下只有一个动作概率为 1 时，就退化成确定性的写法 <var>π(s)</var>。
+      策略是智能体自己的东西；环境只负责 <span class="math">p(s′,r|s,a)</span>，两者不要混。</p>
+    <p>到这里，问题已经被完整描述：找一套策略 π，让期望回报 <span class="math">𝔼[G<sub>t</sub>]</span> 最大。
+      这里的 𝔼（期望，同一件事重复很多次之后的平均结果）说的是：同一套策略跑很多次，把每次的总分平均一下。
+      但"某一套策略到底值多少"还没有定义。第 <a href="A04-value-bellman.html">0004 课</a>会用
+      贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）回答这个问题；
+      那里的价值函数（从某个状态出发，按某套策略走下去，平均能拿多少总分）就是为它准备的。
+      再往后，策略改进（根据算出的分数，把策略里明显吃亏的选择换掉）和策略梯度
+      （不绕道估价值，直接调整策略参数的那类方法）都要先用上"从某一步开始的累积回报"。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 关于马尔可夫性，下列哪一项描述是准确的？</p>
+      <ol class="mcq-options">
+        <li>状态必须能够唯一地还原出此前完整的观测与动作历史</li>
+        <li>给定当前状态之后，未来与更早的历史之间互相条件独立</li>
+        <li>状态必须是有限个离散取值，连续取值的状态不满足该性质</li>
+        <li>状态转移只由环境自身决定，与智能体选了什么动作无关</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：马尔可夫性只要求当前状态是决策所需的充分统计量，
+          历史在给定状态后不再提供增量信息，因此未来与历史条件独立（S&amp;B 第 3.1 节）。</p>
+        <p>A 是过强要求：状态只需充分，不必能还原历史。
+          C 把表格法的限制当成了 MDP 的前提；连续状态空间同样是合法的 MDP。
+          D 恰好抹掉了动作的作用，而 <span class="math">p(s′,r|s,a)</span> 明确依赖 <var>a</var>。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 取折扣因子 <var>γ</var> = 0.9，那么"10 步之后才会拿到的奖励"权重是多少？</p>
+      <ol class="mcq-options">
+        <li>约 0.09，因为每往后一步都要从总权重中扣除 0.09</li>
+        <li>约 0.31，因为 10 步的累计折扣等于 0.9 的 10 次方的一半</li>
+        <li>约 0.90，因为折扣只在超过 10 步之后才真正开始生效</li>
+        <li>约 0.35，因为第 10 步的权重就是 0.9 连乘 10 次的结果</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：权重是 <span class="math">γ<sup>10</sup></span> =
+          <span class="math">0.9<sup>10</sup> ≈ 0.349</span>。10 步以后的奖励只剩三分之一的份量，
+          这就是"γ = 0.9 看未来十步左右"这个说法的依据。</p>
+        <p>A 把指数衰减当成了线性扣减（0.9 不是每步减 0.09）。
+          B 的"折半"没有依据。C 描述的是一种根本不存在的免折扣窗口期。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. 分幕任务（episodic）与持续任务（continuing）的关键区别是什么？</p>
+      <ol class="mcq-options">
+        <li>分幕任务不能使用折扣因子，持续任务则必须使用折扣因子</li>
+        <li>分幕任务的动作空间是离散的，持续任务的动作空间都是连续的</li>
+        <li>分幕任务会自然终止并重置，持续任务没有终止状态可以到达</li>
+        <li>分幕任务的回报一定是有限值，持续任务的回报必定发散到无穷</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：区分标准只有一条：交互序列是否会自然结束并重新开始。
+          分幕任务存在终止状态，持续任务则一直在同一个过程里延续下去（S&amp;B 第 3.3 节）。</p>
+        <p>A 错：分幕任务同样可以（也常常）用 γ &lt; 1，只是允许 γ = 1。
+          B 与动作空间无关。D 错：持续任务在 γ &lt; 1 且奖励有界时回报有限，上界就是 1/(1−γ)。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 关于策略 π，下列哪种说法是正确的？</p>
+      <ol class="mcq-options">
+        <li>π(a|s) 给出各状态下动作的概率，π(s) 是它的确定性特例</li>
+        <li>π 属于环境的一部分，与智能体学到的价值函数没有直接关系</li>
+        <li>只有当状态空间是有限的时候，策略才能写成条件概率形式</li>
+        <li>π(a|s) 描述状态如何转移，而奖励由另外的策略函数单独给出</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：策略是智能体的决策规则，<span class="math">π(a|s)</span> 是它的随机形式；
+          当某个动作概率为 1、其余为 0 时，就写成确定性形式 <var>π(s)</var>。</p>
+        <p>B 把策略归给了环境；环境负责的是 <span class="math">p(s′,r|s,a)</span>。
+          C 不成立：无限或连续状态空间照样可以定义策略。
+          D 把策略和转移模型搞混了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 五元组里的 <span class="math">p(s′,r|s,a)</span> 描述的是什么？</p>
+      <ol class="mcq-options">
+        <li>它直接给出每个状态下的最优动作，属于策略的一部分内容</li>
+        <li>它只描述奖励取值的分布，不包含下一个状态会是谁的信息</li>
+        <li>它同时给出下一状态与奖励的联合概率，定义了环境的动态规律</li>
+        <li>它只在分幕任务中是必需的，持续任务里完全用不到这个量</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：它是"下一状态和奖励一起出现"的联合分布，
+          按它取期望就得到贝尔曼方程里的那两项。所有基于模型的算法都以它（或其等价表格）为输入。</p>
+        <p>A 错：最优动作要靠价值函数推出来，环境不会告诉你。
+          B 漏掉了 s′：两者是联合的，奖励和状态才能相关，算期望时不能拆开。
+          D 错：两类任务都需要它，区别只在是否有终止状态。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0003-code-1">
+      <h3>代码题 1 · 从轨迹奖励算出每一步的折扣回报</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>跑完一条轨迹后，拿到的只有每步的即时奖励。轨迹就是从开始到结束、一路上状态动作奖励的记录；而后面给策略打分的算法要的是"从某一步开始的累积回报"。这个函数把奖励序列变成整条轨迹上每一步的折扣回报，在采集完一条轨迹之后调用，是后面蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）这类算法的输入准备步骤。输入是记录下来的奖励，输出是从同一时刻起算的长期收益。</p>
+        <p>请实现 <code>returns_from_rewards(rewards, gamma)</code>。</p>
+                <div class="eq">
+                  <span class="eq-body">G[t] = Σ<sub>k≥0</sub> γ<sup>k</sup> · rewards[t+k]</span>
+                  <span class="eq-num">(3.3)</span>
+                </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：长度为 <code>T</code> 的奖励序列，Python 列表或一维 numpy 数组都可以。numpy 数组是"一排数字的容器"，形状记作 <code>(T,)</code>，下标从 0 开始，<code>T</code> 允许为 0；</li>
+          <li><code>gamma</code>：float，折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折）；未来第 <var>k</var> 步的奖励要乘 <var>γ</var><sup>k</sup>，也就是 γ 连乘 k 次。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回用浮点数存放、长度为 <code>T</code> 的 numpy 数组 <code>G</code>，形状 <code>(T,)</code>；<code>G[t]</code> 是从第 <var>t</var> 步起、把 <code>rewards[t]</code> 当作第一步的折扣回报。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试逐项核对 <code>G</code> 与定义一致，并检查相邻两项满足 <code>G[t] = rewards[t] + gamma * G[t+1]</code>；最后一步的回报等于那一步的奖励；只有一步时返回长度 1 的数组；<code>rewards</code> 为空时返回形状 <code>(0,)</code> 的数组。只用标准库与 numpy，本题不需要随机数。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>返回的必须是 numpy 数组：先写 <code>G = np.zeros(len(rewards))</code>。<code>np.zeros(n)</code> 返回长度 n、全是 0 的数组，下标从 0 开始，最后一步的下标是 <code>T-1</code>。</li>
+          <li>用一个变量 <code>running = 0.0</code> 记住"后面所有奖励的折扣和"。它一开始是 0，因为最后一步之后没有奖励。</li>
+          <li>让 <code>t</code> 从 <code>T-1</code> 倒着走到 <code>0</code>，写成 <code>range(len(rewards) - 1, -1, -1)</code>。
+              每轮先做 <code>running = rewards[t] + gamma * running</code>，再把 <code>running</code> 存进 <code>G[t]</code>。</li>
+          <li>不要对每个 <var>t</var> 都重新往后累加一遍，那样要算 O(T²) 次，边界上还容易出错。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def returns_from_rewards(rewards, gamma):
+    # TODO: 从轨迹末尾往前推，G[t] = rewards[t] + gamma * G[t+1]
+    return np.zeros(len(rewards))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+G = returns_from_rewards([1.0, 1.0, 1.0], 1.0)
+check(isinstance(G, np.ndarray), f"返回值应当是 numpy 数组，实际 {type(G).__name__}")
+check(G.shape == (3,), f"输出长度应当与输入一致，实际 {G.shape}")
+check(np.allclose(G, [3.0, 2.0, 1.0]), f"gamma=1 时应当是 [3, 2, 1]，实际 {G}")
+
+G = returns_from_rewards([1.0, 1.0, 1.0], 0.5)
+check(np.allclose(G, [1.75, 1.5, 1.0]),
+      f"gamma=0.5 时每一步的回报应是 [1.75, 1.5, 1.0]，实际 {G}")
+
+G = returns_from_rewards([0.0, 0.0, 10.0], 0.9)
+check(abs(G[0] - 8.1) < 1e-9, f"10 分奖励在第 3 步，G[0] 应为 10*0.81 = 8.1，实际 {G[0]:.4f}")
+check(abs(G[1] - 9.0) < 1e-9, f"G[1] 应为 10*0.9 = 9.0，实际 {G[1]:.4f}")
+check(abs(G[2] - 10.0) < 1e-9, f"最后一步的回报就等于那一步奖励，实际 {G[2]:.4f}")
+
+G = returns_from_rewards([2.0], 0.9)
+check(G.shape == (1,) and abs(G[0] - 2.0) < 1e-9, "只有一步时，回报等于该步奖励")
+
+G = returns_from_rewards([], 0.9)
+check(G.shape == (0,), f"空输入应当返回长度为 0 的数组，实际 {G.shape}")
+
+G = returns_from_rewards(np.array([1.0, 2.0, 3.0, 4.0]), 0.9)
+expected = [1 + 0.9 * 2 + 0.81 * 3 + 0.729 * 4, 2 + 0.9 * 3 + 0.81 * 4, 3 + 0.9 * 4, 4]
+check(np.allclose(G, expected), f"逐项累加结果应为 {expected}，实际 {G}")
+
+for t in range(len(expected) - 1):
+    check(abs(G[t] - (G[t + 1] * 0.9 + [1.0, 2.0, 3.0, 4.0][t])) < 1e-9,
+          f"必须满足递推 G[t] = rewards[t] + gamma * G[t+1]，在 t={t} 处不成立")
+
+G = returns_from_rewards([1.0] * 11, 0.9)
+check(abs(G[0] - (1 - 0.9 ** 11) / 0.1) < 1e-9,
+      f"11 个 1 在 gamma=0.9 下的 G[0] 应为 {(1 - 0.9 ** 11) / 0.1:.6f}，实际 {G[0]:.6f}")
+check(abs(0.9 ** 10 - 0.3486784401) < 1e-9, "第 10 步奖励的权重应为 0.9 的 10 次方")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def returns_from_rewards(rewards, gamma):
+    G = np.zeros(len(rewards), dtype=float)
+    running = 0.0
+    for t in range(len(rewards) - 1, -1, -1):
+        running = rewards[t] + gamma * running
+        G[t] = running
+    return G
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0003-code-2">
+      <h3>代码题 2 · 用数据检验状态表示是否满足马尔可夫性</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>状态表示漏掉关键历史时，同一个状态下的下一步会依赖被丢掉的信息，马尔可夫性就不成立，后面所有基于价值函数的算法都会跟着失准。这个函数用一批转移记录给状态表示做体检：同一状态、不同历史下的结果分布差得越远，说明这个状态表示漏掉的东西越多。输入是交互日志，输出是一个可以跨状态设计比较的偏差分数。</p>
+        <p>请实现 <code>max_markov_gap(records)</code>。</p>
+                <div class="eq">
+                  <span class="eq-body">TV(p, q) = ½ Σ<sub>o</sub> | p(o) − q(o) |</span>
+                  <span class="eq-num">(3.4)</span>
+                </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>records</code>：转移记录列表，每条是三元组 <code>(state, history, outcome)</code>；<code>state</code> 是状态表示看到的值，<code>history</code> 是这个表示丢掉的历史信息，<code>outcome</code> 是这一步之后观察到的结果（整数）。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 Python <code>float</code>：所有状态里、所有历史组合两两比较中最大的总变差距离。总变差距离（total variation distance）是这样算的：把两套"平均一百次里各出现几次"的比例逐项相减、取绝对值、加起来再除以 2，取值在 0 到 1 之间。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>records</code> 为空时返回 <code>0.0</code>；某个状态只有一种 <code>history</code> 时没有可比对象，同样返回 <code>0.0</code>；两个历史的经验分布完全不相交时返回 <code>1.0</code>，相差 1/3 时返回约 <code>0.3333</code>；某个 <code>outcome</code> 只在一侧出现时，另一侧的概率按 0 处理。这个函数只做统计，不要修改传入的 <code>records</code>；只用标准库与 numpy，本题不需要随机数。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先统计次数：用一个字典记下每个结果出现了几次，写成 <code>counts[state][history][outcome] += 1</code>。
+              字典的键可以再套字典，用 <code>setdefault</code> 可以先把空的子字典建好。</li>
+          <li>再把次数换成概率：某个 history 下的概率 = 这个 outcome 的次数 ÷ 这个 history 的样本总数。这就是"平均一百次里大约几次"的那个比例。</li>
+          <li>然后对同一个 state 下的每一对 history 算 TV：把两套概率的键并成一个集合，对每个键取 <code>abs(p - q)</code>；
+              某个 outcome 只在一侧出现时，另一侧的概率按 0 处理。最后把总和乘以 0.5。</li>
+          <li>所有 state、所有 history 对里取最大的那个返回；<code>records</code> 为空、或者某个 state 只有一种 history 时，直接返回 <code>0.0</code>。</li>
+          <li>这个函数只做统计，不要修改传入的 <code>records</code>；返回的是 Python 的 <code>float</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def max_markov_gap(records):
+    # TODO: 按 state、history 分组统计 outcome 分布，返回最大的总变差距离
+    return 0.0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+markov = [("s1", "h1", 0), ("s1", "h2", 0), ("s2", "h1", 1), ("s2", "h2", 1)]
+g = max_markov_gap(markov)
+check(isinstance(g, float), f"返回值应当是 float，实际 {type(g).__name__}")
+check(abs(g) < 1e-9, f"每个状态下的结果都确定，差距应为 0，实际 {g:.4f}")
+
+gap1 = max_markov_gap([("s", "h1", 0), ("s", "h2", 1)])
+check(abs(gap1 - 1.0) < 1e-9, f"两个历史的经验分布完全不相交，TV 应为 1.0，实际 {gap1:.4f}")
+
+half = [("s", "h1", 0), ("s", "h1", 0), ("s", "h2", 0), ("s", "h2", 1)]
+g = max_markov_gap(half)
+check(abs(g - 0.5) < 1e-9, f"一侧永远是 0、另一侧 0 和 1 各半，TV 应为 0.5，实际 {g:.4f}")
+
+third = [("s", "h1", 0), ("s", "h1", 0), ("s", "h1", 1), ("s", "h2", 0), ("s", "h2", 1), ("s", "h2", 1)]
+g = max_markov_gap(third)
+check(abs(g - 1.0 / 3) < 1e-9, f"两个分布相差 1/3 时 TV 应为 0.3333，实际 {g:.4f}")
+
+mixed = [("s1", "h1", 0), ("s1", "h2", 0), ("s2", "h1", 7), ("s2", "h2", 9), ("s3", "h1", 5)]
+g = max_markov_gap(mixed)
+check(abs(g - 1.0) < 1e-9, f"应当取所有状态、所有历史组合里的最大值（此处为 1.0），实际 {g:.4f}")
+
+check(max_markov_gap([]) == 0.0, "空输入应当返回 0.0")
+check(max_markov_gap([("s", "h1", 0), ("s", "h1", 1)]) == 0.0,
+      "同一状态下只有一种历史时没有可比对象，应当返回 0.0")
+
+spread = [("s", "h1", 2), ("s", "h2", 0), ("s", "h2", 1)]
+g = max_markov_gap(spread)
+check(abs(g - 1.0) < 1e-9,
+      f"一侧永远是 2、另一侧是 0/1 各半，TV 应为 0.5*(1+0.5+0.5)=1.0，实际 {g:.4f}")
+
+three_hist = [("s", "a", 0), ("s", "b", 0), ("s", "c", 1)]
+g = max_markov_gap(three_hist)
+check(abs(g - 1.0) < 1e-9, f"应当比较所有历史两两组合，最大 TV 为 1.0，实际 {g:.4f}")
+
+data = [("s", "h1", 0), ("s", "h2", 1)]
+before = list(data)
+max_markov_gap(data)
+check(data == before, "这个函数只做统计，不应当修改传入的 records")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def max_markov_gap(records):
+    counts = {}
+    for state, hist, outcome in records:
+        counts.setdefault(state, {}).setdefault(hist, {})
+        bucket = counts[state][hist]
+        bucket[outcome] = bucket.get(outcome, 0) + 1
+
+    best = 0.0
+    for by_hist in counts.values():
+        hists = list(by_hist.keys())
+        for i in range(len(hists)):
+            for j in range(i + 1, len(hists)):
+                p_counts, q_counts = by_hist[hists[i]], by_hist[hists[j]]
+                n_p = float(sum(p_counts.values()))
+                n_q = float(sum(q_counts.values()))
+                keys = set(p_counts) | set(q_counts)
+                tv = 0.5 * sum(abs(p_counts.get(k, 0) / n_p - q_counts.get(k, 0) / n_q) for k in keys)
+                if tv > best:
+                    best = tv
+    return float(best)
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 3.1–3.3 节。
+        五元组、马尔可夫性、回报与折扣、分幕与持续任务的定义都在这里；
+        第 3.1 节末尾关于"状态应当是信息的充分统计量"的讨论值得反复读。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>如果这里的讲法不合你的口味，Berkeley CS188 的 MDP 讲义
+        <a class="cite" href="https://inst.eecs.berkeley.edu/~cs188/">（课程主页）</a>
+        用更直白的语言讲了同一套定义。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "我现在的状态设计漏掉了哪些变量？" 或者 "帮我为这个业务问题写出 p(s′,r|s,a) 的表格"。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

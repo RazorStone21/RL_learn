@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A08 · 时序差分 TD(0) — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A08" data-slug="td-learning" data-part="进阶篇 · 第二部分 · 无模型方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第二部分 · 无模型方法</p>
+    <h1>时序差分 TD(0)</h1>
+    <p class="lede">上一节的办法要等一整局走完才能学，这一节换一条路：走一步就能学一步。
+      它会先讲清"用下一步的估计来更新这一步的估计"这件事，再说明这样做换来了什么、代价是什么。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 TD(0) 的更新式，并指出每一项在代码里对应什么</li>
+        <li>能用自己的话解释自举与 TD 误差</li>
+        <li>能说出它与蒙特卡洛在偏差和波动上的差别，以及为什么它常常学得更快</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>上一节卡在哪两处</h2>
+    <p>第 <a href="A07-monte-carlo.html">0007 课</a>讲过的方法叫蒙特卡洛（把一整局走完，用真实拿到的总分来估价值），
+      它有两个硬伤。</p>
+    <p>第一，它必须等一整局走完，拿到这一局的<span class="term">回报（从现在起一直到结束，把每一步奖励加起来的总分）</span>，
+      才能更新一次估计。要是这一局有几千步，或者任务永远不结束，它就一步也学不了。</p>
+    <p>第二，这个回报把一整局里所有的随机性都堆进了一个数，波动很大。
+      同一个起点跑两次，拿到的回报可能差得远。</p>
+    <p>这一节的办法换个思路：为什么要等真实的总分？手上已经有一个对下一状态的估计了，
+      先用它顶上。</p>
+  </section>
+
+  <section>
+    <h2>TD(0)：用下一步的估计当目标</h2>
+    <p>这个办法叫<span class="term">时序差分</span>（不用等到一局走完，用"走一步之后的新估计"来更新"走这一步之前的估计"），
+      简称 TD。它的核心更新只有一行。</p>
+    <div class="eq">
+      <span class="eq-body">V(s) ← V(s) + α [ r + γV(s') − V(s) ]</span>
+      <span class="eq-num">(8.1)</span>
+    </div>
+    <p>先把这一行"读"一遍。箭头读作"更新为"；<var>V</var> 是价值估计，
+      括号里放的是状态，也可以是"状态加动作"；
+      <var>s</var> 是刚离开的那个状态，<span class="math">s'</span> 是刚进入的新状态；
+      <var>r</var> 是环境刚给的即时奖励；<var>α</var> 是<span class="term">学习率</span>（每次更新时，往新信息的方向挪多远）；
+      <var>γ</var> 是<span class="term">折扣因子</span>（越往后的奖励，算进总分时权重越小，等于给它打了个折）。
+      方括号里那一整串叫 TD 误差，下面单独讲。这里先记住这套记号：
+      给定一套策略（看到什么状态就选什么动作的规则），价值就是指"照着它走下去，平均能拿多少总分"。</p>
+    <p>这一行在做什么？拿"这一步的即时奖励，加上打折后的下一步估计"当作一个新目标，
+      然后让 <var>V(s)</var> 朝这个目标挪一小步。挪多远，由 <var>α</var> 决定。</p>
+    <p>举个例子。假设现在估计"从状态 A 出发能拿 10 分"，也就是 <span class="math">V(A) = 10</span>。
+      从 A 走一步到了状态 B，拿到了 2 分奖励，而 <span class="math">V(B) = 8</span>，
+      折扣因子取 1。那么新目标是 2 + 8 = 10，和当前的估计一样，这一行就不改动。
+      如果 <span class="math">V(B)</span> 是 14，新目标就变成 16，这个更新会把
+      <span class="math">V(A)</span> 往上抬一点。抬多少，看 <var>α</var>。</p>
+    <p>方括号里的那个量是整个课程里最重要的中间量，叫
+      <span class="term">TD 误差</span>（TD 目标减去当前估计，也就是还差多少没补上）：</p>
+    <div class="eq">
+      <span class="eq-body">δ<sub>t</sub> = r + γV(s') − V(s)</span>
+      <span class="eq-num">(8.2)</span>
+    </div>
+    <p>公式 (8.2) 里 <span class="math">δ<sub>t</sub></span> 表示"第 t 步的那个 δ"，
+      其中右下角的 <var>t</var> 就是步数下标。
+      它等于"新目标"减去"当前估计"，读出来就是"还差多少"。
+      如果两个数相等，误差是 0，这一步就不用改。</p>
+    <p>新目标 <span class="math">r + γV(s')</span> 有个名字，叫
+      <span class="term">TD 目标</span>（用来当靶子的那个数，等于即时奖励加打折后的下一步估计），
+      英文是 TD target。到达终止状态时，把 <span class="math">V(s')</span> 当作 0，
+      目标里就不含"下一步的估计"了，这一行代码天然覆盖了两种情形。</p>
+    <p>注意 <span class="math">V(s')</span> 本身也是一个估计值，可能还是错的。
+      拿一个估计去更新另一个估计，这种像拽着自己鞋带往上提的做法叫
+      <span class="term">自举</span>（用自己当前的估计去更新自己当前的估计）。
+      上一节的蒙特卡洛从不拿自己的估计当目标，而 TD 每一步都在这么做。</p>
+  </section>
+
+  <section>
+    <h2>偏差与方差的取舍</h2>
+    <p>先补两个词。方差说的是"同一个做法重复很多次，结果波动有多大"，
+      像成绩忽高忽低。偏差说的是"估计值总往同一个方向偏，一次又一次地偏同一侧"，
+      像一杆秤每次都偏重两斤。</p>
+    <p>蒙特卡洛的目标是真实采样出来的回报，它是实实在在发生的分数，
+      不会一次又一次地偏向同一个方向。所以它的估计是无偏的，但方差大。</p>
+    <p>TD 的目标里塞了一个 <span class="math">V(s')</span>，而这个数本身还在学、可能还是错的。
+      拿它当靶子，估计就会偏向它当前的样子，所以 TD 是有偏的。
+      好处是它只用了一步的随机性，方差小得多。</p>
+    <p>量级上可以这样感受。如果 <span class="math">V(s')</span> 有 ±0.5 的误差，
+      TD 目标的误差大致也在这个量级。而一个几十步的蒙特卡洛回报，
+      误差要把沿途每一步的随机都累加起来，常常是它的好几倍。
+      一句话：TD 是拿偏差换了方差。</p>
+  </section>
+
+  <section>
+    <h2>为什么 TD 常常更准</h2>
+    <p>Sutton &amp; Barto 用同一个 5 状态随机游走做了对照实验<a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[第 6.2 节, 图 6.2]</a>：
+      常数步长的 TD(0) 在早期就把误差压了下来，而常数 <var>α</var> 的蒙特卡洛起步很慢。
+      这里用的误差是 RMS 误差，意思是"把每个状态的估计误差平方后取平均，再开根号"，
+      英文全称 root mean square，它衡量的是整体差了多远。</p>
+    <p>原因不只是"更新得更频繁"。TD 还用上了一条蒙特卡洛用不了的信息：
+      相邻两个状态的价值必须彼此对得上。当 <span class="math">V(s')</span> 被修正时，
+      这个修正会顺着 TD 更新一步步往回流到相邻状态；蒙特卡洛只能等这一整条轨迹重新跑出来。
+      TD 把"这个环境的下一步只取决于现在"这条先验吃进了算法里。</p>
+    <p>把同一批经验反复扫，这件事看得更清楚。做法是把数据分成一批批地过：
+      一次处理一小批，而不是一条一条来，这样的一批数据叫 batch（一批样本，像一次批改一叠作业）。
+      反复扫完之后，用批量的蒙特卡洛会<span class="term">收敛</span>（一轮轮算下去，数值不再明显变化，稳定下来了）到训练集上的最小平方误差解，
+      而用批量的 TD(0) 会收敛到另一个解：先由这批数据估出一个 MDP
+      （马尔可夫决策过程，就是把"下一步只取决于现在"的问题写成标准格式），
+      似然指的是"当前这套说法，解释我们观测到的这批数据的能力有多强"，
+      再取这个 MDP 的最大似然解。
+      这就是 TD 在预测任务上常常更准的理论解释。</p>
+  </section>
+
+  <figure class="sim" data-sim="random-walk" data-states="5" data-runs="100"></figure>
+
+  <section>
+    <h2>应用视角：TD 换来了什么，代价是什么</h2>
+    <p>换来的是能在一条长长的流水线上持续学：每交互一步就更新一次，
+      不需要"这一局到哪儿算结束"，天生适合永不终止的线上系统。
+      从这一节开始，后面所有算法都建立在 TD 之上。</p>
+    <p>代价是自举带来的偏差与不稳定。单独用表格 TD 很稳；
+      但一旦把自举、<span class="term">函数逼近</span>（状态太多记不下整张表，干脆用一个带参数的函数去猜价值）、
+      off-policy（边学的那套策略，不是产生数据的那套）这三样叠在一起，就可能发散。
+      这就是第 <a href="A12-function-approximation.html">0012 课</a>要讲的
+      <span class="term">致命三元组</span>（这三样东西同时出现时，学习可能越跑越偏），
+      英文叫 deadly triad。</p>
+    <p>诊断上也有用。如果价值估计在训练中越来越大，直到溢出，
+      先查两件事：<var>α</var> 是不是太大，以及状态的表示是不是把该有的信息丢了。
+      后者回到 <a href="A06-modeling-your-problem.html">0006 课</a>的检查表。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 下面哪一项是 TD(0) 里的 TD 误差 δ<sub>t</sub>？</p>
+      <ol class="mcq-options">
+        <li>当前状态的估计值与该状态真实价值之间的差值</li>
+        <li>整个回合的真实回报与当前价值估计之间的差值</li>
+        <li>即时奖励加折扣后的下个状态估计，再减去当前估计</li>
+        <li>当前这一步的即时奖励与折扣后即时奖励之间的差</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：<span class="math">δ<sub>t</sub> = r + γV(s') − V(s)</span>，
+          它是"TD 目标减当前估计"的差，也就是这一行更新要消掉的量。</p>
+        <p>B 描述的是 MC（Monte Carlo，蒙特卡洛）的误差 <span class="math">G<sub>t</sub> − V(s)</span>，不是 TD 误差。
+          A 说"真实价值"，可真实价值你根本不知道，否则就不用学了。
+          D 把奖励自己减自己，与价值估计无关，凑不出任何有用的信号。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 在 TD 里说"自举（bootstrapping）"，指的是什么？</p>
+      <ol class="mcq-options">
+        <li>用对下个状态的估计来构造更新目标，不等真实回报</li>
+        <li>从同一批数据反复重采样，以提高样本的利用效率</li>
+        <li>用多步回报的平均值来降低单步更新引入的方差</li>
+        <li>逐步把学习率衰减到零，以保证价值估计最终收敛</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：自举就是"拿自己当前的估计当目标的一部分"。
+          <span class="math">r + γV(s')</span> 里的 <span class="math">V(s')</span> 是估计值，
+          整个更新不需要等到回合结束。</p>
+        <p>B 说的是重采样或经验回放（把走过的每一步存进一个池子，训练时从池子里随机抽一批出来用），
+          C 说的是 n-step 或平均回报，D 说的是学习率调度：
+          三者都真实存在，但都不是自举的含义。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 关于 TD 与蒙特卡洛在偏差和方差上的特性，哪一项描述正确？</p>
+      <ol class="mcq-options">
+        <li>TD 无偏而方差大，MC 有偏而方差小，二者正好互补</li>
+        <li>两者都无偏，只是 TD 的方差在实践中通常更小一些</li>
+        <li>两者都有偏，只是 MC 的偏差会随回合长度一起增长</li>
+        <li>TD 有偏而方差小，MC 无偏而方差大，各有各的取舍</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：MC 的目标是真实采样的回报，所以无偏；TD 的目标里含估计值
+          <span class="math">V(s')</span>，所以有偏，但因为只用一步随机性，方差小得多。</p>
+        <p>A 把两者对调了。B 错在 TD 并非无偏：它只在估计收敛（数值不再明显变化）之后才渐渐不偏。
+          C 也错：MC 的回报本身无偏，方差才随回合长度增长，不是偏差。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 在 5 状态随机游走上，常数步长的 TD(0) 通常比常数 α 的 MC 收敛更快，为什么？</p>
+      <ol class="mcq-options">
+        <li>因为 TD 每次更新的计算量远小于 MC 的一次更新</li>
+        <li>因为 TD 会自举，并利用了状态之间的马尔可夫结构</li>
+        <li>因为 TD 不需要探索，因此不会把样本浪费在坏动作上</li>
+        <li>因为 TD 的更新目标无偏，所以每一步都指向真实价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：TD 每步都更新，而且价值信息会沿马尔可夫链快速传播；
+          一个状态估计的改进立刻成为相邻状态的目标，不必等整条轨迹重新采样。</p>
+        <p>A 是无关的工程细节：计算量差异解释不了误差曲线差那么多。
+          C 错：预测任务里两者都在给同一套策略（看到什么状态就选什么动作的规则）打分，
+          谈不上谁不需要探索。
+          D 恰好说反了：TD 的目标是有偏的，无偏的是 MC。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 把同一批经验反复扫给批量的 TD(0)，它会收敛到什么？</p>
+      <ol class="mcq-options">
+        <li>训练数据上的最小平方误差解，与批量蒙特卡洛一致</li>
+        <li>这套策略的真实价值（从某个状态出发，平均能拿多少总分），与这批数据的来路无关</li>
+        <li>由这批数据估出的那个 MDP，它的最大似然解</li>
+        <li>一个依赖学习率 α、会随 α 改变的不动点（再迭代一次也不变的那种解）</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：批量 TD(0) 收敛到的是"让每个状态的价值都彼此对得上"的那个解，
+          也就是用这批数据估出的那个 MDP 的最大似然估计。
+          它满足的那个等式叫贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）。</p>
+        <p>A 恰好是把两者说反了：最小平方误差解是批量蒙特卡洛的极限。
+          B 错：任何方法都只能逼近数据支持范围内的东西，采样分布当然有影响。
+          D 错：batch 迭代法的极限与 α 无关，α 只影响收敛速度。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0008-code-1">
+      <h3>代码题 1 · 实现 TD(0) 预测</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>上一课的办法要等一整局走完才能更新一次，<code>td_prediction</code>
+          换成走一步就更新一次：每一步只用"即时奖励加上下一步的估计"来改当前这一步的估计，
+          不用等回合结束。它做的仍然是在给定策略下估计价值，后面和蒙特卡洛做对比时会反复调用它，
+          也是后面 DQN（深度 Q 网络）算目标时的起点。</p>
+        <p>环境沿用 Sutton &amp; Barto 的 5 状态随机游走：状态编号 0 到 6，0 和 6 是终止状态，
+          走到 0 得 0 分、走到 6 得 1 分；每走一步以 0.5 的概率向左一格、0.5 的概率向右一格，
+          每局都从状态 3 出发。</p>
+        <p>请实现 <code>td_prediction(n_episodes=20000, alpha=0.05, gamma=1.0, seed=0)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>n_episodes</code>：int，回合数，默认 20000；</li>
+          <li><code>alpha</code>：float，常数步长，默认 0.05；</li>
+          <li><code>gamma</code>：float，折扣因子，默认 1.0；</li>
+          <li><code>seed</code>：int，随机种子，默认 0。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状 <code>(7,)</code>，float：<code>V[s]</code> 是状态 <code>s</code> 的价值估计；状态 0 与 6 是终止状态，价值保持 0。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>返回值是 numpy 数组且形状为 <code>(7,)</code>；<code>V[0]</code> 与 <code>V[6]</code> 保持 0；<code>V[1..5]</code> 与真值 <var>s</var>/6 的偏差小于 0.12；价值随状态编号严格递增。步长必须是常数 <code>alpha</code>，换成样本平均就不是 TD(0)，上面这条容差也对不上；随机数来自 <code>np.random.default_rng(seed)</code>；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>第一句先写 <code>rng = np.random.default_rng(seed)</code>，
+              再写 <code>V = np.zeros(7)</code>。它返回"装了 7 个 0 的一维数组"，
+              下标从 0 开始，所以状态 s 的估计就存在 <code>V[s]</code> 里。</li>
+          <li>外层用 <code>for _ in range(n_episodes)</code> 跑每一个回合，回合开始设 <code>s = 3</code>。</li>
+          <li>内层用 <code>while True</code> 走每一步：先算下一个状态，写法是
+              <code>s_next = s + (-1 if rng.random() &lt; 0.5 else 1)</code>。
+              <code>rng.random()</code> 返回 0 到 1 之间的一个随机小数，它小于 0.5 的可能性正好是一半。</li>
+          <li>再算这一步的奖励：<code>r = 1.0 if s_next == 6 else 0.0</code>，
+              也就是只有走进状态 6 那一步才给 1 分。</li>
+          <li>然后按公式 (8.1) 更新：<code>V[s] += alpha * (r + gamma * V[s_next] - V[s])</code>。
+              注意方括号里用的是更新前的 <code>V[s]</code>，而且 <code>V[s_next]</code> 读的是旧的估计。</li>
+          <li>最后 <code>s = s_next</code> 往前走一步；如果 <code>s</code> 到了 0 或 6 就 <code>break</code>。
+              全部回合跑完 <code>return V</code>。终止状态的价值不动，所以一直是 0。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def td_prediction(n_episodes=20000, alpha=0.05, gamma=1.0, seed=0):
+    # TODO: 每个回合沿轨迹做 TD(0) 单步更新
+    return np.zeros(7)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+V = td_prediction(n_episodes=20000, alpha=0.05, seed=0)
+check(isinstance(V, np.ndarray), "V 应当是 numpy 数组")
+check(V.shape == (7,), f"V 必须是长度 7 的数组，实际 {V.shape}")
+check(abs(float(V[0])) < 1e-12 and abs(float(V[6])) < 1e-12,
+      f"两个终止状态的价值应保持 0，实际 {V[0]} / {V[6]}")
+
+for s in range(1, 6):
+    check(abs(float(V[s]) - s / 6.0) < 0.12,
+          f"V[{s}] 应接近 {s}/6={s/6.0:.3f}，实际 {float(V[s]):.3f}（alpha=0.05 时容差 0.12）")
+
+check(float(V[1]) < float(V[2]) < float(V[3]) < float(V[4]) < float(V[5]),
+      f"价值应当随状态编号单调递增，实际 {np.round(V, 3)}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def td_prediction(n_episodes=20000, alpha=0.05, gamma=1.0, seed=0):
+    rng = np.random.default_rng(seed)
+    V = np.zeros(7)
+    for _ in range(n_episodes):
+        s = 3
+        while True:
+            s_next = s + (-1 if rng.random() < 0.5 else 1)
+            r = 1.0 if s_next == 6 else 0.0
+            V[s] += alpha * (r + gamma * V[s_next] - V[s])
+            s = s_next
+            if s == 0 or s == 6:
+                break
+    return V
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0008-code-2">
+      <h3>代码题 2 · 用固定种子做 MC 与 TD 的统计对比</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>本课的关键结论是 TD 通常比蒙特卡洛学得快。
+          这个结论需要一个能复现的对照实验来支撑：<code>mc_td_curves</code>
+          在同一条随机游走上同时跑两种方法，每个回合两者共用同一条轨迹，
+          再用固定种子把多次实验的 RMS 误差取平均，返回两条曲线供课上画图和读结论。
+          它是一个统计实验函数：输入是实验规模和两个步长，输出是"误差随回合数变化"的两条序列。</p>
+        <p>请实现 <code>mc_td_curves(n_runs=30, n_episodes=2000, alpha_mc=0.02, alpha_td=0.1, seed=7)</code>。第 <var>r</var> 次实验的随机数用 <code>np.random.default_rng(seed + 1000 * r)</code>；每次实验维护长度 7 的 <code>Vmc</code> 与 <code>Vtd</code>（全 0），分别在常数步长 <code>alpha_mc</code> 与 <code>alpha_td</code> 下更新，两处都取 γ = 1；<code>CHECKPOINTS = [10, 50, 100, 500, 2000]</code> 是记录误差的回合数。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>n_runs</code>：int，重复实验次数，默认 30；</li>
+          <li><code>n_episodes</code>：int，每次实验的回合数，默认 2000；</li>
+          <li><code>alpha_mc</code>：float，MC 的常数步长，默认 0.02；<code>alpha_td</code>：float，TD(0) 的常数步长，默认 0.1；</li>
+          <li><code>seed</code>：int，基础种子，默认 7。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回二元组 <code>(mc_err, td_err)</code>，两项都是 <code>np.ndarray</code>，形状 <code>(5,)</code>，float；</li>
+          <li><code>mc_err[i]</code> 与 <code>td_err[i]</code> 是在 <code>CHECKPOINTS[i]</code> 个回合时、对 <code>n_runs</code> 次实验取平均的 RMS 误差，即状态 1–5 的估计与真值 <var>s</var>/6 的均方根差。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>两项都是 numpy 数组且形状为 <code>(5,)</code>；50 个回合与 100 个回合时 TD 的误差都低于 MC；MC 的误差随样本增加而下降，即 <code>mc_err[-1] &lt; mc_err[0]</code>；2000 个回合后两条曲线都降到 0.15 以下；只用标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先准备真值数组：<code>true_v = np.array([i / 6.0 for i in range(7)])</code>，
+              再用 <code>np.zeros(len(CHECKPOINTS))</code> 建两个长度为 5 的累计误差数组。
+              <code>np.zeros(n)</code> 返回"装了 n 个 0 的一维数组"。</li>
+          <li>RMS 误差的意思是"把每个状态的误差平方、取平均、再开根号"，
+              代码是 <code>math.sqrt(np.mean((V[1:6] - true_v[1:6]) ** 2))</code>。
+              其中 <code>V[1:6]</code> 是切片，取出下标 1 到 5 这五个数，6 取不到。</li>
+          <li>外层 <code>for r in range(n_runs)</code> 跑每一次实验：开头写
+              <code>rng = np.random.default_rng(seed + 1000 * r)</code>，再建
+              <code>Vmc = np.zeros(7)</code> 与 <code>Vtd = np.zeros(7)</code>，
+              并把检查点下标 <code>ci = 0</code> 归零。</li>
+          <li>内层 <code>for ep in range(1, n_episodes + 1)</code> 跑回合。先从状态 3 走出一条完整轨迹
+              （把途经状态按顺序存进一个列表，走到 0 或 6 结束），
+              再令 <code>G = 1.0 if 终点 == 6 else 0.0</code>。</li>
+          <li>然后让两个估计共用这条轨迹。蒙特卡洛用 <code>for st in reversed(path)</code>
+              从末尾往前遍历，每个非终止状态做
+              <code>Vmc[st] += alpha_mc * (G - Vmc[st])</code>，并且每退一步把折扣补上。</li>
+          <li>TD 要正向遍历：让 <code>s0 = 3</code>，对轨迹里每个 <code>st</code> 先算
+              <code>rew = 1.0 if st == 6 else 0.0</code>，再做
+              <code>Vtd[s0] += alpha_td * (rew + Vtd[st] - Vtd[s0])</code>，然后 <code>s0 = st</code>。
+              两处都取 γ = 1，所以不用乘 gamma。</li>
+          <li>每个回合结束时判断 <code>ep == CHECKPOINTS[ci]</code>：成立就把两种方法当前的
+              RMS 误差累加进各自的数组，再 <code>ci += 1</code>。
+              全部跑完后返回 <code>mc_err / n_runs, td_err / n_runs</code>，除以次数就是平均值。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+import math
+
+CHECKPOINTS = [10, 50, 100, 500, 2000]
+
+def mc_td_curves(n_runs=30, n_episodes=2000, alpha_mc=0.02, alpha_td=0.1, seed=7):
+    # TODO: 返回 (mc_err, td_err)，各是长度 5 的数组
+    return np.zeros(5), np.zeros(5)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+CK = [10, 50, 100, 500, 2000]
+mc_err, td_err = mc_td_curves()
+check(isinstance(mc_err, np.ndarray) and isinstance(td_err, np.ndarray),
+      "返回值应当是 numpy 数组")
+check(mc_err.shape == (5,) and td_err.shape == (5,),
+      f"两个数组都应当是长度 5，实际 {mc_err.shape} / {td_err.shape}")
+
+check(td_err[1] < mc_err[1],
+      f"50 个回合时 TD 的 RMS 误差应低于 MC，实际 TD={td_err[1]:.3f} vs MC={mc_err[1]:.3f}")
+check(td_err[2] < mc_err[2],
+      f"100 个回合时 TD 仍应更准，实际 TD={td_err[2]:.3f} vs MC={mc_err[2]:.3f}")
+check(mc_err[-1] < mc_err[0],
+      f"MC 的误差应当随样本增加而下降，实际 {mc_err[0]:.3f} -> {mc_err[-1]:.3f}")
+check(td_err[-1] < 0.15 and mc_err[-1] < 0.15,
+      f"2000 个回合后两者都应降到 0.15 以下，实际 TD={td_err[-1]:.3f} MC={mc_err[-1]:.3f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+import math
+
+CHECKPOINTS = [10, 50, 100, 500, 2000]
+
+def mc_td_curves(n_runs=30, n_episodes=2000, alpha_mc=0.02, alpha_td=0.1, seed=7):
+    true_v = np.array([i / 6.0 for i in range(7)])
+    mc_err = np.zeros(len(CHECKPOINTS))
+    td_err = np.zeros(len(CHECKPOINTS))
+    for r in range(n_runs):
+        rng = np.random.default_rng(seed + 1000 * r)
+        Vmc = np.zeros(7)
+        Vtd = np.zeros(7)
+        ci = 0
+        for ep in range(1, n_episodes + 1):
+            s = 3
+            path = []
+            while True:
+                s += -1 if rng.random() < 0.5 else 1
+                path.append(s)
+                if s == 0 or s == 6:
+                    break
+            G = 1.0 if s == 6 else 0.0
+            for st in reversed(path):
+                if st in (0, 6):
+                    continue
+                Vmc[st] += alpha_mc * (G - Vmc[st])
+            s0 = 3
+            for st in path:
+                rew = 1.0 if st == 6 else 0.0
+                Vtd[s0] += alpha_td * (rew + Vtd[st] - Vtd[s0])
+                s0 = st
+            if ep == CHECKPOINTS[ci]:
+                mc_err[ci] += math.sqrt(np.mean((Vmc[1:6] - true_v[1:6]) ** 2))
+                td_err[ci] += math.sqrt(np.mean((Vtd[1:6] - true_v[1:6]) ** 2))
+                ci += 1
+    return mc_err / n_runs, td_err / n_runs
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 6.1–6.3 节。
+        第 6.1 节给出 TD 预测的更新式与 TD 误差，第 6.2 节就是本课演示的随机游走实验（图 6.2），
+        第 6.3 节讨论 batch TD 与确定性等价估计。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>想看看 TD 误差在 RL（reinforcement learning，强化学习）工程实现里被怎么用，可以读 OpenAI Spinning Up 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/spinningup/rl_intro.html">Key Concepts in RL</a>，
+        它把 <span class="math">V</span>、<span class="math">Q</span> 与优势函数（在某个状态下，选这个动作比"平均水平"好多少）的关系讲得很直接。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。可以问：
+      "把 TD 误差和我的业务指标对照一下，哪个量最像 δ<sub>t</sub>？"
+      或者让它画一张你自己问题的备份图，逐项解释偏差从哪里来。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

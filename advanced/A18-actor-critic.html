@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A18 · A2C 与 A3C：Actor-Critic — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A18" data-slug="actor-critic" data-part="进阶篇 · 第四部分 · 策略梯度与 Actor-Critic">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第四部分 · 策略梯度与 Actor-Critic</p>
+    <h1>A2C 与 A3C：Actor-Critic</h1>
+    <p class="lede">这一课要走的是<span class="term">策略梯度（不绕道去估价值，直接算参数往哪调能让拿到的总分更高）</span>
+      这条路。办法是加上一个专门打分的角色，用它给的分去改出招习惯；怎么改，就是这一课要写的更新式。
+      先认清谁干什么，两个角色的名字到正文里再解释。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 actor 与 critic 的两条更新式，并说出 δ（TD 误差）的正负意味着什么</li>
+        <li>能解释 A2C 与 A3C 的差别，以及为什么教学复现优先选 A2C</li>
+        <li>能定位"优势尺度失真""策略过早变确定"这两类典型故障</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>上一课留下的两个问题</h2>
+    <p>策略（一套"看到什么状态就选什么动作"的规则）落到网络上，就是这一课的两个角色。
+      <span class="term">actor（出招的那一方，负责决定这一步做什么动作，也叫"策略网络"）</span>负责选动作；
+      <span class="term">critic（打分的那一方，负责估计这个局面值多少分，也叫"价值网络"）</span>负责打分。
+      两者合起来叫 actor-critic，一边出招、一边用打出来的分改出招习惯。</p>
+    <p>先认一个词。<span class="term">回报（从现在起一直到结束，把每一步奖励加起来的总分）</span>
+      就是一整局打完之后的总得分，记作 <var>G<sub>t</sub></var>：<var>G</var> 右下角的
+      <var>t</var> 表示"从第 t 步开始往后的总分"。</p>
+    <p><a href="A17-policy-gradient.html">0017 课</a>的 REINFORCE 用整条
+      <span class="term">折扣回报（往后每一笔奖励都乘一个小于 1 的折扣，越远打得越狠）</span>当评分。
+      折扣因子（越往后的奖励，算进总分时权重越小，等于给它打了个折）记作 <var>γ</var>，是 0 到 1 之间的数。
+      下面几个符号会反复出现：<var>θ</var>（策略参数）是策略网络的参数，
+      <var>π</var>（策略分布）是策略在每个状态下给出的"每个动作各有多大可能"，
+      <var>δ</var>（TD 误差）是"这一步比预期好多少"，定义在式 (18.2)。</p>
+    <p>REINFORCE 把这个折扣回报乘上
+      <span class="math">∇<sub>θ</sub> log π<sub>θ</sub>(A<sub>t</sub>|S<sub>t</sub>)</span>，
+      据此调整参数 θ。<span class="term">策略（一套"看到什么状态就选什么动作"的规则）</span>
+      就是参数 θ 所在的那个网络输出的选择规则。这个做法能跑，但留下两个毛病。</p>
+    <ul>
+      <li>波动太大。<span class="term">方差（同一个做法重复很多次，结果波动有多大）</span>极大：
+        同一套策略跑两局，一局顺、一局背，算出来的 <var>G<sub>t</sub></var> 能差好几倍。</li>
+      <li>必须等一整局结束。算 <var>G<sub>t</sub></var> 要用到后面的全部奖励，回合不结束就拿不到。
+        连续任务里这一局永远不会结束。</li>
+    </ul>
+    <p>0017 用<span class="term">基线（从回报里减掉的一个参照值，只降波动，不改平均方向）</span>把回报换成了
+      <span class="term">优势（在某个状态下，选这个动作比"平均水平"好多少，也就是你这一步比常规走法强多少）</span>，
+      可是那个基线是人拍出来的常数，写多少全凭试。</p>
+    <p>这一课把基线也学出来：让一个价值网络 <span class="math">V(s)</span>
+      去估"从状态 s 出发平均能拿多少分"，它的预测误差就是"这一步比预期好多少"。
+      这套结构叫 <span class="term">actor-critic</span>，critic 就是这个价值网络。</p>
+    <p>好处很直接：critic 每一步都能立刻说"你刚才那一步超出预期了"，更新从每局一次变成每步一次。</p>
+  </section>
+
+  <section>
+    <h2>第一节：这两条更新式在说什么</h2>
+    <p>先看两个会反复出现的符号。</p>
+    <ul>
+      <li><span class="math">∇<sub>θ</sub></span> 读作"对 θ 求梯度"。<span class="term">梯度（往哪个方向调参数能让目标下降最快）</span>
+        是一个方向，告诉我们参数往哪边挪、目标值变化最快。</li>
+      <li><span class="math">𝔼[·]</span> 里的 𝔼 是<span class="term">期望（同一件事重复很多次之后的平均结果）</span>，
+        读作"长期平均下来是多少"。括号里的东西按各种情况出现的概率加权求平均，不是一次采样的结果。</li>
+    </ul>
+    <p>actor 的更新式长这样：</p>
+    <div class="eq">
+      <span class="eq-body">∇<sub>θ</sub>J(θ) ≈ 𝔼[ δ<sub>t</sub> ∇<sub>θ</sub> log π<sub>θ</sub>(A<sub>t</sub>|S<sub>t</sub>) ] + η ∇<sub>θ</sub>H( π<sub>θ</sub>(·|S<sub>t</sub>) )</span>
+      <span class="eq-num">(18.1)</span>
+    </div>
+    <p>式中 π 是策略分布，<var>H</var> 叫熵（衡量"选择有多随机、多分散"；熵大代表还敢试），
+      η（熵系数，熵那一项在目标里占的权重）控制它的分量。下标 t 表示"第 t 步"，
+      <var>S<sub>t</sub></var> 是第 t 步的状态，<var>A<sub>t</sub></var> 是第 t 步的动作。
+      <span class="math">π<sub>θ</sub>(A<sub>t</sub>|S<sub>t</sub>)</span> 读作"在状态 <var>S<sub>t</sub></var> 下选中动作
+      <var>A<sub>t</sub></var> 的概率"。</p>
+    <p>和 0017 的写法比，只换了一个地方：原来乘的是整条回报 <var>G<sub>t</sub></var>，
+      现在乘的是 <var>δ<sub>t</sub></var>。整个式子的意思没变，还是"让拿分高的动作概率变大"。</p>
+    <p>再看 <var>δ<sub>t</sub></var> 从哪来：</p>
+    <div class="eq">
+      <span class="eq-body">δ<sub>t</sub> = R<sub>t+1</sub> + γ V<sub>φ</sub>(S<sub>t+1</sub>) − V<sub>φ</sub>(S<sub>t</sub>)</span>
+      <span class="eq-num">(18.2)</span>
+    </div>
+    <p>式中 γ 是折扣因子，<var>R<sub>t+1</sub></var> 是这一步真正拿到的奖励，
+      <var>φ</var> 是价值网络（也就是 critic）的参数。</p>
+    <p>把它读成一句话：<var>δ<sub>t</sub></var> 就是"这一步的结果，比 critic 事先预期的好多少"。
+      <span class="math">δ<sub>t</sub> &gt; 0</span> 说明动作 <var>A<sub>t</sub></var> 超出预期，
+      梯度上升会提高它的概率；<span class="math">δ<sub>t</sub> &lt; 0</span> 就压低。
+      所以 <var>δ<sub>t</sub></var> 就是<span class="term">优势函数（在某个状态下，选这个动作比"平均水平"好多少）</span>
+      的一个现成估计。</p>
+    <p>符号记法与 <a href="../reference/notation.html">符号表</a>一致，
+      更细的定义见<a href="../reference/glossary.html">术语表</a>。</p>
+  </section>
+
+  <section>
+    <h2>第二节：critic 自己怎么学</h2>
+    <p>critic 是一个价值网络 <span class="math">V<sub>φ</sub>(s)</span>，输入状态，输出一个数。
+      它要学的目标是"从这个状态出发，后面平均能拿多少分"，这个数叫<span class="term">状态价值</span>。
+      训练它用均方误差：</p>
+    <div class="eq">
+      <span class="eq-body">L(φ) = 𝔼[ ( R<sub>t+1</sub> + γ V<sub>φ<sup>−</sup></sub>(S<sub>t+1</sub>) − V<sub>φ</sub>(S<sub>t</sub>) )² ]</span>
+      <span class="eq-num">(18.3)</span>
+    </div>
+    <p>"均方误差"就是把预测值和目标的差平方之后取平均，平方是为了让正负误差不互相抵消。</p>
+    <p>式子里 <var>φ<sup>−</sup></var> 是 critic 的<span class="term">目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑）</span>，
+      做法和 <a href="A13-dqn.html">0013 课</a>完全一样：目标参数另存一份，别跟着正在回归的参数一起动。</p>
+    <p>这里要认清一笔账：<var>V<sub>φ</sub></var> 是人学出来的，一定有误差，
+      于是 <var>δ<sub>t</sub></var> 也带着<span class="term">偏差（估计值系统性地偏离真值）</span>。
+      actor-critic 做的事情，是把 REINFORCE 的高方差，换成了
+      <span class="term">自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）</span>
+      带来的偏差。一笔账换一笔账，没有白拿的好处。
+      (18.2) 和 (18.3) 里那项 <span class="math">γ V<sub>φ</sub>(S<sub>t+1</sub>)</span> 就是自举：
+      它拿网络自己的预测当目标的一部分。</p>
+  </section>
+
+  <section>
+    <h2>第三节：往前看几步才合适</h2>
+    <p>用 <var>δ<sub>t</sub></var> 当优势，等于只往前看一步：波动小，但偏差大。
+      因为它几乎完全依赖 critic 当前的预测，critic 估歪了，优势就跟着歪。</p>
+    <p>另一个极端是往前看完整局。<span class="term">蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）</span>
+      把后面所有真实奖励都加起来，不带任何预测。这样不会因为 critic 的偏差而歪，
+      但每一步都被后面所有随机事件影响，波动就大了。</p>
+    <p>中间还有很多档：往前看 2 步、3 步、10 步，每一档的偏差与方差配比都不同。
+      往前看的步数记作 <var>n</var>。<var>n</var> 越大越接近蒙特卡洛，偏差渐小、方差渐大。</p>
+    <p>挨个试太笨。<a href="A19-gae-trpo.html">0019 课</a>的 GAE（generalized advantage estimation，广义优势估计）
+      用指数加权把这些档位一次平均掉，读那一课时你会看到它怎么把两端连起来。</p>
+    <p>实践中 A2C 不会真的"每一步更新一次"。它先跑一段长度为 <var>T</var> 的 rollout（让程序跑一遍，把一路上遇到的经历收集起来），
+      常见取值是 <span class="math">T = 5 ~ 20</span>，也就是连续采样出来的一小段轨迹。
+      对它每个时刻算 n-step 优势，再把这些优势合成一个 batch（一批样本）一起更新。
+      攒批更新比逐步更新稳定，因为一次更新用的是多步信息的平均。</p>
+  </section>
+
+  <section>
+    <h2>第四节：A3C 与 A2C 的差别在并行方式</h2>
+    <p>连续任务里等不到回合结束，工程上的解法是同时开很多份环境一起采样。两条路线的差别就在怎么汇总。</p>
+    <p>第一条是异步。<span class="term">A3C（asynchronous advantage actor-critic）</span>
+      开多个 worker，也就是多个并行的执行者，每个跑自己的一份环境副本，
+      各自算完梯度就直接写进共享参数，不打招呼、不等别人。</p>
+    <p>多份环境同时跑，采到的数据天然不一样，所以它不需要
+      <span class="term">经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用）</span>。
+      on-policy（边学的那套策略，就是正在用来产生数据的那套）的方法本来也用不了旧数据。</p>
+    <p>代价有两笔。一是梯度会过期：某个 worker 算梯度时读到的参数，
+      很可能已被别的 worker 改过，算出来的方向对不上现在的参数。
+      二是结果不稳定：更新互相覆盖，同一份代码跑两次结果都不一样，对线程数和调度很敏感。</p>
+    <p>第二条是同步。<span class="term">A2C（advantage actor-critic）</span>
+      把那些并行环境改成一个同步的 batch：所有副本各跑 <var>T</var> 步，等齐了一起做一次更新。
+      丢掉异步之后换来三件事：GPU 可以一次算完、结果可复现、梯度不会过期。
+      A2C 是 A3C 的同步简化版，没有配一篇新论文。教学和复现都该先写它。</p>
+  </section>
+
+  <section>
+    <h2>第五节：熵正则、共享网络与常见故障</h2>
+    <p>(18.1) 末尾那一项 <span class="math">η ∇<sub>θ</sub>H</span> 叫
+      <span class="term">熵正则（entropy regularization）</span>。
+      这里的 <var>H</var> 叫<span class="term">熵（衡量"选择有多随机、多分散"；熵大代表还敢试）</span>。</p>
+    <p>加这一项的效果，是给"别太早变确定"发奖金，比喻一下就是强制留一点好奇心。
+      不加它，策略很容易在训练早期就锁死在一个动作上，后面的好选择再也没机会被抽到。</p>
+    <p>系数 <var>η</var> 控制这股好奇心有多强。太大，策略一直很随机，回报曲线看着不涨；
+      太小，早期就坍缩到一个局部最优动作上。它是要盯着调的。</p>
+    <p>另一个坑是 actor 与 critic 共享网络主干：两条损失的尺度差很多，价值回归会压住策略梯度。
+      稳妥做法是先分开两个网络，确认两条损失都在正常下降再共享。</p>
+    <table>
+      <thead><tr><th>症状</th><th>先查什么</th></tr></thead>
+      <tbody>
+        <tr><td>优势几乎恒为正或恒为负</td><td>奖励没归一化，或 critic 的尺度与回报不匹配</td></tr>
+        <tr><td>熵迅速掉到接近 0</td><td>熵系数 <var>η</var> 太小，或 actor 的<span class="term">学习率（每次更新时往新信息的方向挪多远）</span>太大</td></tr>
+        <tr><td>曲线剧烈震荡、方差很大</td><td>rollout 太短或副本太少，梯度噪声没被平均掉</td></tr>
+        <tr><td>critic 损失不降但策略还在变</td><td>两条损失权重失衡，优势不可信</td></tr>
+      </tbody>
+    </table>
+    <p>选型可以压成一句话：需要一套最简单的策略梯度基线，又能开多个并行环境，就选 A2C。
+      至于"优势往前看几步"这件事，本章后面两课继续往下走：
+      <a href="A19-gae-trpo.html">0019 课</a>的 GAE 把偏差与方差一次调好，
+      <a href="A20-ppo.html">0020 课</a>的 PPO（proximal policy optimization，近端策略优化）
+      再给更新幅度加上一道限速。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 在 actor-critic 里，critic 提供的是什么？</p>
+      <ol class="mcq-options">
+        <li>它直接输出动作概率分布，并决定每一步该采取哪个动作</li>
+        <li>它估计状态价值，并把 TD 误差当作优势交给 actor 使用</li>
+        <li>它保存历史回报的平均值，用常数基线替 actor 降低方差</li>
+        <li>它估计环境的转移与奖励，供 actor 在内部做前向规划</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：critic 学的是 <var>V<sub>φ</sub></var>(s)，
+          输出的是价值标量；把它的 TD 误差 <var>δ<sub>t</sub></var> 交给 actor 当优势，
+          就把 0017 里那个手工基线换成了可学习的基线，并且每一步都能更新。</p>
+        <p>A 描述的是 actor 本身；C 退回成了 REINFORCE 的常数基线；
+          D 描述的是模型基方法（model-based），actor-critic 不需要环境模型。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. A2C 与 A3C 的核心差别是什么？</p>
+      <ol class="mcq-options">
+        <li>A2C 要维护经验回放缓冲区，A3C 只使用刚采样到的数据</li>
+        <li>A2C 学确定性策略（固定选同一个动作），A3C 学随机策略（按概率抽动作）</li>
+        <li>A2C 不需要 critic，直接用整条折扣回报当作优势来更新</li>
+        <li>A2C 把并行环境同步成一个批，A3C 让多个 worker 异步更新</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两者的更新式几乎相同，区别只在并行方式：
+          A2C 同步收集、同步更新，因此可以用 GPU 批量化、结果可复现、不会有梯度过期；
+          A3C 让各 worker 异步写共享参数，换来更高的吞吐但失去了可复现性。</p>
+        <p>A 把两者说反了，on-policy 方法都不能靠回放缓冲区里的旧数据训练；
+          B 与事实无关，两者都用随机策略；C 描述的是 REINFORCE，不是 A2C。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 把优势换成 critic 的 TD 误差 <var>δ<sub>t</sub></var> 之后，梯度发生了什么变化？</p>
+      <ol class="mcq-options">
+        <li>方差下降但引入偏差，因为 δ<sub>t</sub> 依赖 critic 那个可能不准的 V 估计</li>
+        <li>方差与偏差同时下降，因为 critic 最终会学到真实的价值函数（从某个状态出发，按某套策略走下去平均能拿多少总分）</li>
+        <li>偏差消失，因为 TD 误差本身就是一种无偏的优势估计，与策略参数无关</li>
+        <li>方差上升，因为每一步都要重新估计一次当前状态的价值，噪声变大</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：<var>δ<sub>t</sub></var> 只用一个奖励加一次自举，
+          比整条回报 <var>G<sub>t</sub></var> 的方差小得多；但 <var>V<sub>φ</sub></var> 是人学的，
+          它的误差会原封不动进入优势，所以梯度变成有偏的。</p>
+        <p>B 把逼近当成了相等：critic 只能逼近真实价值，训练中永远有误差；
+          C 恰好相反，<var>δ<sub>t</sub></var> 的自举项依赖 critic 参数，谈不上无偏；
+          D 说反了，逐步估计才是方差下降的来源。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 关于一步 actor-critic 与 n-step 版本，下列说法正确的是？</p>
+      <ol class="mcq-options">
+        <li>n 越小方差越大，n 越大越接近蒙特卡洛的回报估计</li>
+        <li>n 越大方差越小，n 越小越接近蒙特卡洛的回报估计</li>
+        <li>n 越小偏差越大方差越小，n 越大越接近蒙特卡洛</li>
+        <li>n 越大偏差越大方差越小，n 越小越接近蒙特卡洛</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：n=1 就是 <var>δ<sub>t</sub></var>：只用一次自举，方差最小、
+          偏差最大；n 增大后自举次数减少、真实奖励增多，估计越来越像蒙特卡洛，
+          偏差减小、方差上升。GAE 就是在这两端之间做指数加权。</p>
+        <p>A 与 B 都把方差的方向说反了；D 把偏差方向说反：n 越大偏差是减小而不是增大。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 熵正则项的作用与最常见的误用分别是什么？</p>
+      <ol class="mcq-options">
+        <li>它鼓励策略保持随机以维持探索，η 太大会让策略一直随机</li>
+        <li>它惩罚价值过高的动作，η 太大会让策略回避高回报动作</li>
+        <li>它惩罚 critic 的估计误差，η 太大会让价值函数停止收敛（数值不再趋于稳定）</li>
+        <li>它把策略快速推向确定性以加速收敛，η 太大会让熵塌缩</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：熵衡量策略的随机程度，把它加进目标等于给"保持不确定"发奖金，
+          防止早期就锁死在一个动作上。<var>η</var> 过大时策略长期接近均匀随机，
+          回报曲线看起来像没学到东西。</p>
+        <p>B 与 C 都改错了项：熵只与策略分布有关，和<span class="term">动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）</span>、
+          critic 误差都无关；D 把符号说反了，<span class="term">熵正则（在目标里加一项鼓励保持随机性，防止过早死磕一个选择）</span>
+          是往上加熵，不是压低熵。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0018-code-1">
+      <h3>代码题 1 · 用 TD 误差构造优势</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>actor-critic 里 critic 学一个状态价值 <span class="math">V(s)</span>，训练循环每采集一段轨迹就调用这两个函数，把价值预测变成 actor 能用的优势信号。<code>td_errors</code> 给出每一步的单步 TD 误差，<code>n_step_return</code> 把 n 步真实奖励和一次自举拼起来，是偏差与方差之间的中间档。这些数组都来自同一段轨迹。</p>
+        <p>请实现两个函数，只用标准库加 numpy：<code>td_errors(rewards, values, next_values, dones, gamma)</code> 与 <code>n_step_return(rewards, values, t, n, gamma)</code>。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>（两个函数共有）：形状 <code>(T,)</code> 的 float 数组，第 t 项是奖励 <span class="math">r<sub>t</sub></span>。</li>
+          <li><code>values</code>（两个函数共有）：形状 <code>(T,)</code> 的 float 数组，第 t 项是 <span class="math">V(s<sub>t</sub>)</span>。</li>
+          <li><code>next_values</code>（<code>td_errors</code>）：形状 <code>(T,)</code> 的 float 数组，第 t 项是 <span class="math">V(s<sub>t+1</sub>)</span>。</li>
+          <li><code>dones</code>（<code>td_errors</code>）：形状 <code>(T,)</code> 的布尔数组，第 t 项为 True 表示这一步是回合的最后一步。</li>
+          <li><code>gamma</code>（两个函数共有）：Python float 标量，γ（折扣因子）。</li>
+          <li><code>t</code>（<code>n_step_return</code>）：Python int，起始步下标。</li>
+          <li><code>n</code>（<code>n_step_return</code>）：Python int，往前看的步数。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>td_errors</code> 返回形状 <code>(T,)</code> 的 <code>np.ndarray</code>：第 t 项是 <span class="math">r<sub>t</sub> + γ(1 − done<sub>t</sub>)V(s<sub>t+1</sub>) − V(s<sub>t</sub>)</span>。</li>
+          <li><code>n_step_return</code> 返回 Python <code>float</code>：<span class="math">G<sub>t</sub><sup>(n)</sup> = Σ<sub>l=0</sub><sup>n−1</sup> γ<sup>l</sup> r<sub>t+l</sub> + γ<sup>n</sup> V(s<sub>t+n</sub>)</span>；当 <code>t+n</code> 越出 <code>values</code> 的范围时，末尾自举项按 0 处理。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会逐项核对 δ 的数值，并把终止步的 <code>next_values</code> 换成 1e9，要求那一步完全不含自举；还会核对 <code>t=2, n=3</code> 越界那一例的自举项为 0，并验证折扣 δ 之和等于 <span class="math">G<sub>t</sub><sup>(n)</sup> − V(s<sub>t</sub>)</span>。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>终止不自举可以写成 <code>(~dones)</code> 乘在自举项上，一行搞定。</li>
+          <li><code>n_step_return</code> 用一个 <code>for l in range(n)</code> 累加，折扣因子逐项乘。</li>
+          <li>末尾自举项要判断 <code>t + n &lt; len(values)</code> 再累加。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def td_errors(rewards, values, next_values, dones, gamma):
+    # TODO: delta_t = r_t + gamma * (1 - done_t) * V(s_{t+1}) - V(s_t)
+    return np.zeros(len(rewards))
+
+
+def n_step_return(rewards, values, t, n, gamma):
+    # TODO: 前 n 步奖励的折扣和，再加 gamma**n * V(s_{t+n})
+    return 0.0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+r = np.array([1.0, 0.0, 2.0, -1.0, 0.5])
+V = np.array([0.5, 1.0, 0.0, 2.0, -0.5])
+NV = np.array([1.0, 0.0, 2.0, -0.5, 0.3])
+D = np.array([False, False, False, False, True])
+g = 0.9
+
+d = np.asarray(td_errors(r, V, NV, D, g), dtype=float)
+check(d.shape == (5,), f"td_errors 应返回长度 5 的数组，实际形状 {d.shape}")
+want = np.array([1.4, -1.0, 3.8, -3.45, 1.0])
+for i in range(5):
+    check(abs(d[i] - want[i]) < 1e-9,
+          f"delta[{i}] 应为 {want[i]}（终止转移不自举），实际 {d[i]:.6f}")
+
+huge = td_errors(r, V, np.full(5, 1e9), np.array([False, False, False, False, True]), 0.99)
+check(abs(float(huge[4]) - 1.0) < 1e-9,
+      f"终止转移的 delta 必须等于 r - V：0.5 - (-0.5) = 1.0，实际 {float(huge[4]):.6f}")
+
+NVc = V.copy()
+NVc[:4] = V[1:]
+NVc[4] = 0.3
+dc = np.asarray(td_errors(r, V, NVc, D, g), dtype=float)
+
+for t, n in [(0, 4), (1, 3), (2, 2)]:
+    lhs = float(np.sum([(g ** l) * dc[t + l] for l in range(n)]))
+    rhs = float(n_step_return(r, V, t, n, g)) - float(V[t])
+    check(abs(lhs - rhs) < 1e-9,
+          f"t={t}, n={n}: 折扣 delta 之和应等于 G^(n) - V(s_t)，实际 {lhs:.9f} vs {rhs:.9f}")
+
+check(abs(float(n_step_return(r, V, 0, 1, g)) - (1.0 + 0.9 * 1.0)) < 1e-9,
+      f"1 步回报 = r0 + 0.9*V(s1) = 1.9，实际 {float(n_step_return(r, V, 0, 1, g)):.6f}")
+check(abs(float(n_step_return(r, V, 2, 3, g)) - 1.505) < 1e-9,
+      f"t=2, n=3 已越界（2+3=5），末尾自举按 0：2 + 0.9*(-1) + 0.81*0.5 = 1.505，"
+      f"实际 {float(n_step_return(r, V, 2, 3, g)):.6f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def td_errors(rewards, values, next_values, dones, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    values = np.asarray(values, dtype=float)
+    next_values = np.asarray(next_values, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    return rewards + gamma * next_values * (~dones) - values
+
+
+def n_step_return(rewards, values, t, n, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    values = np.asarray(values, dtype=float)
+    g = 0.0
+    for l in range(int(n)):
+        g += (gamma ** l) * rewards[t + l]
+    if t + n < len(values):
+        g += (gamma ** n) * values[t + n]
+    return float(g)
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0018-code-2">
+      <h3>代码题 2 · 算带熵正则的 actor 损失与梯度</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这是 actor 的损失函数，训练循环在每个 batch 上调用一次：返回的 loss 用来监控策略项与熵项各占多少，返回的 grad 直接更新策略输出层的 logits，也就是让策略输出一点点变好的那个方向。优势为正的动作会被提高<span class="term">对数概率（把概率取对数后的值；概率越小它越负，用来避免很小的概率在计算里直接变成 0）</span>，熵那一项一直把分布往外推，避免策略过早锁死在少数动作上。advantages 一般来自本课 critic 给出的 TD 误差或 GAE。</p>
+        <p>请实现 <code>actor_critic_loss(logits, actions, advantages, entropy_coef)</code>，只用标准库加 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>logits</code>：形状 <code>(B, A)</code> 的 float 数组，<code>B</code> 是 batch 大小，<code>A</code> 是动作数，每行是 softmax 策略的未归一化分数。</li>
+          <li><code>actions</code>：形状 <code>(B,)</code> 的整数数组，取值 <code>0 ~ A−1</code>，第 i 项是实际执行的动作。</li>
+          <li><code>advantages</code>：形状 <code>(B,)</code> 的 float 数组，第 i 项是 <span class="math">A<sub>i</sub></span>，衡量该动作比平均好多少。</li>
+          <li><code>entropy_coef</code>：Python float 标量 η，给式 (18.4) 里的熵正则项定权重，取 0 时熵项消失。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回二元组 <code>(loss, grad)</code>。<code>loss</code> 是 Python <code>float</code>，等于 <span class="math">−mean<sub>i</sub>[log π(a<sub>i</sub>|s<sub>i</sub>)·A<sub>i</sub>] − η·mean<sub>i</sub>[H(π(·|s<sub>i</sub>))]</span>。</li>
+          <li><code>grad</code> 是形状 <code>(B, A)</code> 的 <code>np.ndarray</code>，是 <code>loss</code> 对 <code>logits</code> 的梯度，行列位置与 <code>logits</code> 一一对应。</li>
+        </ul>
+        <div class="eq">
+          <span class="eq-body">L = − mean<sub>i</sub>[ log π<sub>θ</sub>(a<sub>i</sub>|s<sub>i</sub>) · A<sub>i</sub> ] − η · mean<sub>i</sub>[ H( π<sub>θ</sub>(·|s<sub>i</sub>) ) ]</span>
+          <span class="eq-num">(18.4)</span>
+        </div>
+        <p class="cp-note"><span class="cp-label">会被检验</span>测试会核对 <code>eta=0</code> 与 <code>eta=0.5</code> 时的 loss 数值；<code>grad</code> 形状与 <code>logits</code> 相同、每行之和为 0，并用数值微分逐项核对。优势全为 0 且 <code>eta=0</code> 时 loss 与 grad 都为 0；<code>eta=1</code> 时均匀策略的 loss 等于 −log 3，尖峰分布上升的那一列梯度为正、其余为负。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>记 <code>p = softmax(logits)</code>、<code>logp = logits − logsumexp(logits)</code>，
+            策略项对 logits 的梯度是 <code>A_i · (p − onehot(a_i))</code>。</li>
+          <li>熵那一项：<span class="math">H = −Σ p log p</span>，它给出的梯度是
+            <code>η · p · (logp + H)</code>（逐元素乘）。</li>
+          <li>两个梯度都要再除以 batch 大小 <code>B</code>，因为 loss 用的都是 <code>mean</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def actor_critic_loss(logits, actions, advantages, entropy_coef):
+    # TODO: softmax 策略的 −mean(log pi(a|s) * A) − eta * mean(H)，并返回对 logits 的梯度
+    logits = np.asarray(logits, dtype=float)
+    return 0.0, np.zeros_like(logits)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+logits = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, -1.0]])
+acts = np.array([0, 2])
+advs = np.array([2.0, -1.0])
+
+l0, g0 = actor_critic_loss(logits, acts, advs, 0.0)
+g0 = np.asarray(g0, dtype=float)
+check(abs(l0 - (-0.5758938197159833)) < 1e-9,
+      f"eta=0 时 loss = -mean(log pi(a|s)*A) = -0.5758938，实际 {l0:.9f}")
+check(g0.shape == logits.shape,
+      f"grad 形状应等于 logits 的形状 {logits.shape}，实际 {g0.shape}")
+check(abs(float(np.sum(g0[0]))) < 1e-12,
+      f"softmax 参数下梯度按行求和应为 0（整体平移 logits 不改变 loss），实际 {float(np.sum(g0[0])):.3e}")
+check(abs(g0[0, 0] - (-2.0 / 3.0)) < 1e-9 and abs(g0[0, 1] - (1.0 / 3.0)) < 1e-9,
+      f"A=2 选中动作 0 时，梯度应是 (p - onehot)*A/B = (-2/3, 1/3, 1/3)，实际 {g0[0]}")
+
+lz, gz = actor_critic_loss(logits, acts, np.zeros(2), 0.0)
+check(abs(lz) < 1e-12 and np.allclose(np.asarray(gz, dtype=float), 0.0),
+      "优势全为 0 且 eta=0 时，损失与梯度都应当是 0")
+
+lu, gu = actor_critic_loss(np.zeros((1, 3)), np.array([0]), np.array([0.0]), 1.0)
+check(abs(lu - (-1.0986122886681096)) < 1e-9,
+      f"均匀策略的熵是 log 3，eta=1 时 loss = -log 3 = -1.0986123，实际 {lu:.9f}")
+
+lp, gp = actor_critic_loss(np.array([[2.0, 0.0, 0.0]]), np.array([0]), np.array([0.0]), 1.0)
+gp = np.asarray(gp, dtype=float)
+check(gp[0, 0] > 1e-6 and gp[0, 1] < -1e-6,
+      f"熵项应把 logits 往均匀推：尖峰那一列梯度为正、其它列为负，实际 {gp[0]}")
+
+ref = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, -1.0]])
+lmix, gmix = actor_critic_loss(ref, acts, advs, 0.5)
+gmix = np.asarray(gmix, dtype=float)
+check(abs(lmix - (-1.0290133313801668)) < 1e-9,
+      f"eta=0.5 时 loss 应为 -1.0290133314，实际 {lmix:.9f}")
+
+eps = 1e-6
+for i, j in [(0, 1), (1, 2), (1, 0)]:
+    up = ref.copy(); up[i, j] += eps
+    dn = ref.copy(); dn[i, j] -= eps
+    fd = (actor_critic_loss(up, acts, advs, 0.5)[0] - actor_critic_loss(dn, acts, advs, 0.5)[0]) / (2 * eps)
+    check(abs(fd - gmix[i, j]) < 1e-5,
+          f"grad[{i},{j}] 与数值梯度不符：解析 {gmix[i, j]:.8f}，数值 {fd:.8f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def actor_critic_loss(logits, actions, advantages, entropy_coef):
+    logits = np.asarray(logits, dtype=float)
+    actions = np.asarray(actions, dtype=int)
+    adv = np.asarray(advantages, dtype=float)
+    B = logits.shape[0]
+
+    z = logits - np.max(logits, axis=1, keepdims=True)
+    expz = np.exp(z)
+    total = np.sum(expz, axis=1, keepdims=True)
+    p = expz / total
+    logp = z - np.log(total)
+
+    logp_a = logp[np.arange(B), actions]
+    entropy = -np.sum(p * logp, axis=1)
+    loss = float(-np.mean(logp_a * adv) - entropy_coef * np.mean(entropy))
+
+    onehot = np.zeros_like(p)
+    onehot[np.arange(B), actions] = 1.0
+    grad = (adv[:, None] * (p - onehot) + entropy_coef * p * (logp + entropy[:, None])) / B
+    return loss, grad
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>理论与实现约定读 Spinning Up in Deep RL（reinforcement learning，强化学习） 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/algorithms/vpg.html">Vanilla Policy Gradient / Actor-Critic 章节</a>，
+        它给出式 (18.1) 的实现形式与 A2C 的 batch 组织方式
+        （<a class="cite" href="https://spinningup.openai.com/en/latest/">spinningup.openai.com</a>）。</p>
+      <p>教科书里的对应小节是 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em>
+        (2nd ed.) 第 13.5 节 "Actor–Critic Methods"，它解释了为什么 <var>δ<sub>t</sub></var>
+        是优势的一个合理估计。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>A3C 的原始论文：Mnih et al., <em>Asynchronous Methods for Deep Reinforcement Learning</em>（ICML 2016），
+        arXiv <a class="cite" href="https://arxiv.org/abs/1602.01783">1602.01783</a>。
+        想看清"异步"到底省了什么、又引入了什么，读它第 3 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，把它当私教用。比如可以问：
+      "把式 (18.1) 用我自己的业务状态设计写成完整训练循环。"
+      或者 "我的 A2C 熵掉得很快、回报也不涨，按本课的表帮我逐条排查。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

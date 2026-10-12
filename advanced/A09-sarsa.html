@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A09 · SARSA：on-policy 控制 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A09" data-slug="sarsa" data-part="进阶篇 · 第二部分 · 无模型方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第二部分 · 无模型方法</p>
+    <h1>SARSA：on-policy 控制</h1>
+    <p class="lede">前面两节都在"给一套做法打分"，这一节往前走一步：让程序自己改做法。
+      要学的算法叫 SARSA（state-action-reward-state-action，一种边学边改的控制方法）。
+      你会看懂一条只改动一个符号的更新式，以及它和下一课的那条式子为什么是两种完全不同的思路。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 SARSA 的一步更新，并说清用 a' 而不是取最大值会带来什么后果</li>
+        <li>能用自己的话解释 on-policy 的含义，以及它适合什么场合</li>
+        <li>能解释悬崖行走上 SARSA 为什么学到远离悬崖的路径</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>从预测走到控制</h2>
+    <p>先回顾一下手上有什么。第 <a href="A08-td-learning.html">0008 课</a>的 TD(0) 估计的是
+      <span class="term">状态价值</span>（只看状态、不管具体选哪个动作的那个价值），
+      写作 <span class="math">V(s)</span>。它回答的是"现在这个局面好不好"。</p>
+    <p>可我们要的是让程序自己把做法改好。这件事在强化学习里叫控制，
+      而<span class="term">控制（control，就是一边估价值、一边把做法往好里改）</span>
+      需要的是另一个东西：<span class="term">动作价值</span>
+      （在某个状态下先选某个具体动作，之后再好好走，能拿多少总分），写作
+      <span class="math">Q(s, a)</span>。它回答的是"现在走这一步好不好"。</p>
+    <p>为什么一定要动作价值？因为要改做法，就得比较"这个局面下选哪个动作更好"。
+      只有动作价值能直接回答这个问题：挑出让 Q 最大的那个动作，
+      也就是 <span class="math">arg max<sub>a</sub> Q(s, a)</span>。
+      这里的 argmax 读作"arg-max"，意思是
+      <span class="term">argmax（挑出让后面那个式子最大的那个选择）</span>。</p>
+    <p>把"每个状态都挑当前 Q 最大的动作"这条规则固定下来，就叫
+      <span class="term">贪心（在当前估计里挑看起来最好的那个）</span>做法。
+      但只照着它走会有一个毛病：没被选过的动作，它的 Q 永远是初始值，
+      你也就永远不知道它到底好不好。所以要留一点概率去试别的，这就是<span class="term">探索</span>（故意试试那些现在看起来不是最好的选择）。</p>
+    <p>把 TD 从 <var>V</var> 搬到 <var>Q</var>，会冒出一个新问题：更新目标里的"下一步价值"，
+      该用下个状态的哪个动作来算？这个算法（它的名字叫 SARSA，读作"萨萨"，
+      就是下面更新式里那五样东西的英文首字母）的回答是：用你下一步真会执行的那个动作
+      <span class="math">a'</span>。</p>
+    <div class="eq">
+      <span class="eq-body">Q(s, a) ← Q(s, a) + α [ r + γ Q(s', a') − Q(s, a) ]</span>
+      <span class="eq-num">(9.1)</span>
+    </div>
+    <p>先把公式 (9.1) 读一遍。箭头读作"更新为"；
+      <var>α</var> 是<span class="term">学习率</span>（每次更新时，往新信息的方向挪多远）；
+      <var>γ</var> 是<span class="term">折扣因子</span>（越往后的奖励，算进总分时权重越小，等于给它打了个折）；
+      <var>r</var> 是这一步刚拿到的即时奖励；
+      <span class="math">s</span> 与 <span class="math">a</span> 是刚离开的状态和刚执行的动作；
+      <span class="math">s'</span> 是进入的新状态，<span class="math">a'</span> 是你在这个新状态下选出的下一个动作。</p>
+    <p>这个算法的名字就是更新式里用到的五样东西。它属于前面讲过的
+      <span class="term">时序差分</span>（不用等到一局走完，用"走一步之后的新估计"来更新"走这一步之前的估计"）。
+      它的名字 SARSA 来自五个英文单词的首字母：state、action、reward、state、action，
+      也就是状态、动作、奖励、状态、动作。</p>
+    <p>每个符号在代码里都很好找：<span class="math">a</span> 是刚执行的动作，
+      <var>r</var> 是刚拿到的奖励，<span class="math">s'</span> 是新状态，
+      <span class="math">a'</span> 是用当前做法在新状态上选出的动作。</p>
+  </section>
+
+  <section>
+    <h2>用 a' 而不是取最大值，差别在哪</h2>
+    <p>把 <span class="math">Q(s', a')</span> 换成 <span class="math">max<sub>a'</sub> Q(s', a')</span>，
+      也就是换成"下个状态里最好的那个动作价值"，就得到下一课的 Q-learning。
+      一个符号的差别，划出了两类算法。这个差别会在下一课展开。</p>
+    <p>先看 SARSA 这一边。它评估的是你当前真正在用的那套做法的价值，
+      其中包括它偶尔随机乱走那部分的代价。所以 SARSA 的 Q 值乐观不起来：
+      它知道你会以 <var>ε</var>（<span class="term">探索率</span>，就是每次决策时有多大比例的概率去"随便试一个"）
+      的概率随机动一下，于是把这份风险也算进了价值里。</p>
+    <p>这里顺便把两个容易混的说法讲清。真正在环境里做决定、产生数据的那套做法，
+      这条规则本身叫策略（看到什么状态就选什么动作的规则），这里叫它行为策略。
+      而当前正在学、正在被评估的那套做法，叫目标策略。</p>
+    <p>SARSA 里这两套是同一个，所以叫 <span class="term">on-policy（边学的那套，就是产生数据的那套）</span>，
+      比喻是"边打边改自己的打法"。
+      如果边学的那套不是产生数据的那套，就叫
+      <span class="term">off-policy（边学的那套，不是产生数据的那套）</span>，
+      比喻是"看别人的录像学自己的打法"。
+      第 <a href="A07-monte-carlo.html">0007 课</a>提过这两个词，这里是第一次细说。</p>
+    <p>SARSA 怎么改做法？更新完 Q 之后，把行为策略也换成对 Q 的 ε-greedy：
+      大多数时候挑当前最好的动作，小部分时候随机试一个。行为策略与目标策略始终是同一个，
+      所以这套流程叫 <span class="term">on-policy 控制（边学边用同一套做法的那种控制）</span>。</p>
+  </section>
+
+  <section>
+    <h2>悬崖行走：两种"最优"的分野</h2>
+    <p>Sutton &amp; Barto 的悬崖行走<a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[第 6.5 节]</a>是一个 4 行 12 列的网格：
+      左下角是起点，右下角是终点，最下面一行的中间十格是悬崖。
+      踩进悬崖要扣 100 分并被送回起点，每走一步扣 1 分。</p>
+    <p>Q-learning 用 <span class="math">max</span> 当目标，学到的是贴着悬崖走的最短路径：
+      在它眼里，只要不掉下去，13 步就是最优。</p>
+    <p>SARSA 用下一步真会执行的 <span class="math">a'</span>。而 <span class="math">a'</span>
+      有 ε 的概率是随机选出来的，所以它把"以 ε 的概率随机迈步"这件事算进了价值里。
+      贴着悬崖走，意味着每走一步都有约 2.5% 的概率掉下去：ε 取 0.1、四个动作时就是
+      0.1 乘上四分之一。一次扣 100 分，足以让这条看起来最短的路变得不划算，于是它宁可绕远。</p>
+    <p>这里要多说一句：两个算法没有谁更聪明，它们回答的问题不一样。
+      SARSA 估的是你真正在用的那套带探索的做法值多少分；
+      Q-learning 估的是最优做法的价值，数据则由探索的做法提供。
+      当你真正要上线的就是那套带探索的做法时，SARSA 的估计才是诚实的。</p>
+  </section>
+
+  <section>
+    <h2>什么时候该选 on-policy</h2>
+    <p><var>ε</var> 必须随训练衰减，比如从 0.2 慢慢降到 0.02。
+      如果不降，SARSA 会稳定在某个"一直保留随机性"的做法上，而不是最好的做法，
+      因为"乱走"本来就是它评估对象的一部分。</p>
+    <p>反过来说，如果探索本身有真实代价，比如推荐系统里的一次坏推荐、
+      库存里的一次缺货、医疗决策里的一次错误尝试，那么把这份代价算进价值就是你想要的。
+      该选 on-policy 的信号在这里：你要的是"实际执行做法"的可靠估计，
+      而不是一个只写在纸面上的最优做法。</p>
+  </section>
+
+  <figure class="sim" data-sim="gridworld" data-rows="4" data-cols="4" data-gamma="0.9" data-mode="q-learning"></figure>
+
+  <section>
+    <h2>应用视角与诊断</h2>
+    <p>上面的演示用 Q-learning 学一个 4×4 网格：格子里的数字是
+      <span class="math">max<sub>a</sub> Q(s, a)</span>，箭头是学到的做法。
+      把训练回合拉到最低，你会看到有些格子的做法还是错的。
+      这是因为被访问的次数不够，Q 值本身就不可信，这一点 SARSA 完全一样。</p>
+    <p>诊断这类算法时，先看两件事：每个"状态加动作"的组合被访问了多少次，
+      以及 <var>ε</var> 是否随着训练在下降。</p>
+    <p>再往回一步，状态里装的信息够不够做决定、奖励写得对不对，
+      决定了 Q 值有没有意义。这些都在 <a href="A06-modeling-your-problem.html">0006 课</a>的检查表里。
+      下一课把 <span class="math">a'</span> 换成 <span class="math">max</span>，
+      就得到 off-policy 的 Q-learning，两者的对照表会放在那里。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. SARSA 更新式里的 <span class="math">Q(s', a')</span>，那个 a' 是什么？</p>
+      <ol class="mcq-options">
+        <li>行为策略在下一个状态实际选择并且执行的那个动作</li>
+        <li>让 Q(s', ·) 取到最大值的那一个动作，相当于贪心</li>
+        <li>目标策略在下一状态会选择的动作，与行为策略无关</li>
+        <li>下一状态所有动作价值的平均值，需要先遍历求和</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：SARSA 用"下一步真正会执行的动作"来构造目标，
+          所以它估计的是当前行为策略的价值，而不是某个更贪心的策略。</p>
+        <p>B 描述的是 Q-learning：一旦换成 max，算法就变成 off-policy 了。
+          C 混淆了 on/off-policy，SARSA 里行为策略和目标策略是同一个。
+          D 是完全没有依据的凑法，更新从来不对动作求平均。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 说一个算法是 on-policy 的，准确的含意是什么？</p>
+      <ol class="mcq-options">
+        <li>它必须在线收集数据，完全不能使用历史经验回放（存下来的旧经历）</li>
+        <li>它的更新目标只来自当前状态获得的即时奖励信号</li>
+        <li>它正在评估的那套做法，与正在产生数据的那套做法是同一个</li>
+        <li>它只在改过一次做法之后，才更新一次价值估计</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：on-policy 的判据是"行为策略与目标策略是否同一个"。
+          SARSA 采数据用 ε-greedy，评估的也是这个 ε-greedy，所以是 on-policy。</p>
+        <p>A 把它误解成"必须在线学习"：能不能用回放缓冲区是工程选择，
+          不能与真实环境交互、只能用已经攒下来的历史数据学的
+          on-policy 算法照样存在。B 把 TD 更新说成了只吃即时奖励。
+          D 把策略迭代（反复"打分、改招"，直到改不动为止）的节奏当成了定义。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 在悬崖行走中 SARSA 学到远离悬崖的路径，根本原因是什么？</p>
+      <ol class="mcq-options">
+        <li>SARSA 的目标里用了 max，因此高估了掉下悬崖的代价</li>
+        <li>SARSA 把行为策略随机探索的代价算进了价值估计里</li>
+        <li>SARSA 的学习率通常更小，所以最后稳定下来的解更保守</li>
+        <li>SARSA 无法处理负奖励，所以只能选择绕远的那条路径</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：SARSA 的目标是 <span class="math">r + γQ(s', a')</span>，
+          而 <span class="math">a'</span> 有 ε 的概率是随机动作。贴着悬崖走等于反复暴露在
+          "随机一步就掉下去"的风险里，这份期望损失被如实记进了价值。
+          这里说的收敛，是指"一轮轮更新下去，Q 值不再明显变化，稳定下来了"。</p>
+        <p>A 说反了：用 max 的是 Q-learning。C 错：学习率只影响收敛速度，
+          不改变算法最终稳定到的那个解。不动点指的是"再更新一次也不变的那种解"。D 错：SARSA 处理负奖励毫无问题。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 下列哪种情况更该优先考虑 on-policy 的 SARSA？</p>
+      <ol class="mcq-options">
+        <li>你只能离线（不能与真实环境交互，只能用已经攒下来的历史数据），反复回放日志，且探索不产生任何成本</li>
+        <li>你只关心最后那套最优做法，过程中怎么试错完全无所谓</li>
+        <li>你需要用旧做法产生的数据，反复评估多套候选的新做法</li>
+        <li>探索本身有真实代价，且你关心实际执行策略的表现</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：探索有代价时，"把探索代价算进价值"是优点；
+          SARSA 给出的就是部署后真会拿到的收益估计。</p>
+        <p>A 和 C 描述的是 off-policy 的典型用武之地：数据可复用、要评估别的策略。
+          B 也偏向 off-policy，因为 SARSA 的价值里永远含着探索成本，
+          即使 ε 很小，它也从不声称那是纯贪心策略的价值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. SARSA 的 TD 误差 δ（时序差分误差）等于什么？</p>
+      <ol class="mcq-options">
+        <li>r + γQ(s', a') − Q(s, a)，其中 a' 由行为策略选出</li>
+        <li>r + γ max<sub>a'</sub> Q(s', a') − Q(s, a)，取下一状态最大</li>
+        <li>r + γV(s') − V(s)，其中 V 是状态价值的估计</li>
+        <li>G<sub>t</sub> − Q(s, a)，其中 G<sub>t</sub> 是本回合实际拿到的总分（每个奖励先打折再加起来）</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把 (9.1) 的方括号展开就是 SARSA 的 TD 误差，
+          目标的第二项来自行为策略实际选出的 <span class="math">a'</span>。</p>
+        <p>B 是 Q-learning 的 TD 误差，差别恰在这个 max。
+          C 是 TD(0) 预测 <var>V</var> 的误差，不是控制用的形式。
+          D 是蒙特卡洛（把一整局走完，用真实拿到的总分来估价值）的动作价值误差，它要等回合结束。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0009-code-1">
+      <h3>代码题 1 · 写一步 SARSA 更新</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>SARSA 是本课要学的控制算法，它把上一节的 TD(0)
+          从状态价值 <code>V</code> 推到动作价值 <code>Q</code>，因为只有
+          <code>Q(s, a)</code> 才能直接取出一套做法。
+          程序每走一步就会拿到五元组 (s, a, r, s', a')，
+          这个函数负责用这五样东西修正 Q 表里的一个格子，是训练循环里最内层的那次调用。
+          输入是更新前的 Q 表与这一步的五元组，输出是改好一格的新 Q 表，
+          下一步的决策就从它里面取 ε-greedy 动作。</p>
+        <p>请实现 <code>sarsa_update(Q, s, a, r, s_next, a_next, alpha, gamma)</code>，按
+          <span class="math">Q(s,a) ← Q(s,a) + α[r + γQ(s',a') − Q(s,a)]</span> 更新一步。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>Q</code>：形状 <code>(状态数, 动作数)</code> 的二维 numpy 数组，是训练到目前为止的动作价值估计；</li>
+          <li><code>s</code>：当前状态的整数下标；<code>a</code>：当前动作的整数下标，两者一起指定被改的那一格；</li>
+          <li><code>r</code>：这一步拿到的即时奖励，float；</li>
+          <li><code>s_next</code>：下一状态的整数下标；<code>a_next</code>：下一步实际会执行的动作的整数下标，由行为策略给出；</li>
+          <li><code>alpha</code>：学习率 α；<code>gamma</code>：折扣因子 γ，两者都是标量。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状与 <code>Q</code> 相同 <code>(状态数, 动作数)</code>：第 <code>[s, a]</code> 个格子是更新后的值，
+            其余格子逐位等于传入时的值。不要就地修改传入的 <code>Q</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>返回值是 <code>np.ndarray</code> 且形状不变；
+          传入的 <code>Q</code> 在调用后保持原值；除 <code>[s, a]</code> 之外的格子逐个不变；
+          自举（用自己当前的估计去更新自己当前的估计）项用的是 <code>Q[s_next, a_next]</code>，
+          而不是 <code>Q[s_next]</code> 的最大值，
+          测试里 <code>Q[s_next] = [5.0, 1.0]</code>、<code>a_next = 1</code> 时目标必须是 1.0 而不是 5.0。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先用 <code>np.array(Q, dtype=float, copy=True)</code> 复制一份再改。</li>
+          <li>目标 = <code>r + gamma * Q[s_next, a_next]</code>；注意是 <code>a_next</code>，不是 max。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def sarsa_update(Q, s, a, r, s_next, a_next, alpha, gamma):
+    # TODO: 按 SARSA 的一步更新返回新的 Q
+    return np.array(Q, dtype=float)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+Q = np.array([[0.0, 1.0], [2.0, 3.0]])
+Q2 = sarsa_update(Q, 0, 0, 1.0, 1, 0, 0.5, 0.9)
+check(isinstance(Q2, np.ndarray), "返回值应当是 numpy 数组")
+check(abs(float(Q2[0, 0]) - 1.4) < 1e-9,
+      f"目标为 1+0.9*2=2.8，新值应为 0+0.5*2.8=1.4，实际 {float(Q2[0, 0])}")
+check(abs(float(Q[0, 0])) < 1e-12,
+      f"不应原地修改传入的 Q，但 Q[0,0] 已变成 {float(Q[0, 0])}")
+check(abs(float(Q2[0, 1]) - 1.0) < 1e-12 and abs(float(Q2[1, 0]) - 2.0) < 1e-12
+      and abs(float(Q2[1, 1]) - 3.0) < 1e-12,
+      f"除 [0,0] 之外的值都不应改变，实际 {Q2}")
+
+Q3 = np.array([[0.0, 0.0], [5.0, 1.0]])
+Q4 = sarsa_update(Q3, 0, 1, 0.0, 1, 1, 1.0, 1.0)
+check(abs(float(Q4[0, 1]) - 1.0) < 1e-9,
+      f"必须用 a'=1 的 Q 值 1.0 作目标，而不是 max 出来的 5.0，实际 {float(Q4[0, 1])}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def sarsa_update(Q, s, a, r, s_next, a_next, alpha, gamma):
+    Q = np.array(Q, dtype=float, copy=True)
+    target = r + gamma * Q[s_next, a_next]
+    Q[s, a] += alpha * (target - Q[s, a])
+    return Q
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0009-code-2">
+      <h3>代码题 2 · 在悬崖行走上训练 SARSA</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>上一题只做一步更新，这道题把 SARSA 放进完整的控制循环里：在悬崖行走上反复跑回合，边用 ε-greedy 探索边把 Q 表改好。
+          它对应本课"SARSA 学到远离悬崖的路径"那个结论，训练循环调用它一次、拿回 Q 表，再对 Q 取贪心就得到学到的策略。
+          环境规则全部给定，不需要你另外实现环境：4 行 12 列、行优先编号 0–47，起点 36，终点 47，37–46 是悬崖；
+          动作 0/1/2/3 依次是上/右/下/左，撞边界原地不动；每步奖励 −1，踩悬崖奖励 −100 并退回 36（回合继续），走到 47 结束，每回合最多 400 步。</p>
+        <p>请实现 <code>train_sarsa_cliff(episodes=30000, alpha=0.5, epsilon=0.1, gamma=1.0, seed=0)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>episodes</code>：训练的回合数，默认 30000；</li>
+          <li><code>alpha</code>：学习率 α，默认 0.5；</li>
+          <li><code>epsilon</code>：ε-greedy 的探索率 ε，默认 0.1；</li>
+          <li><code>gamma</code>：折扣因子 γ，默认 1.0；</li>
+          <li><code>seed</code>：随机种子，用 <code>np.random.default_rng(seed)</code> 取随机数，不要用全局 <code>np.random</code>。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状 <code>(48, 4)</code>：第 <code>s</code> 行第 <code>a</code> 列是状态 <code>s</code> 下动作 <code>a</code> 的估计价值，
+            行下标就是上面那套行优先编号。对每一行取 <code>argmax</code> 就得到训练学到的策略。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>返回的 <code>Q</code> 形状是 <code>(48, 4)</code>；
+          对每行取 <code>argmax</code> 得到的贪心策略从起点 36 出发能在 20 步以内走到 47，且路径不经过 37–46；
+          <code>Q[36, 1]</code> 比 <code>Q[36, 0]</code> 低 30 以上，因为起点向右一步就进悬崖，
+          而 ε-greedy 的随机探索也会被算进价值里。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>开头先写 <code>rng = np.random.default_rng(seed)</code>，
+              再写 <code>Q = np.zeros((48, 4))</code>（48 就是 4 行乘 12 列）。
+              形状 <code>(48, 4)</code> 是 48 行 4 列，也就是每个状态一行、每个动作一列，
+              下标写成 <code>Q[s, a]</code>，行列都从 0 开始。</li>
+          <li>环境怎么动、每一步给多少奖励，题面已经写全，照题面算就行。
+              代码里的顺序是：选动作 a，执行它得到奖励 r 和新状态 s_next，再选一个 a_next。</li>
+          <li>选动作的小函数写成：先抽 <code>rng.random()</code>（0 到 1 之间的随机小数），
+              小于 <code>epsilon</code> 就用 <code>int(rng.integers(0, 4))</code> 随机取一个动作
+              （它返回 0、1、2、3 中的一个整数，右端的 4 取不到），
+              否则用 <code>int(np.argmax(Q[s]))</code> 取当前 Q 最大的动作下标。</li>
+          <li>踩到悬崖（下一个状态落在 37 到 46 之间）时，奖励记 <code>-100.0</code>，
+              并把 <code>s_next</code> 强制改成起点 36，这一回合继续；其他情况奖励记 <code>-1.0</code>。</li>
+          <li>然后用刚拿到的 (s, a, r, s_next, a_next) 更新一格：
+              <code>Q[s, a] += alpha * (r + gamma * Q[s_next, a_next] - Q[s, a])</code>。
+              注意方括号里第二项是 <code>a_next</code> 那一格，不是这一行的最大值。</li>
+          <li>更新完再前进：<code>s, a = s_next, a_next</code>。如果 <code>s == 47</code> 就结束这一回合。
+              整个回合用一个最多跑 400 步的 <code>for</code> 循环兜住，防止永远走不完。</li>
+          <li>跑完 <code>episodes</code> 个回合后 <code>return Q</code>，形状仍然是 <code>(48, 4)</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+ROWS, COLS = 4, 12
+
+def train_sarsa_cliff(episodes=30000, alpha=0.5, epsilon=0.1, gamma=1.0, seed=0):
+    # TODO: 用 ε-greedy 行为策略的 SARSA 训练悬崖行走
+    return np.zeros((ROWS * COLS, 4))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+ROWS, COLS = 4, 12
+N = ROWS * COLS
+START = (ROWS - 1) * COLS
+GOAL = N - 1
+CLIFF = set(range(START + 1, GOAL))
+
+def _move(s, a):
+    r, c = divmod(s, COLS)
+    if a == 0:
+        r -= 1
+    elif a == 1:
+        c += 1
+    elif a == 2:
+        r += 1
+    else:
+        c -= 1
+    r = min(max(r, 0), ROWS - 1)
+    c = min(max(c, 0), COLS - 1)
+    return r * COLS + c
+
+Q = train_sarsa_cliff(episodes=30000, seed=0)
+check(Q.shape == (N, 4), f"Q 的形状应为 ({N}, 4)，实际 {Q.shape}")
+check(float(Q[START, 1]) < float(Q[START, 0]) - 30.0,
+      f"起点向右就走进了悬崖，Q[起点,右] 应远低于 Q[起点,上]，实际 {float(Q[START, 1]):.1f} vs {float(Q[START, 0]):.1f}")
+
+s, path = START, [START]
+for _ in range(25):
+    if s == GOAL:
+        break
+    s = _move(s, int(np.argmax(Q[s])))
+    path.append(s)
+check(s == GOAL, f"贪心策略应当能从起点走到终点，实际停在 {s}（路径 {path}）")
+check(not any(x in CLIFF for x in path), f"SARSA 学到的贪心路径不应走进悬崖：{path}")
+check(len(path) - 1 <= 20, f"路径不应长到离谱，实际走了 {len(path) - 1} 步：{path}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def train_sarsa_cliff(episodes=30000, alpha=0.5, epsilon=0.1, gamma=1.0, seed=0):
+    rng = np.random.default_rng(seed)
+    ROWS, COLS = 4, 12
+    N = ROWS * COLS
+    START = (ROWS - 1) * COLS
+    GOAL = N - 1
+    CLIFF = set(range(START + 1, GOAL))
+
+    def move(s, a):
+        r, c = divmod(s, COLS)
+        if a == 0:
+            r -= 1
+        elif a == 1:
+            c += 1
+        elif a == 2:
+            r += 1
+        else:
+            c -= 1
+        r = min(max(r, 0), ROWS - 1)
+        c = min(max(c, 0), COLS - 1)
+        return r * COLS + c
+
+    Q = np.zeros((N, 4))
+    for _ in range(episodes):
+        s = START
+        if rng.random() < epsilon:
+            a = int(rng.integers(0, 4))
+        else:
+            a = int(np.argmax(Q[s]))
+        for _ in range(400):
+            s_next = move(s, a)
+            if s_next in CLIFF:
+                r = -100.0
+                s_next = START
+            else:
+                r = -1.0
+            if rng.random() < epsilon:
+                a_next = int(rng.integers(0, 4))
+            else:
+                a_next = int(np.argmax(Q[s_next]))
+            Q[s, a] += alpha * (r + gamma * Q[s_next, a_next] - Q[s, a])
+            s, a = s_next, a_next
+            if s == GOAL:
+                break
+    return Q
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 6.4–6.5 节。
+        第 6.4 节给出 SARSA 的更新式，第 6.5 节用悬崖行走（图 6.4）对照 SARSA 与 Q-learning 的行为差异，
+        那两张学习曲线值得照着本课的代码自己复现一遍。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>想从工程角度再看一遍 on/off-policy 的取舍，OpenAI Spinning Up 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/spinningup/rl_intro.html">Key Concepts in RL（reinforcement learning，强化学习）</a>
+        有一节专门讨论两类算法的适用场景。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。可以问：
+      "在我的场景里，探索一次的真实代价是多少？把这个代价代进去，我该选 SARSA 还是 Q-learning？"
+      也可以让它把悬崖行走换成你的业务流程，重算一遍那两条路径各自平均能拿多少总分。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

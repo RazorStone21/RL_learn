@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0026 · 策略表示与两种度量 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0026" data-slug="policy-gradient-metrics" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法</p>
+    <h1>策略表示与两种度量：平均价值、平均奖励</h1>
+    <p class="lede">前面 20 多课都在学"值多少分"，再从分数里挑动作。这一课换一条路：直接
+      把策略（看到什么状态就选什么动作的规则）本身当成要优化的对象，用梯度去改它。但"改得好不好"需要一把尺子，
+      而这把尺子在折扣和不折扣两种情形下长得不一样。这一课先把策略参数化，
+      再定义这两把尺子。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>写出 softmax 策略与高斯策略的具体形式，并说明各自适合什么动作空间</li>
+        <li>说清策略梯度方法与价值方法的分工差别，以及它为什么能处理连续动作</li>
+        <li>写出平均价值 $\bar v_\pi$ 的定义，并说明状态分布 $d$ 的选取为什么是个问题</li>
+        <li>写出平均奖励 $\bar r_\pi$ 的定义，并说明它与平均价值在什么条件下等价</li>
+        <li>判断一个具体任务该用哪个度量</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 为什么需要直接优化策略</h2>
+    <p>回顾一下已经学过的做法。值方法先把 $q_\pi(s,a)$ 或 $q^*(s,a)$ 学出来，
+      再用 $\arg\max_a q(s,a)$ 提取策略。这条路在动作少、且都是离散的时候很好用，
+      但有两个绕不过去的麻烦。</p>
+    <p>第一个麻烦是<em>连续动作</em>（动作是一个实数，不是从几个选项里挑）。机械臂的关节力矩是实数，$\arg\max$ 要在无穷多个动作里搜，
+      做不了。第二个麻烦是<em>随机策略</em>（同一个状态按概率选不同动作，而不是永远选同一个）。有些任务的最优做法本身就是随机的
+      （比如石头剪刀布，最优策略是均匀随机），而 $\arg\max$ 永远给出确定性的选择。</p>
+    <div class="rem">
+      <span class="label">注记 1.1（两种方法的对照）</span>
+      <p>值方法学的是"每个动作值多少分"，策略是<em>算出来的</em>；
+        策略方法直接学"每个动作选的概率"，策略是<em>参数化出来并被直接优化的</em>。
+        后者用一个参数向量 $\theta$ 表示策略，写作 $\pi(a|s,\theta)$。</p>
+    </div>
+    <p>把策略参数化之后，问题就变成一个标准的优化问题：找一个参数向量 $\theta$，
+      让某个衡量"这套策略有多好"的标量指标 $J(\theta)$ 尽量大。剩下的全部工作分两步：
+      先定义 $J(\theta)$（本课），再算出它的梯度 $\nabla_\theta J(\theta)$（下一课）。
+      这条梯度就叫策略梯度（策略对参数求导，它告诉你参数往哪调能让总分更高），
+      后面几课都在围着它转。</p>
+  </section>
+
+  <section>
+    <h2>2. 策略的参数化</h2>
+    <div class="def">
+      <span class="label">定义 2.1（softmax 策略，用于离散动作）</span>
+      <p>设动作空间（你这一步能做的选择有多少种）$\mathcal{A}=\{a_1,\dots,a_m\}$ 有限。给每个动作配一个打分函数
+        $h(s,a_i,\theta)$，也叫<em>偏好值</em>，然后做 softmax 归一化：
+        $$h(s,a_i,\theta)\ \longrightarrow\ \pi(a_i|s,\theta)=\frac{\exp\big(h(s,a_i,\theta)\big)}{\sum_{j=1}^{m}\exp\big(h(s,a_j,\theta)\big)}.$$
+        softmax（把一组任意实数变成一组非负且总和为 1 的数的操作，可以理解为"软"的最大值，
+        即不是硬选出最大的那个，而是让大的占比高）。分数高的动作概率大，但概率永远大于 0，
+        所以每个动作都有机会被选中。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 230" role="img" aria-label="softmax 把任意实数打分变成概率">
+        <text x="30" y="20" class="lbl">打分 h（任意实数，可正可负）</text>
+        <line x1="40" y1="120" x2="240" y2="120" class="axis-b"/>
+        <text x="52"  y="72"  class="val">1.2</text>
+        <text x="104" y="46"  class="val">2.0</text>
+        <text x="156" y="98"  class="val">0.3</text>
+        <text x="208" y="140" class="val">-0.5</text>
+        <line x1="56"  y1="120" x2="56"  y2="80"  class="axis-b"/>
+        <line x1="108" y1="120" x2="108" y2="54"  class="axis-b"/>
+        <line x1="160" y1="120" x2="160" y2="106" class="axis-b"/>
+        <line x1="212" y1="120" x2="212" y2="148" class="axis-b"/>
+        <path d="M250 110 H320" class="arrow-a"/>
+        <path d="M313 105 l9 5 l-9 5" class="arrow-a"/>
+        <text x="254" y="100" class="lbl">softmax</text>
+        <text x="340" y="20" class="lbl">概率 π（非负，总和为 1）</text>
+        <line x1="340" y1="150" x2="500" y2="150" class="axis-b"/>
+        <rect x="352" y="86"  width="30" height="64" class="bar"/>
+        <rect x="396" y="52"  width="30" height="98" class="bar-hi"/>
+        <rect x="440" y="114" width="30" height="36" class="bar"/>
+        <text x="360" y="166" class="lbl">0.31</text>
+        <text x="404" y="166" class="lbl">0.64</text>
+        <text x="448" y="166" class="lbl">0.12</text>
+        <text x="340" y="196" class="lbl">最大的打分拿到最大概率，但没有哪个概率是 0</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 26.1</span>
+        softmax 把任意实数打分映射成一组概率。它是可微的，这一点至关重要：
+        正因为"概率对参数可微"，才能对 $J(\theta)$ 求梯度。最后一个动作的打分是负的，
+        但它仍然拿到正概率，这保证了任何动作都不会被永久排除。</figcaption>
+    </figure>
+    <div class="def">
+      <span class="label">定义 2.2（高斯策略，用于连续动作）</span>
+      <p>设动作 $a\in\mathbb{R}^d$ 连续。让网络输出一个均值 $\mu(s,\theta)$ 和一个标准差
+        $\sigma(s,\theta)$，然后从这个正态分布里采样：
+        $$\pi(a|s,\theta)=\frac{1}{\sqrt{(2\pi)^d\det\Sigma}}\exp\Big(-\tfrac{1}{2}\big(a-\mu(s,\theta)\big)^T\Sigma^{-1}\big(a-\mu(s,\theta)\big)\Big),$$
+        其中 $\Sigma=\operatorname{diag}(\sigma_1^2,\dots,\sigma_d^2)$ 是协方差矩阵，
+        常见做法是让标准差与状态无关（当作一个可学的常数参数）。
+        注意这里的 $\pi(a|s,\theta)$ 是<em>概率密度</em>，不是概率，它可以大于 1。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.3（为什么是高斯）</span>
+      <p>高斯分布有三个好处：表达式可微且好算；采样方便（标准正态采样再线性变换）；
+        均值参数直接就是"最想执行的动作"，而标准差天然承担了<em>探索</em>的角色，
+        不需要额外加噪声。这也解释了为什么后面的确定性策略（第 0031 课）要额外想办法探索。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 210" role="img" aria-label="高斯策略从均值和标准差定义的钟形分布中采样动作">
+        <line x1="60" y1="150" x2="470" y2="150" class="axis-b"/>
+        <path d="M110 148 C170 148 178 44 260 44 C342 44 350 148 410 148" class="curve"/>
+        <line x1="260" y1="40" x2="260" y2="150" class="mark"/>
+        <text x="238" y="170" class="val-b">μ(s,θ)</text>
+        <text x="196" y="34" class="lbl">这里最可能选这个动作</text>
+        <line x1="196" y1="158" x2="196" y2="150" class="arrow"/>
+        <path d="M60 176 L470 176" class="arrow"/>
+        <path d="M60 172 l-9 4 l9 4" class="arrow"/>
+        <path d="M470 172 l9 4 l-9 4" class="arrow"/>
+        <text x="200" y="194" class="lbl">σ(s,θ) 决定探索的幅度：σ 大，试得野</text>
+        <circle cx="230" cy="150" r="3.5" class="dot-a"/>
+        <circle cx="296" cy="150" r="3.5" class="dot-a"/>
+        <circle cx="242" cy="150" r="3.5" class="dot-a"/>
+        <text x="300" y="128" class="lbl">每次采样落点不同</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 26.2</span>
+        高斯策略由均值 $\mu(s,\theta)$ 与标准差 $\sigma(s,\theta)$ 定义。均值是"最想做的动作"，
+        标准差是"敢偏离多远"。每次决策都从这个分布里抽一个具体动作，
+        所以同一个状态两次可能选不同动作，探索是内建的。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 度量一：平均价值</h2>
+    <p>现在要回答"这套策略有多好"。最自然的想法是：</p>
+    <div class="rem">
+      <span class="label">注记 3.1（一个看似显然但站不住的定义）</span>
+      <p>能不能直接定义 $J(\theta)=v_\pi(s_0)$，也就是固定一个起始状态？
+        如果任务总是从同一个状态开始，这完全可以。但如果起始状态是随机的，
+        或者任务根本没有明确的起始状态，这个定义就不好用了。</p>
+    </div>
+    <p>于是引入一个状态分布 $d(s)$，它表示"我们关心哪些状态、各关心多少"，
+      然后对所有状态的状态值按这个分布加权平均：</p>
+    <div class="eq">
+      <span class="eq-body">$$\bar v_\pi=\sum_{s\in\mathcal{S}}d(s)\,v_\pi(s),\qquad \sum_{s}d(s)=1,\ d(s)\ge 0.$$</span>
+      <span class="eq-num">(26.1)</span>
+    </div>
+    <div class="def">
+      <span class="label">定义 3.2（平均价值）</span>
+      <p>式 (26.1) 中的 $\bar v_\pi$ 叫策略 $\pi$ 的<em>平均价值</em>，
+        也叫折扣回报意义下的目标函数，记作 $J(\theta)=\bar v_\pi$（把 $\pi$ 换成 $\pi_\theta$ 后）。</p>
+    </div>
+    <p>这里的关键是 $d(s)$ 怎么选。两种常见选择：</p>
+    <ul>
+      <li><strong>只关心起始状态</strong>：$d(s_0)=1$，其余为 0。适合有明确起点的任务（如每局游戏都从头开始）。</li>
+      <li><strong>平稳分布</strong>：取 $d$ 满足 $d^T P_\pi=d^T$，即"按策略 $\pi$ 走很久之后，
+        落在各状态的比例"。它刻画的是长期行为，与起点无关。</li>
+    </ul>
+    <div class="rem">
+      <span class="label">注记 3.3（$d$ 要不要依赖 $\theta$）</span>
+      <p>平稳分布 $d$ 是 $\pi$ 的函数，所以它也依赖 $\theta$。但下一课推导梯度时会看到，
+        这个依赖项可以被消掉，因此实践上把 $d$ 当常数处理不影响结论。
+        这是策略梯度定理里最漂亮的一点，先在此埋个伏笔。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 度量二：平均奖励</h2>
+    <p>折扣因子（越往后的奖励，算进总分时权重越小的那个系数，常用 $\gamma$ 表示）是为了让无穷级数收敛（一轮轮加下去，总和不再无限变大，稳定在一个有限值）而引入的，但它同时改变了对远期奖励的态度。
+      有些任务不希望这样：比如让一个机器人持续运行，我们关心的是<em>单位时间的平均收益</em>，
+      而不是某个被折扣的累积量。</p>
+    <div class="def">
+      <span class="label">定义 4.1（平均奖励）</span>
+      <p>策略 $\pi$ 的<em>平均奖励</em>定义为长期平均每步收益：
+        $$\bar r_\pi=\lim_{n\to\infty}\frac{1}{n}\sum_{t=0}^{n-1}\E\big[R_{t+1}\mid S_0\sim d\big]
+        =\lim_{n\to\infty}\frac{1}{n}\E\Big[\sum_{t=0}^{n-1}R_{t+1}\Big].$$</p>
+    </div>
+    <p>这里先除以 $n$ 再让 $n\to\infty$，所以它<em>不需要</em>折扣因子：即使 $\gamma=1$，
+      累积奖励趋于无穷，但除以 $n$ 之后平均下来是有限的。</p>
+    <div class="thm">
+      <span class="label">命题 4.2（平均奖励的等价刻画）</span>
+      <p>若马尔可夫链在 $\pi$ 下是遍历的（各状态都能反复到达），则 $\bar r_\pi$ 与初始状态无关，
+        且可以写成
+        $$\bar r_\pi=\sum_{s}d_\pi(s)\sum_{a}\pi(a|s)r(s,a),$$
+        其中 $d_\pi$ 是该链的平稳分布。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（思路）</span>
+      <p>把 $\frac{1}{n}\sum_{t=0}^{n-1}\E[R_{t+1}]$ 按"第 $t$ 步落在哪个状态"展开：
+        $\E[R_{t+1}]=\sum_s P(S_t=s)\sum_a\pi(a|s)r(s,a)$。遍历链的状态分布 $P(S_t=s)$
+        随 $t\to\infty$ 收敛到平稳分布 $d_\pi(s)$，而有限项的初始瞬态在除以 $n$ 后消失，
+        故极限等于 $\sum_s d_\pi(s)\sum_a\pi(a|s)r(s,a)$。由于平稳分布唯一，极限与起点无关。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 220" role="img" aria-label="折扣累积回报与平均奖励随步数的变化">
+        <line x1="70" y1="180" x2="490" y2="180" class="axis-b"/>
+        <line x1="70" y1="30" x2="70" y2="180" class="axis-b"/>
+        <text x="410" y="198" class="lbl">步数 t</text>
+        <path d="M72 170 C150 90 260 50 480 38" class="curve"/>
+        <text x="330" y="60" class="lbl">折扣累积回报：会收敛到有限值</text>
+        <path d="M72 120 L130 66 L190 100 L250 58 L310 92 L370 62 L430 88 L486 68" class="curve2"/>
+        <line x1="70" y1="78" x2="490" y2="78" class="mark"/>
+        <text x="424" y="74" class="val-b">r̄</text>
+        <text x="150" y="132" class="lbl">平均奖励：在 r̄ 附近震荡，不收敛到某个点</text>
+        <text x="80" y="212" class="lbl">两条曲线的形状完全不同，这就是需要两种度量的原因</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 26.3</span>
+        折扣累积回报（把往后各步的奖励按 $\gamma$ 打折后加起来）随步数增长并收敛到有限值；平均奖励则一直在均值 $\bar r$ 附近震荡。
+        两者描述的是不同的目标：前者关心"总共能拿多少"，后者关心"每步平均能拿多少"。
+        分幕任务通常用前者，持续运行的任务通常用后者。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. 两种度量的关系</h2>
+    <div class="thm">
+      <span class="label">命题 5.1（折扣平均价值与平均奖励的极限关系）</span>
+      <p>在同样的遍历性条件下，有
+        $$\lim_{\gamma\to1}(1-\gamma)\,\bar v_\pi=\bar r_\pi.$$
+        也就是说，折扣平均价值在 $\gamma\to1$ 时的主要增长部分是 $\frac{\bar r_\pi}{1-\gamma}$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明（思路）</span>
+      <p>把 $\bar v_\pi$ 按平稳分布展开：$\bar v_\pi=\sum_s d_\pi(s)v_\pi(s)$，
+        而 $v_\pi(s)=\E\big[\sum_{k\ge0}\gamma^k R_{t+k+1}\mid S_t=s\big]$。
+        交换求和次序，并对无限马尔可夫链用"状态分布的极限是 $d_\pi$"这一事实，
+        可得 $\bar v_\pi\to\frac{\bar r_\pi}{1-\gamma}$（$\gamma\to1$），移项即得。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 5.2（实践上怎么选）</span>
+      <p>看任务本身：<em>分幕任务</em>（游戏、每单生意、一次治疗）用平均价值 + 折扣；
+        <em>持续运行任务</em>（机器人续航、长期推荐、设备维护）用平均奖励。
+        数学上两者可以统一处理，这就是第 0027 课能一次推导两种梯度的原因。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.3（一个能心算的小例子）</span>
+      <p>只有两个状态的循环任务：在 $s_1$ 无论选什么动作都拿奖励 $1$ 并转到 $s_2$，
+        在 $s_2$ 无论选什么动作都拿奖励 $0$ 并转回 $s_1$。策略不影响任何东西。
+        此时平均奖励 $\bar r=\frac{1+0}{2}=0.5$（两步一轮，平均每步半份）。
+        若取 $\gamma=0.9$，从 $s_1$ 出发的 $v=\frac{1+0.9\times0}{1-0.9^2}\cdot$… 算出来约 $5.26$，
+        而 $\frac{\bar r}{1-\gamma}=\frac{0.5}{0.1}=5$。两者接近但不相等，
+        差别来自初始瞬态，随着 $\gamma\to1$ 会吻合。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>策略方法直接参数化 $\pi(a|s,\theta)$ 并优化标量 $J(\theta)$，绕开了对连续动作做 $\arg\max$ 的困难。</li>
+      <li>离散动作用 softmax 策略，连续动作用高斯策略；后者天然带探索。</li>
+      <li>平均价值 $\bar v_\pi=\sum_s d(s)v_\pi(s)$ 需要一个状态分布 $d$，它定义"我们关心哪些状态"。</li>
+      <li>平均奖励 $\bar r_\pi$ 是长期每步平均收益，不需要折扣因子，适合持续运行的任务。</li>
+      <li>两者在 $\gamma\to1$ 时有 $\lim(1-\gamma)\bar v_\pi=\bar r_\pi$。</li>
+    </ul>
+    <p>下一课做真正的硬活：把 $\nabla_\theta J(\theta)$ 算出来。会看到无论用哪种度量，
+      最终都能写成"梯度乘以一个价值"的期望形式，而这个形式就是所有策略梯度算法
+      （包括第 0028 课的 REINFORCE 与第 0029 课之后的 Actor-Critic）的共同起点。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 策略梯度方法相比价值方法，最主要的结构差别是什么？</p>
+      <ol class="mcq-options">
+        <li>它不需要与环境交互，只用别人跑好的现成数据就能学</li>
+        <li>它直接参数化并优化策略本身，不必对动作求最大值</li>
+        <li>它只能处理离散动作，因此实现起来比价值方法更简单</li>
+        <li>它不需要任何价值估计，完全绕开了期望回报的概念</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把策略写成 $\pi(a|s,\theta)$ 并直接对 $J(\theta)$ 求梯度，
+          就不用再解 $\arg\max_a q(s,a)$。这就是它能处理连续动作与随机策略的原因。</p>
+        <p>A 错在方向相反：策略梯度通常需要大量在线交互。
+          C 说反了，连续动作本来就是它的强项。D 错在它仍然围绕期望回报做优化，
+          只是不显式地学 $q$ 再取最大值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 关于 softmax 策略 $\pi(a_i|s,\theta)=\frac{\exp h_i}{\sum_j\exp h_j}$，下列说法正确的是？</p>
+      <ol class="mcq-options">
+        <li>只有打分最大的那个动作概率非零，其余被置零</li>
+        <li>打分 $h_i$ 之和必须等于 1，否则归一化后不是概率</li>
+        <li>所有动作概率都严格大于 0，且概率对参数可微</li>
+        <li>打分必须非负，因为概率不能由负数生成</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：指数函数把任意实数变成正数，所以每个概率都 $>0$；
+          又因为 $\exp$ 可导、四则运算可导，整个比值对 $\theta$ 可微。这两点是它被采用的原因。</p>
+        <p>A 描述的是硬最大值，也就是 one-hot（只有被选中的那一格是 1，其余全是 0）那种向量，softmax 是"软"的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 高斯策略里，标准差参数 $\sigma(s,\theta)$ 主要起什么作用？</p>
+      <ol class="mcq-options">
+        <li>保证动作落在合法区间内，避免超出物理限制</li>
+        <li>决定均值 $\mu$ 向哪个方向更新，即学习率的大小</li>
+        <li>把动作归一化到 $[0,1]$，便于网络输出</li>
+        <li>决定采样的分散程度，也就是探索的幅度</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：高斯策略每次从分布中采样，$\sigma$ 越大动作偏离均值越远，
+          探索越强。这是随机策略自带的探索机制。</p>
+        <p>A 错在截断区间要靠额外的变换（如 tanh），不是高斯的职责。
+          B 混淆了"分布参数"与"优化步长"。C 错在归一化与 $\sigma$ 无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 定义平均价值 $\bar v_\pi=\sum_s d(s)v_\pi(s)$ 时，引入分布 $d$ 的直接原因是什么？</p>
+      <ol class="mcq-options">
+        <li>任务可能没有唯一的起始状态，需要一个"关心哪些状态"的权重</li>
+        <li>为了让 $\bar v_\pi$ 的值落在 $[0,1]$ 区间内便于比较</li>
+        <li>为了消除折扣因子 $\gamma$ 对目标函数的影响</li>
+        <li>因为状态值 $v_\pi(s)$ 本身不是实数，必须先加权</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_\pi(s)$ 是"从 $s$ 出发能拿多少分"，要对所有状态汇总成一个标量，
+          就必须说明各状态的相对重要性，这就是 $d$ 的角色。</p>
+        <p>B 错在 $d$ 与取值范围无关。C 错在 $d$ 不会消掉折扣。D 错在 $v_\pi(s)$ 本来就是实数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 关于平均奖励 $\bar r_\pi$，下列说法正确的是？</p>
+      <ol class="mcq-options">
+        <li>它是折扣累积回报在 $\gamma=0$ 时的特例</li>
+        <li>它一定等于 $\bar v_\pi$，两者只是记号不同</li>
+        <li>它先除以步数再取极限，因此不需要折扣因子就能有限</li>
+        <li>它只对分幕任务有定义，持续任务下会发散</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：定义里是 $\lim_{n\to\infty}\frac{1}{n}\E[\sum_{t \lt n}R_{t+1}]$，
+          先平均再取极限，所以即使 $\gamma=1$、累计奖励发散，平均下来仍有限。</p>
+        <p>A 错在 $\gamma=0$ 时只剩第一步奖励，与平均奖励无关。
+          B 错在两者量纲都不同（一个是累积、一个是每步）。
+          D 说反了：持续任务本来就是平均奖励最自然的用武之地。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">6. 在只有两个状态的循环任务里（$s_1$ 拿 1 转到 $s_2$，$s_2$ 拿 0 转回 $s_1$，策略不影响任何转移），平均奖励等于多少？</p>
+      <ol class="mcq-options">
+        <li>$\bar r_\pi=1$，因为 $s_1$ 每步都拿 1</li>
+        <li>$\bar r_\pi=0.5$，两步一轮共拿 1</li>
+        <li>$\bar r_\pi=0$，因为一半的步数拿 0</li>
+        <li>取决于起点是 $s_1$ 还是 $s_2$，不能一概而论</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两步构成一轮，总奖励 $1+0=1$，平均每步 $1/2=0.5$。
+          由命题 4.2，遍历链的平均奖励与初始状态无关，所以 D 不对。</p>
+        <p>A 错在把单步最大奖励当成平均值。C 错在忽略了 $s_1$ 的奖励。
+          D 错在遍历性保证了与起点无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 推导策略梯度时，若把平均价值里的 $d(s)$ 当成依赖 $\theta$ 的平稳分布，会发生什么？</p>
+      <ol class="mcq-options">
+        <li>梯度会多出一项，导致策略梯度定理不再成立</li>
+        <li>梯度会变成零，因为没有状态分布的变化就没有改进</li>
+        <li>必须改用平均奖励度量，折扣情形下无法定义</li>
+        <li>多出的那一项可以消掉，因此把 $d$ 当常数处理不影响结论</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\nabla_\theta\sum_s d(s)v_\pi(s)$ 确实会产生"$d$ 随 $\theta$ 变化"的额外项，
+          但在平稳分布的选取下这一项正好为零（这是策略梯度定理的一个关键引理）。
+          所以实践上把 $d$ 视作常数是安全的。</p>
+        <p>A 错在定理反而依赖这个消去成立。B 错在这不是零梯度的理由。
+          C 错在折扣与非折扣情形都能推导，见下一课。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">8. 一个设备维护任务：设备持续运行，目标是最大化长期平均每天的收益，没有自然的"一局"概念。应当用哪个度量？</p>
+      <ol class="mcq-options">
+        <li>平均奖励 $\bar r_\pi$，因为关心的是单位时间的平均收益</li>
+        <li>平均价值 $\bar v_\pi$，因为它是更一般的定义</li>
+        <li>两者都可以且结果必然相同，不需要区分</li>
+        <li>都无法使用，因为任务的状态无法完整描述当前局面</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：这是持续运行任务，没有回合边界，"每天平均赚多少"就是平均奖励的定义；
+          而且 $\gamma<1$ 会引入一个本来不存在的"时间偏好"，反而不符合任务本意。</p>
+        <p>B 在 $\gamma\to1$ 时也能用但需要额外归一化。C 错在两者数值并不相等
+          （见命题 5.1 的极限关系）。D 错在题目并未否定"只看当前状态就够"这一前提。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 在命题 5.1（$\lim_{\gamma\to1}(1-\gamma)\bar v_\pi=\bar r_\pi$）的证明中，哪一步是最关键的？</p>
+      <ol class="mcq-options">
+        <li>把 $v_\pi(s)$ 的定义代入 $\bar v_\pi$ 的那一步</li>
+        <li>交换求和次序，把对 $k$ 的求和提到外层的那一步</li>
+        <li>用"状态分布随步数收敛到平稳分布 $d_\pi$"这一事实</li>
+        <li>把 $(1-\gamma)$ 乘到等式右边的那一步</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_\pi(s)$ 里含无限求和，直接算不出来。就是"$P(S_t=s)\to d_\pi(s)$"
+          这一遍历性结论把逐项的期望换成平稳分布，才使极限可算。</p>
+        <p>A、B、D 都是必要的代数操作，但它们本身不提供收敛信息；
+          换成非遍历链时这三步照样能做，结论却不成立，可见 C 才是关键。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">10. 为什么说"$\pi(a|s,\theta)$ 对 $\theta$ 可微"是策略梯度方法的命门？</p>
+      <ol class="mcq-options">
+        <li>因为不可微的策略无法从分布里采样出动作</li>
+        <li>因为求梯度会带出含 $\nabla_\theta\pi$ 的那一项</li>
+        <li>因为可微能保证策略收敛到全局最优解</li>
+        <li>因为只有可微策略才能表示确定性选择</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$J(\theta)$ 里含 $\pi(a|s,\theta)$，对它求梯度就会带出
+          $\nabla_\theta\pi(a|s,\theta)$。若这一项不存在或恒为零，就没有可用的更新方向。</p>
+        <p>A 错在采样只需要能算出概率，不需要可微。
+          C 错在策略梯度一般只保证收敛到局部最优，可微并非全局最优的充分条件。
+          D 错在确定性策略反而不是"可微的随机策略"的直接产物，需要单独的定理（第 0031 课）。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 9 章 9.1–9.2 节。本课的两种度量、softmax 与高斯策略的参数化口径与之一致。</p>
+      <p>想对照另一套讲法，可读 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em>
+        (2nd ed.) 第 13.1–13.2 节，那里用 $d^\pi(s)$ 记号讨论状态分布。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 softmax 策略的梯度对我这个具体任务算一遍"，
+      或者 "为什么持续运行任务用 $\gamma<1$ 反而不合适？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

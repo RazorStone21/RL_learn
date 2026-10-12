@@ -1,0 +1,218 @@
+{
+ "A01": {
+  "code_ex": 2,
+  "data_answer": "1,0,2,3,1",
+  "eq_num": 2,
+  "mcq": 5,
+  "title": "强化学习到底是什么",
+  "x_python": 6
+ },
+ "A02": {
+  "code_ex": 2,
+  "data_answer": "2,0,3,1,2",
+  "eq_num": 6,
+  "mcq": 5,
+  "title": "多臂老虎机：探索与利用",
+  "x_python": 6
+ },
+ "A03": {
+  "code_ex": 2,
+  "data_answer": "1,3,2,0,2",
+  "eq_num": 4,
+  "mcq": 5,
+  "title": "马尔可夫决策过程",
+  "x_python": 6
+ },
+ "A04": {
+  "code_ex": 2,
+  "data_answer": "3,1,0,2,1",
+  "eq_num": 8,
+  "mcq": 5,
+  "title": "价值函数与贝尔曼方程",
+  "x_python": 6
+ },
+ "A05": {
+  "code_ex": 2,
+  "data_answer": "2,0,3,1,0",
+  "eq_num": 5,
+  "mcq": 5,
+  "title": "动态规划：策略迭代与价值迭代",
+  "x_python": 6
+ },
+ "A06": {
+  "code_ex": 2,
+  "data_answer": "1,2,1,3,0",
+  "eq_num": 1,
+  "mcq": 5,
+  "title": "把你的工作问题建模成 MDP",
+  "x_python": 6
+ },
+ "A07": {
+  "code_ex": 2,
+  "data_answer": "0,2,3,1,2",
+  "eq_num": 2,
+  "mcq": 5,
+  "title": "蒙特卡洛方法",
+  "x_python": 6
+ },
+ "A08": {
+  "code_ex": 2,
+  "data_answer": "2,0,3,1,2",
+  "eq_num": 2,
+  "mcq": 5,
+  "title": "时序差分 TD(0)",
+  "x_python": 6
+ },
+ "A09": {
+  "code_ex": 2,
+  "data_answer": "0,2,1,3,0",
+  "eq_num": 1,
+  "mcq": 5,
+  "title": "SARSA：on-policy 控制",
+  "x_python": 6
+ },
+ "A10": {
+  "code_ex": 2,
+  "data_answer": "1,0,1,2,3",
+  "eq_num": 2,
+  "mcq": 5,
+  "title": "Q-Learning：off-policy 控制",
+  "x_python": 6
+ },
+ "A11": {
+  "code_ex": 2,
+  "data_answer": "0,2,3,1,2",
+  "eq_num": 5,
+  "mcq": 5,
+  "title": "n-step 回报与 TD(λ)",
+  "x_python": 6
+ },
+ "A12": {
+  "code_ex": 2,
+  "data_answer": "0,1,2,3,1",
+  "eq_num": 3,
+  "mcq": 5,
+  "title": "函数逼近与致命三元组",
+  "x_python": 6
+ },
+ "A13": {
+  "code_ex": 2,
+  "data_answer": "0,3,1,2,0",
+  "eq_num": 1,
+  "mcq": 5,
+  "title": "DQN：经验回放与目标网络",
+  "x_python": 6
+ },
+ "A14": {
+  "code_ex": 2,
+  "data_answer": "0,1,3,2,0",
+  "eq_num": 3,
+  "mcq": 5,
+  "title": "Double DQN 与 Dueling DQN",
+  "x_python": 6
+ },
+ "A15": {
+  "code_ex": 2,
+  "data_answer": "2,0,3,1,0",
+  "eq_num": 3,
+  "mcq": 5,
+  "title": "优先经验回放 PER",
+  "x_python": 6
+ },
+ "A16": {
+  "code_ex": 2,
+  "data_answer": "3,0,2,1,3",
+  "eq_num": 4,
+  "mcq": 5,
+  "title": "Rainbow 与分布式 RL",
+  "x_python": 6
+ },
+ "A17": {
+  "code_ex": 2,
+  "data_answer": "1,3,0,2,1",
+  "eq_num": 4,
+  "mcq": 5,
+  "title": "策略梯度与 REINFORCE",
+  "x_python": 6
+ },
+ "A18": {
+  "code_ex": 2,
+  "data_answer": "1,3,0,2,0",
+  "eq_num": 4,
+  "mcq": 5,
+  "title": "A2C 与 A3C：Actor-Critic",
+  "x_python": 6
+ },
+ "A19": {
+  "code_ex": 2,
+  "data_answer": "1,0,2,1,3",
+  "eq_num": 4,
+  "mcq": 5,
+  "title": "优势估计 GAE 与 TRPO",
+  "x_python": 6
+ },
+ "A20": {
+  "code_ex": 2,
+  "data_answer": "2,0,3,1,2",
+  "eq_num": 3,
+  "mcq": 5,
+  "title": "PPO：裁剪目标与工程实践",
+  "x_python": 6
+ },
+ "A21": {
+  "code_ex": 2,
+  "data_answer": "0,2,3,1,2",
+  "eq_num": 3,
+  "mcq": 5,
+  "title": "DDPG：确定性策略梯度",
+  "x_python": 6
+ },
+ "A22": {
+  "code_ex": 2,
+  "data_answer": "2,0,3,1,2",
+  "eq_num": 2,
+  "mcq": 5,
+  "title": "TD3：双评论家与延迟更新",
+  "x_python": 6
+ },
+ "A23": {
+  "code_ex": 2,
+  "data_answer": "3,1,0,2,1",
+  "eq_num": 5,
+  "mcq": 5,
+  "title": "SAC：最大熵强化学习",
+  "x_python": 6
+ },
+ "A24": {
+  "code_ex": 2,
+  "data_answer": "1,2,0,1,3",
+  "eq_num": 2,
+  "mcq": 5,
+  "title": "基于模型与规划：Dyna、MCTS 与 AlphaZero",
+  "x_python": 6
+ },
+ "A25": {
+  "code_ex": 2,
+  "data_answer": "0,2,1,3,1",
+  "eq_num": 0,
+  "mcq": 5,
+  "title": "离线 RL 与模仿学习",
+  "x_python": 6
+ },
+ "A26": {
+  "code_ex": 2,
+  "data_answer": "1,2,3,0,3",
+  "eq_num": 5,
+  "mcq": 5,
+  "title": "RLHF 与 DPO：大模型对齐",
+  "x_python": 6
+ },
+ "A27": {
+  "code_ex": 2,
+  "data_answer": "1,2,3,0,1",
+  "eq_num": 0,
+  "mcq": 5,
+  "title": "综合实战：为你的工作问题选算法",
+  "x_python": 6
+ }
+}

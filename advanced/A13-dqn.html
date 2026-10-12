@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A13 · DQN：经验回放与目标网络 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A13" data-slug="dqn" data-part="进阶篇 · 第三部分 · 深度价值方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第三部分 · 深度价值方法</p>
+    <h1>DQN：经验回放与目标网络</h1>
+    <p class="lede">到上一课为止，估计一个局面值多少分的那套公式，输入还是靠人手设计的。
+      状态一旦是一张画面或者一段很长的序列，手工设计就顶不住了。
+      这一节讲 DQN（深度 Q 网络）怎么把这一步也交给神经网络，以及它为此必须加上的两件装备。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 DQN 的损失与目标，并说出"只对所选动作算误差"为什么重要</li>
+        <li>能解释经验回放解决的三个问题，以及它为什么要求 off-policy</li>
+        <li>能在训练震荡或发散时，按症状表定位最可能的原因</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>为什么还要一个神经网络</h2>
+    <p><a href="A12-function-approximation.html">0012 课</a>的函数逼近
+      （状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值）可以是线性的、粗编码的，
+      上限却取决于你手写的特征（把原始状态加工成一组数字，供函数使用）。
+      状态是一张画面、一个棋盘、一段用户行为序列时，状态空间（所有可能状态的集合）
+      大得根本列不完，手写特征本身就顶不住了：
+      很难把"画面里有个球正往右上飞"写成几百维向量。</p>
+    <p><span class="term">DQN（Deep Q-Network，深度 Q 网络）</span>的做法很直接：
+      把提特征这一步也交给神经网络。网络输入状态，输出每个离散动作的 Q 值向量，
+      取 argmax（挑出让后面那个式子最大的选择）就是策略
+      （一套"看到什么状态就选什么动作"的规则）。参数 <var>θ</var>（网络参数）
+      从此代替了 0012 课里的 <var>w</var>。</p>
+    <p>但把线性回归直接换成 MLP（multilayer perceptron，多层感知机，
+      也就是好几层神经元堆起来的网络）还不够，这样做几乎一定会发散。
+      DQN 的贡献是让它稳下来的两件工程装备，下一节和后面一节各讲一件。</p>
+  </section>
+
+  <section>
+    <h2>损失函数：只算你选的那个动作</h2>
+    <div class="eq">
+      <span class="eq-body">L(θ) = 𝔼<sub>(s,a,r,s′)∼D</sub>[ ( y − Q(s,a;θ) )² ],&nbsp;&nbsp; y = r + γ max<sub>a′</sub> Q(s′,a′;θ<sup>−</sup>)</span>
+      <span class="eq-num">(13.1)</span>
+    </div>
+    <p>式 (13.1) 里的 <span class="math">𝔼</span> 读作"E"，是期望
+      （同一件事重复很多次之后的平均结果）的记号；它右下角那串
+      <span class="math">(s,a,r,s′)∼D</span> 表示"从缓冲区 D 里随便取一条转移再求平均"。
+      式中 γ 是折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折），
+      r 是即时奖励，<var>θ</var> 是网络参数。
+      目标 y 里只有即时奖励 r 和下一步的估计，而那一长串的总分，
+      也就是回报（从现在起一直到结束，把每一步奖励加起来的总分），是它们一层层拼出来的。
+      这里说的 TD 误差，就是时序差分（不用等到一局结束，
+      用"走一步之后的新估计"来更新"走这一步之前的估计"）误差。</p>
+    <p>式子里那个缓冲区 <var>D</var> 下一节解释。
+      这里有三个最容易写错的地方。</p>
+    <ul>
+      <li>只对所选动作算误差。网络对每个状态输出一整个向量，
+        而损失只取 batch（一批样本，训练时一次处理一小批，而不是一条一条来）
+        里实际采取的那个 <var>a</var>：实现上就是 gather（按动作下标把对应的元素取出来）出
+        <span class="math">Q(s,a;θ)</span> 再算均方误差。对所有动作都算误差，
+        等于逼那些没被选中的动作去逼近一个并不属于它们的数。</li>
+      <li>终止转移的目标就是 r。终止状态没有未来，自举
+        （用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）必须停掉。
+        少了这个判断，回合末尾会把下一回合的价值灌回来，这是最常见的实现 bug。</li>
+      <li>目标里的参数是 θ<sup>−</sup>，不是 θ。它来自下一节要讲的另一份参数，
+        那份参数更新得慢，下一节解释为什么必须分开。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>经验回放：把相关的样本打散</h2>
+    <p>按时间顺序喂样本时，相邻的 <span class="math">(s,a,r,s′)</span> 高度相关，
+      连续两帧画面几乎一样。用这种批做随机梯度下降，梯度噪声严重偏离"样本之间互不相关"这个假设，
+      网络会围着最近这段数据反复调整，学完就忘。
+      更浪费的是：采一条样本、更新一次、就把它丢掉，
+      样本效率（拿到同样多的经验能学多好，效率高就是更省数据）低得离谱。</p>
+    <p>经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用）
+      把最近的 <var>N</var> 条转移存进一个环形缓冲区（写满之后新的一条会盖掉最旧的一条；
+      DQN 原文取 <span class="math">N = 10<sup>6</sup></span>，也就是一百万条），
+      每次更新从里面均匀随机抽一个 mini-batch（一小批样本）。
+      好处有两个：样本之间近似互不相关，梯度噪声更符合那条假设；
+      每条样本被复用很多次，样本效率大幅提高。</p>
+    <p>这里补一句概率的话。"均匀随机抽"的意思是每条被抽中的可能性一样大，
+      这个可能性叫概率（一件事发生的可能性，用"平均一百次里大约发生几次"来理解），
+      每条都是 1/N。这些随机数由计算机按一个起始编号生成，
+      同一个编号必然给出同一串数，这个编号叫随机种子
+      （一个起始编号，同一粒种子必然给出同一串随机数，所以测试才能复现）。</p>
+    <p>代价是：只有 off-policy（边学的那套策略不是产生数据的那套，数据来自另一套旧策略）
+      的算法能用它，因为缓冲区里的数据来自旧策略。
+      这就是 <a href="A10-q-learning.html">0010 课</a>那个"off-policy 到底意味着什么"
+      第一次变现的地方：Q-learning 的更新式不含 <span class="math">a′</span>，
+      拿旧数据训练毫无问题。缓冲区也不能太小，否则样本又会变回相关的。</p>
+  </section>
+
+  <section>
+    <h2>目标网络：别追一个同时在跑的靶子</h2>
+    <p>式 (13.1) 有个尴尬之处：同一个 Q 网络既在被更新的左边，又当右边的目标。
+      每次更新都在动目标，等于追自己的尾巴，这在数学上不是一个稳定的回归问题。</p>
+    <p>目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，避免追着自己跑）
+      <span class="math">θ<sup>−</sup></span> 是 <var>θ</var> 的一份周期性拷贝，
+      原文每 10,000 步硬拷贝一次。实践中也常用软更新
+      （每次只把旧参数往新参数的方向挪一点点，不整体替换），
+      这种做法也叫 Polyak 软更新，让它一点点跟上。
+      损失里的 max 用这份冻结的参数算，于是一段区间内目标不动，
+      回归重新变成一个稳定问题。</p>
+    <p>经验回放加目标网络，就是<a href="A12-function-approximation.html">致命三元组</a>
+      在深度价值方法里的标准解法：前者削弱"分布漂移 + 样本相关"，后者掐断自举的自我循环。</p>
+  </section>
+
+  <section>
+    <h2>ε（探索率）衰减与预处理</h2>
+    <ul>
+      <li><var>ε</var> 是探索率（有多大比例的概率去随便试一个动作），
+        它从 1.0 线性衰减到 0.1，在前 <span class="math">10<sup>6</sup></span>
+        帧内完成，之后固定 0.1。早期需要大量随机动作把缓冲区在不同区域铺开；
+        后期大部分时候都挑当前估计里最好的那个动作（这叫贪心：
+        在当前估计里挑看起来最好的那个），所以要把 ε 降下来。</li>
+      <li>把连续 4 帧堆叠成一个状态（frame stacking，把连着几张画面摞起来当一个状态用）。
+        单帧看不出速度与方向，这违反了"状态必须包含决策所需的全部信息"（0003 课）。
+        单帧也不满足马尔可夫性（下一个状态只看当前状态和动作、与更早的历史无关）。</li>
+      <li>奖励裁剪到 <span class="math">[−1, 1]</span>，
+        让不同的游戏能共用一套学习率（每次更新时往新信息的方向挪多远）。</li>
+      <li>输入归一化到 <span class="math">[0, 1]</span>。输入尺度不统一是训练发散的常见原因。</li>
+      <li>上面这些数字都是超参（需要你自己设定、而不是训练学出来的参数），
+        照原论文的取值起步最稳。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>训练不稳时先查什么</h2>
+    <p>先分清两件事：训练不稳，和收敛（一轮轮算下去，数值不再明显变化，稳定下来了）
+      是两回事。按下面这张表先定位症状，再动手改。</p>
+    <table>
+      <thead><tr><th>症状</th><th>最可能的原因</th></tr></thead>
+      <tbody>
+        <tr><td>Q 值随训练时间持续膨胀</td><td>目标网络没生效、γ 太接近 1、奖励没裁剪</td></tr>
+        <tr><td>loss 剧烈震荡或变成 NaN（not a number，非数）</td><td>学习率太大、输入没归一化、没有梯度裁剪</td></tr>
+        <tr><td>训到一半突然整体崩溃</td><td>回放缓冲区太小、目标网络同步太频繁</td></tr>
+        <tr><td>策略始终接近随机</td><td>ε 没衰减，或缓冲区里几乎全是随机动作</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <p>还有一个没解决的问题：DQN 继承了 Q-learning 的最大化偏差
+        （总是取最大值，估计出来的分数会整体偏高，学习因此带上系统性错误），
+        在某些 Atari 游戏上会把 Q 值抬到好几倍。0014 课的
+        Double DQN 就是修这个的，Dueling 结构改的则是网络输出的分解方式。</p>
+    </div>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. DQN 的损失函数对哪些 Q 值计算 TD（temporal difference，时序差分）误差？</p>
+      <ol class="mcq-options">
+        <li>只对 batch 里实际采取的那个动作对应的那一个 Q 值</li>
+        <li>对网络输出的全部动作 Q 值求平均之后得到的那个值</li>
+        <li>只对当前状态下 Q 值最大的那个动作所对应的那一个值</li>
+        <li>只对目标网络输出的全部动作 Q 值中的最大值计算误差</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：网络对每个状态输出一个向量，但只有一个动作真的被执行了。
+          损失只取 <span class="math">Q(s,a;θ)</span>，其中 <var>a</var> 来自缓冲区里的样本。
+          这也是为什么实现里总要先 gather 再算均方误差。</p>
+        <p>B 是常见的错误写法：它会把没被选中的动作也拉向同一个目标。
+          C 混淆了"选动作"与"算损失"：max 只出现在目标 <var>y</var> 里，
+          和"对哪个 Q 求误差"是两件事。D 描述的是 <var>y</var> 的算法，不是损失的对象。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 经验回放缓冲区主要解决的是哪一组问题？</p>
+      <ol class="mcq-options">
+        <li>它把目标网络的参数周期性冻结，从而消除追逐移动目标</li>
+        <li>它把连续的状态空间离散成有限的格子，让表格法可用</li>
+        <li>它保证缓冲区里的数据一定来自当前正在学习的那个策略</li>
+        <li>它把时间上高度相关的样本打散，并让每条样本被反复复用</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：回放同时修两件事：随机采样让批内样本近似独立，
+          更符合随机梯度下降的 i.i.d. 假设；反复复用让宝贵的交互数据被榨干。
+          前者治训练不稳，后者治样本效率。</p>
+        <p>A 说的是目标网络，是另一件装备。B 与事实相反：回放不做离散化。
+          C 恰好说反了：缓冲区里存的就是旧策略产生的数据，它要求 off-policy 的原因就在这里。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 目标网络 θ<sup>−</sup> 在 DQN 里的作用是什么？</p>
+      <ol class="mcq-options">
+        <li>让损失函数可以同时对所有动作求误差，从而加快收敛速度</li>
+        <li>提供一份更新缓慢的目标参数，让自举的回归目标短期内稳定</li>
+        <li>保存训练过程中最优的那份参数，作为最终交付的模型权重</li>
+        <li>代替经验回放缓冲区，直接用最近采到的样本做在线更新</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：如果目标里也用正在更新的 <var>θ</var>，
+          每次梯度步都在移动回归目标，这不是一个良定义的回归问题。
+          目标网络把 <var>y</var> 里的参数固定一段时间，把问题变回稳定的监督式回归。</p>
+        <p>A 与损失的对象无关，而且它不加快收敛。C 混淆了目标网络与"最优权重快照"，
+          目标网络是一直在缓慢更新的，不是挑最优存档。D 与回放缓冲区是两件独立的装备。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 在 DQN 的目标 y 里，终止转移应当如何处理？</p>
+      <ol class="mcq-options">
+        <li>目标仍要加上下一状态的最大 Q 值，只是把折扣因子取成 0</li>
+        <li>目标取 r 加上下一回合首个状态的最大 Q 值再乘以折扣因子</li>
+        <li>目标取 r 本身，不再加 γ 乘以下一状态的最大 Q 值</li>
+        <li>目标取 r 减去 γ 乘以下一状态的最大 Q 值作为终止惩罚</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：终止状态之后没有未来，自举项必须消失，
+          此时 Bellman 最优方程退化成 <span class="math">y = r</span>。
+          实现上就是一个 <code>(1 - done)</code> 因子或 <code>if done</code> 分支。</p>
+        <p>A 在数学上等价于取 γ=0，但显式写出来更容易掩盖"忘了处理终止"这个 bug，
+          而且它把终止与"折扣为 0"两件事混为一谈。B 会把下一回合的回报灌进本回合的末尾，
+          是最典型的错误。D 的惩罚项没有任何理论依据。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">5. 关于 ε 衰减与状态预处理，下列哪一项符合 DQN 的实践？</p>
+      <ol class="mcq-options">
+        <li>ε 从 1 线性衰减到 0.1，并把最近若干帧堆叠成一个状态</li>
+        <li>ε 固定为 0，并把画面里的每一帧单独作为一个状态输入</li>
+        <li>ε 从 0.1 线性增长到 1，并且只使用最近的那一帧作为状态</li>
+        <li>ε 始终保持为 1，并把每一步的奖励放大到一个很大的区间</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：早期需要高 <var>ε</var> 把缓冲区在不同区域铺开，
+          后期需要低 <var>ε</var> 让学到的贪心策略被执行，所以从 1 衰减到 0.1 是标准做法。
+          堆叠多帧是为了让状态包含速度信息，单帧不满足马尔可夫性。</p>
+        <p>B 与 C 都取消了探索，缓冲区会迅速退化成只在少数状态上打转。
+          D 保持了纯随机行为，等于从不利用已经学到的价值；
+          放大奖励则正好违反"裁剪奖励以稳定学习"的做法。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0013-code-1">
+            <h3>代码题 1 · 写固定容量的环形回放缓冲区</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>DQN 每走一步得到一条转移 (s, a, r, s′, done)，先存起来，更新时随机抽一批算目标与损失，靠随机性打断样本之间的相关性。回放缓冲区就是这个容器，容量固定，写满后新转移覆盖最旧的一条。训练循环每步调用 <code>push</code> 存一条，每次更新前调用 <code>sample</code> 取一批，<code>len</code> 给出当前条数。请实现 <code>ReplayBuffer(capacity, seed=0)</code> 的 <code>__init__</code>、<code>__len__</code>、<code>push</code>、<code>sample</code>，只许用标准库和 numpy。补一句 numpy：数组是一排（或几排）数字的容器，形状说的是它几行几列，下标从 0 开始数。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>capacity</code>：整数，缓冲区能存的最大条数（测试用 4、32）。</li>
+          <li><code>seed</code>：整数，交给 <code>np.random.default_rng</code> 存成 <code>self.rng</code>；采样只用它。</li>
+          <li><code>s</code>：<code>push</code> 的当前状态标量。</li>
+          <li><code>a</code>：<code>push</code> 的动作标量，测试里是整数下标。</li>
+          <li><code>r</code>：<code>push</code> 的即时奖励标量。</li>
+          <li><code>s_next</code>：<code>push</code> 的下一状态标量。</li>
+          <li><code>done</code>：<code>push</code> 的布尔标量，<code>True</code> 表示这条在 <code>s_next</code> 终止。</li>
+          <li><code>batch_size</code>：<code>sample</code> 的整数，一批抽多少条。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>__init__</code>：无返回值，只建好空缓冲区。</li>
+          <li><code>__len__</code>：返回 Python <code>int</code>，当前条数，从 0 起，到 <code>capacity</code> 为止不再增加。</li>
+          <li><code>push</code>：无返回值，原地写入一条转移，满了覆盖最旧的一条。</li>
+          <li><code>sample</code>：有放回均匀抽 <code>batch_size</code> 条，返回五元组 <code>(states, actions, rewards, next_states, dones)</code>，五个 numpy 数组长度都等于 <code>batch_size</code>；<code>states</code>、<code>rewards</code>、<code>next_states</code> 是 float，<code>actions</code> 是整数，<code>dones</code> 是 bool。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>空缓冲区长度为 0；容量 4 写进 6 条后长度保持 4、只留最后 4 条；<code>sample(200)</code> 的五个数组长度都是 200，dtype 分别是浮点、整数、布尔；五个数组同一下标必须来自同一条转移（用 <code>a = s % 3</code>、<code>r = s * 10.0</code>、<code>s_next = s + 1</code>、<code>done = (s % 2 == 0)</code> 核对）；容量 32 抽 500 条要覆盖到至少 25 条。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>用一个 <code>self.pos</code> 记录下一个写入位置，写入后
+            <code>self.pos = (self.pos + 1) % capacity</code>。
+            <code>%</code> 是取余数，位置走到末尾会绕回 0，这就是环形缓冲区。</li>
+          <li>容量固定，所以直接预分配五个数组最省事：<code>np.zeros(capacity)</code> 造一串全是 0 的数，
+            <code>np.zeros(capacity, dtype=np.int64)</code> 造整数数组，
+            <code>np.zeros(capacity, dtype=bool)</code> 造真/假数组。
+            再用 <code>self.size</code> 记住当前实际存了几条。</li>
+          <li><code>__len__</code> 直接返回 <code>self.size</code>；<code>push</code> 把五个值分别写进
+            <code>self.states[self.pos]</code> 这些位置，再移动 <code>self.pos</code>、更新 <code>self.size</code>。</li>
+          <li>采样用 <code>idx = self.rng.integers(0, len(self), size=batch_size)</code>。
+            它返回长度 <code>batch_size</code> 的整数数组，每个数在 <code>0</code> 到
+            <code>len(self)-1</code> 之间（右端取不到），而且是有放回地抽。</li>
+          <li>最后用同一组 <code>idx</code> 去索引五个数组并一起返回：
+            <code>self.states[idx], self.actions[idx], ...</code>。
+            同一组下标才能保证五个值来自同一条转移，配对不会乱。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+class ReplayBuffer:
+    def __init__(self, capacity, seed=0):
+        self.capacity = int(capacity)
+        self.rng = np.random.default_rng(seed)
+
+    def __len__(self):
+        # TODO: 返回当前已存的转移条数（不超过 capacity）
+        return 0
+
+    def push(self, s, a, r, s_next, done):
+        # TODO: 存一条转移；满了就覆盖最旧的一条
+        pass
+
+    def sample(self, batch_size):
+        # TODO: 有放回地均匀采样，返回 (states, actions, rewards, next_states, dones)
+        z = np.zeros(batch_size)
+        return z, z.astype(np.int64), z, z, z.astype(bool)
+</script>
+
+      <script type="text/x-python" data-role="tests">
+buf = ReplayBuffer(capacity=4, seed=0)
+check(len(buf) == 0, f"空缓冲区的长度应为 0，实际 {len(buf)}")
+for s in range(6):
+    buf.push(s, s % 3, float(s) * 10.0, s + 1, s % 2 == 0)
+check(len(buf) == 4, f"容量 4 装满后 len 必须保持 4，实际 {len(buf)}")
+
+S, A, R, NS, D = buf.sample(200)
+check(len(S) == 200 and len(A) == 200 and len(R) == 200 and len(NS) == 200 and len(D) == 200,
+      f"sample 返回的五个数组长度都应等于 batch_size，实际 {[len(x) for x in (S, A, R, NS, D)]}")
+check(np.issubdtype(np.asarray(S).dtype, np.floating), "states 应当是浮点数组")
+check(np.issubdtype(np.asarray(A).dtype, np.integer), "actions 应当是整数数组")
+check(np.asarray(D).dtype == np.bool_, "dones 应当是布尔数组")
+
+kept = sorted(set(np.asarray(S).tolist()))
+check(set(kept) <= {2.0, 3.0, 4.0, 5.0},
+      f"循环缓冲区只应保留最近 4 条转移（状态 2,3,4,5），实际采到 {kept}")
+check(len(kept) >= 3, f"均匀采样应当在多条转移之间散开，实际只覆盖 {kept} 条")
+
+S_i = np.asarray(S).astype(int)
+check(np.all(np.asarray(A) == S_i % 3), "(s, a) 必须来自同一条转移，不能各自独立随机取")
+check(np.allclose(np.asarray(R), np.asarray(S) * 10.0), "(s, r) 必须来自同一条转移")
+check(np.allclose(np.asarray(NS), np.asarray(S) + 1.0), "(s, s') 必须来自同一条转移")
+check(np.array_equal(np.asarray(D), S_i % 2 == 0), "(s, done) 必须来自同一条转移")
+
+buf2 = ReplayBuffer(capacity=32, seed=1)
+for s in range(32):
+    buf2.push(s, 0, 0.0, 0.0, False)
+S2, _, _, _, _ = buf2.sample(500)
+cover = len(set(np.asarray(S2).tolist()))
+check(cover >= 25, f"容量 32 时抽 500 条应覆盖大部分条目，实际只覆盖 {cover} 条")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+class ReplayBuffer:
+    def __init__(self, capacity, seed=0):
+        self.capacity = int(capacity)
+        self.rng = np.random.default_rng(seed)
+        self.states = np.zeros(self.capacity)
+        self.actions = np.zeros(self.capacity, dtype=np.int64)
+        self.rewards = np.zeros(self.capacity)
+        self.next_states = np.zeros(self.capacity)
+        self.dones = np.zeros(self.capacity, dtype=bool)
+        self.pos = 0
+        self.size = 0
+
+    def __len__(self):
+        return self.size
+
+    def push(self, s, a, r, s_next, done):
+        self.states[self.pos] = s
+        self.actions[self.pos] = a
+        self.rewards[self.pos] = r
+        self.next_states[self.pos] = s_next
+        self.dones[self.pos] = done
+        self.pos = (self.pos + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+
+    def sample(self, batch_size):
+        idx = self.rng.integers(0, self.size, size=int(batch_size))
+        return (self.states[idx], self.actions[idx], self.rewards[idx],
+                self.next_states[idx], self.dones[idx])
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0013-code-2">
+            <h3>代码题 2 · 用 numpy 手写 DQN 目标与损失</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>DQN 的一次梯度更新分三步：用目标网络算下一状态的 <code>Q(s′,·)</code> 并折算成 TD 目标 <code>y</code>，再用在线网络对所选动作的输出与 <code>y</code> 算损失并反传。这两个函数承担后两步，由手写训练循环调用。终止样本的目标只能等于即时奖励。请实现 <code>dqn_targets(rewards, dones, next_q_values, gamma)</code> 与 <code>dqn_loss(q_values, actions, targets)</code>，都不修改输入，只许用 numpy。补一句 numpy：<code>axis=1</code> 表示"沿每一行做运算"，对二维数组取最大值时会得到每一行的最大值。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：形状 <code>(B,)</code> 的 float 数组，即时奖励。</li>
+          <li><code>dones</code>：形状 <code>(B,)</code> 的 bool 数组，<code>True</code> 表示该条在 <code>s′</code> 终止。</li>
+          <li><code>next_q_values</code>：形状 <code>(B, n_actions)</code> 的 float 数组，目标网络在 <code>s′</code> 上给出的 Q 值。</li>
+          <li><code>gamma</code>：float，折扣因子 γ。</li>
+          <li><code>q_values</code>：形状 <code>(B, n_actions)</code> 的 float 数组，在线网络对当前状态的输出。</li>
+          <li><code>actions</code>：形状 <code>(B,)</code> 的整数数组，已执行的动作下标。</li>
+          <li><code>targets</code>：形状 <code>(B,)</code> 的 float 数组，目标 <code>y</code>。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>dqn_targets</code> 返回 <code>np.ndarray</code>，形状 <code>(B,)</code> 的 float：第 <code>i</code> 个元素是 <span class="math">y<sub>i</sub> = r<sub>i</sub> + (1 − done<sub>i</sub>) γ max<sub>a′</sub> Q<sub>target</sub>(s′<sub>i</sub>, a′)</span>。</li>
+          <li><code>dqn_loss</code> 返回二元组 <code>(loss, grad)</code>。<code>loss</code> 是 Python <code>float</code>，所选动作 <code>Q[s<sub>i</sub>, a<sub>i</sub>]</code> 与 <code>y<sub>i</sub></code> 的均方误差；<code>grad</code> 是 <code>np.ndarray</code>，形状 <code>(B, n_actions)</code>，只有 <code>(i, a<sub>i</sub>)</code> 位置非零，值为 <span class="math">2(Q[s<sub>i</sub>,a<sub>i</sub>] − y<sub>i</sub>) / B</span>。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>dones</code> 为真时即使 <code>Q(s′,·)</code> 全是 1e6，目标也只等于 <code>r</code>；非终止样本按最大值自举（如 0.9×max(2,5) = 4.5）；<code>dqn_loss</code> 只统计被选中的动作，Q 全为 9 而只选动作 0 时算 (1−3)² = 4；所选 Q 正好等于目标时 <code>loss</code> 为 0 且 <code>grad</code> 全零；未被选中的位置梯度严格为 0。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>目标里"终止不自举"可以用 <code>(~dones)</code> 乘在自举项上，一行搞定。
+            <code>~</code> 是布尔取反：<code>True</code> 变 <code>False</code>、<code>False</code> 变 <code>True</code>。</li>
+          <li>先取下一状态每一行的最大值：<code>np.max(next_q_values, axis=1)</code>。
+            <code>axis=1</code> 表示沿每一行压下去，返回形状 <code>(B,)</code> 的一维数组。</li>
+          <li>再拼目标：<code>rewards + gamma * bootstrap * (~dones)</code>。
+            形状相同的数组逐项相乘；一个数乘一个数组时，numpy 会把这个数用到每个元素上。</li>
+          <li>取所选动作用花式索引 <code>q_values[np.arange(B), actions]</code>：
+            <code>np.arange(B)</code> 返回 0 到 B−1 的一串整数，
+            和 <code>actions</code> 配起来，就取出了每一行里被选中的那一个值。</li>
+          <li>均方误差对所选值的导数是 <code>2 * diff / B</code>，别漏掉除以 <code>B</code>。
+            把梯度写回去也用同一种花式索引：<code>grad[np.arange(B), actions] = 2.0 * diff / B</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def dqn_targets(rewards, dones, next_q_values, gamma):
+    # TODO: y = r + (1-done) * gamma * max_a' Q_target(s', a')
+    return np.zeros(len(rewards))
+
+
+def dqn_loss(q_values, actions, targets):
+    # TODO: 只对所选动作求 MSE，并返回它对 q_values 的梯度
+    B = len(actions)
+    return 0.0, np.zeros_like(np.asarray(q_values, dtype=float))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+r = np.array([1.0, 0.0, -1.0])
+done = np.array([True, False, False])
+nq = np.array([[100.0, 100.0], [2.0, 5.0], [3.0, -4.0]])
+y = dqn_targets(r, done, nq, 0.9)
+check(abs(y[0] - 1.0) < 1e-12,
+      f"终止转移的目标只有 r：即使 Q(s',·) 全是 100 也不能自举，实际 {y[0]:.4f}")
+check(abs(y[1] - 4.5) < 1e-12,
+      f"非终止目标 = 0 + 0.9*max(2,5) = 4.5，实际 {y[1]:.4f}")
+check(abs(y[2] - 1.7) < 1e-12,
+      f"非终止目标 = -1 + 0.9*max(3,-4) = -1 + 2.7 = 1.7，实际 {y[2]:.4f}")
+
+y2 = dqn_targets(np.array([2.0]), np.array([True]), np.array([[1e6, -1e6]]), 0.99)
+check(abs(y2[0] - 2.0) < 1e-12, "终止转移的目标应当与 Q(s',·) 完全无关")
+
+Q = np.array([[1.0, 2.0], [3.0, 4.0]])
+a = np.array([1, 0])
+tg = np.array([0.0, 1.0])
+loss, grad = dqn_loss(Q, a, tg)
+check(abs(loss - 4.0) < 1e-12,
+      f"只对所选动作求 MSE：((2-0)^2 + (3-1)^2)/2 = 4.0，实际 {loss:.4f}")
+check(abs(grad[0, 1] - 2.0) < 1e-12,
+      f"所选动作的梯度是 2*(Q-y)/B = 2*2/2 = 2.0，实际 {grad[0,1]:.4f}")
+check(abs(grad[0, 0]) < 1e-12 and abs(grad[1, 1]) < 1e-12,
+      f"未被选中的动作不进损失，梯度必须是 0，实际 {grad}")
+check(abs(float(np.sum(grad)) - 4.0) < 1e-12, "两个被选中位置的梯度之和应为 4.0")
+
+l0, g0 = dqn_loss(np.array([[5.0, 1.0]]), np.array([0]), np.array([5.0]))
+check(abs(l0) < 1e-12 and np.allclose(g0, 0.0),
+      "所选动作的 Q 正好等于目标时，损失与梯度都应当是 0")
+
+l1, _ = dqn_loss(np.array([[1.0, 9.0]]), np.array([0]), np.array([3.0]))
+check(abs(l1 - 4.0) < 1e-12,
+      f"只算所选动作：(1-3)^2 = 4；若对所有动作求误差会得到 20，实际 {l1:.4f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def dqn_targets(rewards, dones, next_q_values, gamma):
+    rewards = np.asarray(rewards, dtype=float)
+    dones = np.asarray(dones, dtype=bool)
+    next_q_values = np.asarray(next_q_values, dtype=float)
+    bootstrap = np.max(next_q_values, axis=1)
+    return rewards + gamma * bootstrap * (~dones)
+
+
+def dqn_loss(q_values, actions, targets):
+    q_values = np.asarray(q_values, dtype=float)
+    actions = np.asarray(actions, dtype=int)
+    targets = np.asarray(targets, dtype=float)
+    B = q_values.shape[0]
+    diff = q_values[np.arange(B), actions] - targets
+    loss = float(np.mean(diff ** 2))
+    grad = np.zeros_like(q_values)
+    grad[np.arange(B), actions] = 2.0 * diff / B
+    return loss, grad
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>原始论文：Mnih et al., <em>Human-level control through deep reinforcement learning</em>（Nature 2015），
+        arXiv 版 <a class="cite" href="https://arxiv.org/abs/1312.5602">1312.5602</a>
+        给出式 (13.1) 与回放缓冲区、目标网络的全部超参设置。</p>
+      <p>理论背景读 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 第 9 章与第 11.3 节，
+        它解释了为什么这里的两个技巧是必需的而不只是工程便利。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>想要一份把 DQN 及其全部变体串起来的综述，读 Lilian Weng 的
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">A (Long) Peek into Reinforcement Learning</a>。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "帮我把式 (13.1) 用 numpy 写成完整的训练循环。"
+      或者 "我的 DQN 训到一半 loss 就炸了，按这课的症状表帮我逐条排查。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

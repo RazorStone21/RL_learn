@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0020 · TD 学习状态值：算法、性质与收敛分析 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0020" data-slug="td-state-values" data-part="第二部分 · 算法" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第二部分 · 算法 1</p>
+    <h1>TD 学习状态值：算法、性质与收敛分析</h1>
+    <p class="lede">0015 课要等一整局走完才能更新，0009 课要先知道环境怎么跳。本课两样都不要：
+      走一步，就能把估计往前挪一点。这条更新式叫时序差分（不用等到一局结束，用"走一步之后的新估计"来更新"走这一步之前的估计"），
+      它的英文缩写是 TD（temporal difference）。本课把它推出来，再把它为什么有效讲清楚。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出贝尔曼方程，并把它改写成"求根问题"</li>
+        <li>能证明 Robbins-Monro 的更新式代进这个求根问题就得到 TD 更新式</li>
+        <li>能证明 TD 目标的偏差按折扣因子逐次收缩，而蒙特卡洛目标是零偏差</li>
+        <li>能证明蒙特卡洛回报的方差等于 TD 目标的方差加上一个非负项</li>
+        <li>能说出 TD 收敛的两个条件，并分清哪一条是本课证明的、哪一条是引用 0018 课的</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 贝尔曼方程：价值自己满足一个等式</h2>
+    <p>0015 课用整局回报（从现在起一直到结束，把每一步奖励加起来的总分）来估价值。0009 课用转移概率（这个跳转不是百分之百确定，只是一组可能性）算价值。两条路都从贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）出发。</p>
+    <div class="def">
+      <span class="label">定义 1.1（要估的那个量）</span>
+      <p>策略（一套"看到什么状态就选什么动作"的规则）$\pi$ 下，状态价值（只看状态、不管具体选哪个动作的那个价值）
+        $v_\pi(s)$ 定义为式 (20.1)。式中 $G_t$ 是从第 $t$ 步起的回报，$\gamma$ 是折扣因子（越往后的奖励，算进总分时权重越小），$0\le\gamma\lt1$；$\E_\pi$ 表示对动作与下一个状态求平均。</p>
+      <div class="eq">
+        <span class="eq-body">$$v_\pi(s)=\E_\pi[G_t\mid S_t=s].$$</span>
+        <span class="eq-num">(20.1)</span>
+      </div>
+    </div>
+    <div class="rem">
+      <span class="label">注记 1.2（大写与小写）</span>
+      <p>大写 $R_{t+1}$ 是随机变量，小写 $r_{t+1}$ 是这一次取到的具体数值；TD 更新式里的 $r_{t+1}$ 是环境当场给的数。</p>
+    </div>
+    <div class="thm">
+      <span class="label">引理 1.3（贝尔曼方程）</span>
+      <p>对策略 $\pi$ 与每个状态 $s$，有式 (20.2)。</p>
+      <div class="eq">
+        <span class="eq-body">$$v_\pi(s)=\E_\pi\big[R_{t+1}+\gamma v_\pi(S_{t+1})\mid S_t=s\big].$$</span>
+        <span class="eq-num">(20.2)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>按 (20.1)，$v_\pi(s)=\E_\pi[G_t\mid S_t=s]$。把回报第一项拆出来：$G_t=R_{t+1}+\gamma G_{t+1}$，由期望的线性性得 $v_\pi(s)=\E_\pi[R_{t+1}\mid S_t=s]+\gamma\E_\pi[G_{t+1}\mid S_t=s]$。</p>
+      <p>第二项用全期望公式：
+        $\E_\pi[G_{t+1}\mid S_t=s]=\E_\pi\big[\E_\pi[G_{t+1}\mid S_{t+1}]\mid S_t=s\big]
+        =\E_\pi\big[v_\pi(S_{t+1})\mid S_t=s\big]$。</p>
+      <p>中间一步用到马尔可夫性（下一个状态只取决于当前状态和动作，与更早的历史无关）。两项合起来即得 (20.2)。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 把贝尔曼方程改成求根问题</h2>
+    <p>把 $v_\pi(s)$ 看成待求的未知数 $w$。0017 课的 Robbins-Monro 算法解 $g(w)=0$ 这类问题：
+      每拿到一次带噪观测，就把 $w$ 往根的方向挪一小步。先要把贝尔曼方程摆成这个形状。</p>
+    <div class="def">
+      <span class="label">定义 2.1（每个状态一个求根问题）</span>
+      <p>对每个状态 $s$，定义式 (20.3)，然后求 $g_s(w)=0$ 的根。</p>
+      <div class="eq">
+        <span class="eq-body">$$g_s(w)=w-\E_\pi\big[R_{t+1}+\gamma v_\pi(S_{t+1})\mid S_t=s\big].$$</span>
+        <span class="eq-num">(20.3)</span>
+      </div>
+    </div>
+    <div class="thm">
+      <span class="label">命题 2.2（根就是状态值）</span>
+      <p>$g_s$ 有且只有一个根，就是 $v_\pi(s)$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>存在性：由 (20.2)，取 $w=v_\pi(s)$ 时 (20.3) 的期望项等于 $v_\pi(s)$，故 $g_s(v_\pi(s))=0$。</p>
+      <p>唯一性：期望项不含 $w$，记它为 $c$，则 $g_s(w)=w-c$ 严格递增，方程 $g_s(w)=0$ 至多一个解。</p>
+      <span class="qed">∎</span>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 240" role="img" aria-label="把状态值问题画成求根问题：直线 g(w) 与横轴的交点就是状态值，迭代点从左边一步步靠近它">
+        <line x1="70" y1="160" x2="480" y2="160" class="axis-b"/>
+        <line x1="70" y1="30" x2="70" y2="200" class="axis-b"/>
+        <text x="486" y="165" class="val-b">w</text>
+        <text x="36" y="30" class="val-b">g(w)</text>
+        <line x1="100" y1="200" x2="420" y2="52" class="curve"/>
+        <line x1="224" y1="52" x2="224" y2="160" class="mark"/>
+        <circle cx="224" cy="160" r="4.5" class="dot-a"/>
+        <text x="232" y="182" class="val-b">根 w* = v(s)</text>
+        <circle cx="120" cy="160" r="4" class="dot"/>
+        <circle cx="168" cy="160" r="4" class="dot"/>
+        <circle cx="200" cy="160" r="4" class="dot"/>
+        <circle cx="214" cy="160" r="4" class="dot"/>
+        <line x1="120" y1="212" x2="208" y2="212" class="arrow-a"/>
+        <path d="M208 208 l10 4 l-10 4" class="arrow-a"/>
+        <text x="96" y="232" class="lbl">迭代点一步步挪向根</text>
+        <text x="252" y="80" class="lbl">根左边为负，右边为正</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 20.1</span>
+        横轴是待求的数 w，纵轴是 g(w)。求 v(s) 就是求这条直线与横轴的交点。交点左边 g 为负，减去负数 w 就往右挪，挪到交点停下。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">注记 2.3（为什么值得专门写成求根）</span>
+      <p>写成 $g_s(w)=w-c$ 之后，$c$ 长什么样不重要，重要的是残差等于"估计减目标"，它就是 TD 误差的雏形。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 2.4（代入 Robbins-Monro 得到 TD）</span>
+      <p>把 (20.3) 交给 0017 课的 Robbins-Monro，每一步用采样到的 $r_{t+1}$ 与 $s_{t+1}$ 代替期望，得 $v_{t+1}(s_t)=v_t(s_t)+\alpha_t(s_t)[r_{t+1}+\gamma v_\pi(s_{t+1})-v_t(s_t)]$；再把真值换成估计 $v_t(s_{t+1})$，就是 TD 更新式。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>Robbins-Monro 每步写作 $w_{k+1}=w_k-\alpha_k\tilde g$，$\tilde g$ 是 $g$ 的一次带噪观测。用采样值代替期望 $c$ 得 $\tilde g=w-(r_{t+1}+\gamma v_\pi(s_{t+1}))$，代入得 $w_{k+1}=w_k+\alpha_k[r_{t+1}+\gamma v_\pi(s_{t+1})-w_k]$。取 $w_k=v_t(s_t)$ 即得。</p>
+      <p>最后一步替换是必要的：真值未知，手里只有 $v_t(s_{t+1})$，这个替换带来偏差，§5 给出定量说法。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="rem">
+      <span class="label">注记 2.5（这一步与 0017、0018 课的分工）</span>
+      <p>$\tilde g$ 等于 $g_s(w)$ 加上一个条件期望为零的噪声项 $c-(r_{t+1}+\gamma v_\pi(s_{t+1}))$，就是引用 Dvoretzky 定理（0018 课）所需的形状。0017 课管求根怎么解，0018 课管带噪序列什么时候收敛（一轮轮算下去，数值不再明显变化，稳定下来了）。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. TD 更新式与 TD 误差</h2>
+    <div class="def">
+      <span class="label">定义 3.1（表格型 TD 更新）</span>
+      <p>维护一张表 $v(s)$。走一步得到 $s_t$、$r_{t+1}$、$s_{t+1}$ 后，只改被访问的那一个状态，见式 (20.4)，其余不变。式中学习率（每次更新时，往新信息的方向挪多远）$\alpha_t(s_t)\in(0,1]$。</p>
+      <div class="eq">
+        <span class="eq-body">$$v_{t+1}(s_t)=v_t(s_t)+\alpha_t(s_t)\big[r_{t+1}+\gamma v_t(s_{t+1})-v_t(s_t)\big].$$</span>
+        <span class="eq-num">(20.4)</span>
+      </div>
+    </div>
+    <div class="def">
+      <span class="label">定义 3.2（TD 误差）</span>
+      <p>把 (20.4) 中括号里的量记作 $\delta_t$，见式 (20.5)。前两项叫 TD 目标，$\delta_t$ 叫 TD 误差，也叫时序差分误差：差多少，就按学习率往目标那边挪多少。</p>
+      <div class="eq">
+        <span class="eq-body">$$\delta_t=r_{t+1}+\gamma v_t(s_{t+1})-v_t(s_t).$$</span>
+        <span class="eq-num">(20.5)</span>
+      </div>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 250" role="img" aria-label="TD 更新的信息流：当前估计与目标相减得到 TD 误差，再按学习率把估计往目标挪">
+        <rect x="40" y="34" width="110" height="40" rx="4" class="box"/>
+        <text x="66" y="59" class="val">v(s)</text>
+        <rect x="370" y="34" width="110" height="40" rx="4" class="box"/>
+        <text x="392" y="59" class="val">v(s′)</text>
+        <rect x="250" y="110" width="240" height="42" rx="4" class="box-a"/>
+        <text x="262" y="136" class="val">目标 = r + γv(s′)</text>
+        <rect x="250" y="186" width="240" height="42" rx="4" class="box-a"/>
+        <text x="262" y="212" class="val">δ = 目标 − v(s)</text>
+        <rect x="30" y="186" width="180" height="42" rx="4" class="box"/>
+        <text x="42" y="212" class="val">v(s) ← v(s) + αδ</text>
+        <line x1="425" y1="74" x2="425" y2="104" class="arrow"/>
+        <path d="M421 96 l4 9 l4 -9" class="arrow"/>
+        <text x="432" y="96" class="lbl">采样</text>
+        <path d="M150 54 H200 V124 H244" class="arrow"/>
+        <path d="M236 120 l9 4 l-9 4" class="arrow"/>
+        <line x1="340" y1="152" x2="340" y2="180" class="arrow"/>
+        <path d="M336 172 l4 9 l4 -9" class="arrow"/>
+        <text x="248" y="172" class="lbl">目标减估计</text>
+        <line x1="250" y1="207" x2="216" y2="207" class="arrow-a"/>
+        <path d="M224 203 l-9 4 l9 4" class="arrow-a"/>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 20.2</span>
+        TD 更新的原料：当前与下一个状态的估计、这一步的真实奖励、学习率。目标里带着下一个状态的估计，用估计算目标、再用目标改估计，这叫自举。</figcaption>
+    </figure>
+
+    <div class="rem">
+      <span class="label">算法 3.3（表格型 TD 学习状态值，一轮）</span>
+      <ol>
+        <li>初始化 $v(s)$（比如全取 0），选学习率 $\alpha\in(0,1]$。</li>
+        <li>按策略 $\pi$ 选动作，得到 $r_{t+1}$ 与 $s_{t+1}$。</li>
+        <li>按 (20.5) 算 TD 误差 $\delta_t$。</li>
+        <li>按 (20.4) 更新 $v(s_t)$。</li>
+        <li>令 $t\leftarrow t+1$，回到第 2 步。</li>
+      </ol>
+      <p>这套做法叫策略评估（给定一套策略，算出它到底值多少分）。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 3.4（手算两步）</span>
+      <p>取 $\gamma=0.9$、$\alpha=0.1$，$v(A)=0.5$、$v(B)=0.8$，终止状态的价值为 0。</p>
+      <p>第一步：在 $A$ 走到 $B$，$r=1$，$\delta=1+0.9\times0.8-0.5=1.22$，故 $v(A)\leftarrow0.5+0.1\times1.22=0.622$，$v(B)$ 不动。</p>
+      <p>第二步：在 $B$ 走到终止状态，$r=2$，$\delta=2-0.8=1.2$，故 $v(B)\leftarrow0.8+0.1\times1.2=0.92$。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 性质一：TD 不需要模型</h2>
+    <p>DP（dynamic programming，动态规划）要用 $v_{k+1}(s)=\sum_a\pi(a\mid s)\sum_{s'}p(s'\mid s,a)[r(s,a)+\gamma v_k(s')]$，右边的量都来自环境，缺了就算不出来。蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）改用采样，但要等回合结束。TD 把 DP 的求和换成一个样本，把蒙特卡洛的整局总分换成"一步真实奖励加剩下的估计"。</p>
+    <table>
+      <thead><tr><th>算法</th><th>目标里用到的信息</th><th>需要模型吗</th><th>需要完整回合吗</th><th>是否自举</th></tr></thead>
+      <tbody>
+        <tr><td>DP</td><td>下一状态的转移概率</td><td>需要</td><td>不需要</td><td>是</td></tr>
+        <tr><td>蒙特卡洛</td><td>一整局的真实奖励</td><td>不需要</td><td>需要</td><td>否</td></tr>
+        <tr><td>TD</td><td>一步奖励与下一状态的估计</td><td>不需要</td><td>不需要</td><td>是</td></tr>
+      </tbody>
+    </table>
+    <div class="rem">
+      <span class="label">注记 4.1（自举与偏差）</span>
+      <p>自举（用自己当前的估计去更新自己当前的估计）让 TD 拿到一步经验就更新，代价是目标混进了 $v_t(s_{t+1})$ 的误差，所以有偏；蒙特卡洛用整局真实奖励，无偏但必须等回合走完。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 240" role="img" aria-label="备份深度对比：TD 只往前看一步，后面的用估计补；蒙特卡洛一路看到回合结束">
+        <text x="26" y="24" class="val-b">TD：只借一步</text>
+        <line x1="60" y1="66" x2="500" y2="66" class="axis-b"/>
+        <circle cx="90" cy="66" r="6" class="dot-a"/><text x="74" y="46" class="val">s(t)</text>
+        <circle cx="190" cy="66" r="6" class="dot-a"/><text x="172" y="46" class="val">s(t+1)</text>
+        <circle cx="300" cy="66" r="5" class="dot"/><text x="288" y="46" class="lbl">s(t+2)</text>
+        <circle cx="440" cy="66" r="5" class="dot"/><text x="420" y="46" class="lbl">回合末尾</text>
+        <line x1="196" y1="66" x2="294" y2="66" class="curve2"/>
+        <line x1="306" y1="66" x2="434" y2="66" class="curve2"/>
+        <path d="M90 88 H190" class="arrow-a"/>
+        <path d="M182 84 l9 4 l-9 4" class="arrow-a"/>
+        <text x="86" y="108" class="lbl">真实奖励 r 加折现的 v(s(t+1))</text>
+        <text x="26" y="146" class="val-b">蒙特卡洛：看到回合结束</text>
+        <line x1="60" y1="186" x2="500" y2="186" class="axis-b"/>
+        <circle cx="90" cy="186" r="6" class="dot-a"/>
+        <circle cx="190" cy="186" r="6" class="dot-a"/>
+        <circle cx="300" cy="186" r="6" class="dot-a"/>
+        <circle cx="440" cy="186" r="6" class="dot-a"/><text x="420" y="212" class="lbl">终止</text>
+        <path d="M90 210 H430" class="arrow-a"/>
+        <path d="M422 206 l9 4 l-9 4" class="arrow-a"/>
+        <text x="96" y="232" class="lbl">每段真实奖励折现后全部加起来</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 20.3</span>
+        估计 s(t) 的价值时，两条路的备份深度不同：TD 只把价值往回传一步，再远的部分用估计顶上；蒙特卡洛把整局的真实奖励都传回来。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. 性质二：偏差与方差</h2>
+    <p>偏差（估计值总是偏向一边、偏离真值）量平均准不准，方差（同一个做法重复很多次，结果波动有多大）量稳不稳。</p>
+    <div class="thm">
+      <span class="label">命题 5.1（TD 目标的偏差）</span>
+      <p>固定估计 $v_t$，并记 $p(s'\mid s)=\sum_a\pi(a\mid s)p(s'\mid s,a)$。对每个状态 $s$ 有式 (20.6)，于是偏差的绝对值不超过 $\gamma\|v_t-v_\pi\|_\infty$，其中 $\|\cdot\|_\infty$ 取分量绝对值的最大者。</p>
+      <div class="eq">
+        <span class="eq-body">$$\E_\pi\big[R_{t+1}+\gamma v_t(S_{t+1})\mid S_t=s\big]-v_\pi(s)
+        =\gamma\sum_{s'}p(s'\mid s)\big[v_t(s')-v_\pi(s')\big].$$</span>
+        <span class="eq-num">(20.6)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记 $r(s)=\E_\pi[R_{t+1}\mid S_t=s]$。(20.2) 可写成 $v_\pi(s)=r(s)+\gamma\sum_{s'}p(s'\mid s)v_\pi(s')$；把动作按 $\pi$ 平均掉，条件期望同样可写成 $r(s)+\gamma\sum_{s'}p(s'\mid s)v_t(s')$。</p>
+      <p>两式相减，两个 $r(s)$ 是同一个数，消掉后剩下 $\gamma\sum_{s'}p(s'\mid s)[v_t(s')-v_\pi(s')]$，即 (20.6)。取绝对值，把每项放大到最大值 $\|v_t-v_\pi\|_\infty$，再用 $\sum_{s'}p(s'\mid s)=1$，得偏差不超过 $\gamma\|v_t-v_\pi\|_\infty$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">命题 5.2（蒙特卡洛目标没有偏差）</span>
+      <p>$\E_\pi[G_t\mid S_t=s]=v_\pi(s)$，即蒙特卡洛目标的条件期望正好是真值。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>这就是 (20.1) 本身。实际做法是把从 $s$ 出发的多个整局回报取样本平均，由期望的线性性，它的期望仍是 $v_\pi(s)$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">命题 5.3（方差分解）</span>
+      <p>记 $X=R_{t+1}+\gamma v_\pi(S_{t+1})$，条件于 $S_t=s$，则有式 (20.7)。第二项非负，所以用真值当下一步估计时，TD 目标的方差不超过蒙特卡洛回报的方差。</p>
+      <div class="eq">
+        <span class="eq-body">$$\var\big(G_t\mid S_t=s\big)=\var\big(X\mid S_t=s\big)
+        +\gamma^2\E\big[\var(G_{t+1}\mid S_{t+1})\mid S_t=s\big].$$</span>
+        <span class="eq-num">(20.7)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>记 $Y=\gamma(G_{t+1}-v_\pi(S_{t+1}))$，则 $G_t=X+Y$。分三步。</p>
+      <p>(i) $\E[Y\mid S_t=s]=0$：先固定 $S_{t+1}$ 再求平均，由 (20.1) 内层期望为 0。</p>
+      <p>(ii) $\E[X\cdot Y\mid S_t=s]=0$：把 $X$ 提到内层期望外，内层是 (i) 的 0；这一步用到马尔可夫性。</p>
+      <p>(iii) 由 (i) 知 $\E[G_t]=\E[X]$，故 $\var(G_t)=\var(X)+2\E[X\cdot Y]+\E[Y^2]$，交叉项为零。又因内层条件均值为 0，二阶矩等于条件方差，$\E[Y^2\mid S_t=s]=\gamma^2\E[\var(G_{t+1}\mid S_{t+1})\mid S_t=s]$。合并即得 (20.7)。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="eg">
+      <span class="label">例 5.4（两步回合的两种方差）</span>
+      <p>取 $\gamma=0.9$，回合只有两步：$s$ 拿到 $R_{t+1}$ 后确定地去 $s'$，$s'$ 拿到 $R_{t+2}$ 后结束。两个奖励独立，都是"以 $1/2$ 得 0、以 $1/2$ 得 2"，期望 1、方差 1。</p>
+      <p>真值 $v_\pi(s')=1$、$v_\pi(s)=1+0.9=1.9$。蒙特卡洛回报 $G_t=R_{t+1}+0.9R_{t+2}$ 的两项独立，$\var(G_t)=1+0.81=1.81$；TD 目标 $R_{t+1}+0.9v_\pi(s')$ 只有一个随机项，方差 1。相差的 0.81 正好等于 $\gamma^2\var(G_{t+1}\mid S_{t+1}=s')$，与 (20.7) 吻合。</p>
+    </div>
+    <p>两者差别列成一张表，顺便看样本效率（拿到同样多的经验能学多好）。</p>
+    <table>
+      <thead><tr><th>比较项</th><th>TD</th><th>蒙特卡洛</th></tr></thead>
+      <tbody>
+        <tr><td>样本效率</td><td>高：走一步就能更新一次</td><td>低：要等一整局走完</td></tr>
+        <tr><td>偏差</td><td>有偏：目标里带着当前的估计</td><td>无偏：目标是真实总分</td></tr>
+        <tr><td>方差</td><td>小：更新量只涉及一步的随机</td><td>大：累积整局的随机</td></tr>
+        <tr><td>是否需要完整回合</td><td>不需要</td><td>需要</td></tr>
+      </tbody>
+    </table>
+    <figure class="fig">
+      <svg viewBox="0 0 520 220" role="img" aria-label="偏差与方差的示意对比：TD 偏差不为零但方差小，蒙特卡洛偏差为零但方差大">
+        <text x="70" y="24" class="val-b">TD</text>
+        <text x="330" y="24" class="val-b">蒙特卡洛</text>
+        <line x1="60" y1="170" x2="230" y2="170" class="axis-b"/>
+        <line x1="60" y1="40" x2="60" y2="170" class="axis-b"/>
+        <rect x="86" y="130" width="42" height="40" class="bar"/>
+        <rect x="150" y="146" width="42" height="24" class="bar-hi"/>
+        <text x="82" y="188" class="lbl">偏差</text>
+        <text x="146" y="188" class="lbl">方差</text>
+        <line x1="290" y1="170" x2="470" y2="170" class="axis-b"/>
+        <line x1="290" y1="40" x2="290" y2="170" class="axis-b"/>
+        <line x1="320" y1="170" x2="362" y2="170" class="mark"/>
+        <rect x="386" y="58" width="42" height="112" class="bar-hi"/>
+        <text x="312" y="188" class="lbl">偏差为 0</text>
+        <text x="382" y="188" class="lbl">方差</text>
+        <text x="60" y="212" class="lbl">柱高只是示意</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 20.4</span>
+        偏差的柱子在 TD 这边有高度、在蒙特卡洛那边为零，方差的柱子反过来。柱高只是示意，说的是愿意拿偏差换方差，还是反过来。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>6. 收敛性：条件与结论</h2>
+    <div class="thm">
+      <span class="label">定理 6.1（引用：TD 的收敛性）</span>
+      <p>设状态空间（所有可能状态的集合）有限，奖励有界，$\gamma\in[0,1)$。对每个状态 $s$，学习率满足 (20.8)（求和对"第 $t$ 步更新了 $s$"的时刻进行），且每个状态都被访问无穷多次。则 $v_t(s)\to v_\pi(s)$ 几乎必然成立（意思是概率为 1）。</p>
+      <div class="eq">
+        <span class="eq-body">$$\alpha_t(s)\ge0,\qquad\sum_{t}\alpha_t(s)=\infty,\qquad\sum_{t}\alpha_t^2(s)\lt\infty.$$</span>
+        <span class="eq-num">(20.8)</span>
+      </div>
+    </div>
+    <div class="rem">
+      <span class="label">注记 6.2（这是引用，不是本课的证明）</span>
+      <p>本课给出到 (20.4) 为止的完整推导与下面的路线说明，但没有重证 Dvoretzky 定理本身。要套上去需核对三件事。(i) 步长：未访问时取 $\alpha_k=0$，每个状态自己的序列就有 $\sum_k\alpha_k=\infty$ 与 $\sum_k\alpha_k^2\lt\infty$，前者由无穷多次访问保证，后者由 (20.8) 保证。(ii) 条件零均值的噪声：由注记 2.5，带噪观测的期望正好是 $g_s$。(iii) 噪声二阶矩一致有界：若 $|v(s)|\le B$、$|r|\le R_{\max}$ 且 $R_{\max}+\gamma B\le B$，则 $|v_{t+1}(s_t)|\le(1-\alpha)|v_t(s_t)|+\alpha|r_{t+1}+\gamma v_t(s_{t+1})|\le B$，对 $t$ 归纳即得。</p>
+      <p>把 $\Delta_k=v_k-v_\pi$ 写成 $\Delta_{k+1}=(1-\alpha_k)\Delta_k+\alpha_k\eta_k$，核对三条即可。要注意 $(s_t,r_{t+1},s_{t+1})$ 前后相关、噪声并不独立，所以要用 0018 课那条只要求条件均值为零的定理。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 6.3（三种学习率）</span>
+      <p>$\alpha_t=1/t$：$\sum_t1/t$ 发散、$\sum_t1/t^2=\pi^2/6\approx1.645$ 收敛，两条都满足。$\alpha_t=1/t^2$：$\sum_t1/t^2$ 收敛，第一条不成立，总步长有限，可能停在半路。$\alpha_t=0.1$：两个 $\sum$ 都发散，第二条不成立，估计在真值附近来回晃。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 6.4（访问条件的含义）</span>
+      <p>"每个状态被访问无穷多次"管的是数据。TD 每次只改被访问的状态，没被访问的估计只能停在初始值，所以评估时要保证这条路反复经过所有状态。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 230" role="img" aria-label="学习率递减时估计收敛到真值，学习率恒定则在真值附近来回摆动">
+        <line x1="70" y1="40" x2="70" y2="180" class="axis-b"/>
+        <line x1="70" y1="180" x2="490" y2="180" class="axis-b"/>
+        <text x="60" y="34" class="lbl">估计值</text>
+        <text x="450" y="200" class="lbl">更新次数</text>
+        <line x1="70" y1="96" x2="490" y2="96" class="mark"/>
+        <text x="494" y="88" class="val-b">真值</text>
+        <path d="M78 40 L108 132 L130 82 L160 118 L196 92 L238 108 L282 98 L330 102 L380 98 L440 100 L480 99" class="curve"/>
+        <path d="M78 46 L100 140 L122 66 L144 128 L166 74 L188 122 L210 78 L232 118 L254 82 L276 116 L298 84 L322 112 L346 86 L372 110 L398 88 L426 106 L456 90 L480 102" class="curve2"/>
+        <text x="180" y="146" class="lbl">实线：学习率按 1/t 递减</text>
+        <text x="180" y="166" class="lbl">虚线：学习率取常数，来回摆</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 20.5</span>
+        竖轴是估计值，横轴是更新次数，中间横线是真值。学习率按 1/t 递减时抖动收窄，估计稳定到真值；取常数时每步幅度不变，估计在真值附近来回晃。式 (20.8) 的两条与这两条曲线的差别对应。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>贝尔曼方程 (20.2) 对每个状态单独看就是一个一元求根问题，根是 $v_\pi(s)$。</li>
+      <li>把 Robbins-Monro 代进去并用估计顶替真值，得到 (20.4) 与 TD 误差 (20.5)。</li>
+      <li>TD 不要模型、不要完整回合，代价是目标带着估计，所以有偏、方差小；蒙特卡洛无偏、方差大。</li>
+      <li>方差分解 (20.7) 把两者之差写成非负项，这是"偏差换方差"的定量版本。</li>
+      <li>收敛要两条：学习率平方可和且之和发散，每个状态被访问无穷多次；结论引用 0018 课的 Dvoretzky 定理。</li>
+    </ul>
+    <p>下一课把估计对象从状态换成状态动作对，更新式里会多出一个下一动作，那条式子正好用到五个量，于是得名 Sarsa。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. TD 误差 $\delta_t=r_{t+1}+\gamma v_t(s_{t+1})-v_t(s_t)$ 的含义是什么？</p>
+      <ol class="mcq-options">
+        <li>这一步拿到的奖励，减去下一步拿到的奖励</li>
+        <li>TD 目标减去当前估计，差多少就按学习率改多少</li>
+        <li>当前估计减去真实状态值，也就是估计的偏差</li>
+        <li>当前策略的价值减去最优策略的价值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：前两项 $r_{t+1}+\gamma v_t(s_{t+1})$ 合起来是 TD 目标，所以减掉的就是当前估计；
+          见式 (20.4)，TD 更新式把这个差乘以学习率再加回估计上。</p>
+        <p>A 只盯着奖励，漏掉了 $\gamma v_t(s_{t+1})$，而这一项就是自举的入口。
+          C 把 TD 误差当成了与真值之差：真值 $v_\pi$ 未知，算不出来，而目标本身又带着估计。
+          D 说的是两个策略之间的价值差，与这一步的更新量无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 关于 TD 与蒙特卡洛的差别，下面哪一句是对的？</p>
+      <ol class="mcq-options">
+        <li>TD 用一步经验就能更新，蒙特卡洛必须等回合结束</li>
+        <li>TD 需要转移概率，蒙特卡洛不需要转移概率</li>
+        <li>TD 不用自举，蒙特卡洛用自举来估计价值</li>
+        <li>TD 的估计无偏，蒙特卡洛的估计有偏</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：TD 的目标只用到一步的 $r_{t+1}$ 与 $s_{t+1}$，所以每走一步都能更新；
+          蒙特卡洛的目标是一整局的真实总分，必须等回合结束。</p>
+        <p>B 说反了：转移概率只有 DP 需要，TD 与蒙特卡洛都用样本代替求和。
+          C 也说反了，用自举的是 TD。D 同样反了：蒙特卡洛无偏，TD 有偏，但后者的方差更小。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. 把 $g_s$ 的求根问题交给 Robbins-Monro 时，用来代替期望的带噪观测是哪一个？</p>
+      <ol class="mcq-options">
+        <li>$\tilde g=r_{t+1}+\gamma v_\pi(s_{t+1})$</li>
+        <li>$\tilde g=r_{t+1}-v_t(s_t)$</li>
+        <li>$\tilde g=v_t(s_t)-\big[r_{t+1}+\gamma v_\pi(s_{t+1})\big]$</li>
+        <li>$\tilde g=\gamma v_\pi(s_{t+1})-r_{t+1}$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$g_s(w)=w-c$，见式 (20.3)。取 $w=v_t(s_t)$，再把常数 $c$ 用一次采样代替，
+          就得到 $\tilde g=v_t(s_t)-\big[r_{t+1}+\gamma v_\pi(s_{t+1})\big]$。</p>
+        <p>A 只取了常数那一半，丢掉了 $w$。B 丢掉了 $\gamma v_\pi(s_{t+1})$ 这一项。
+          D 把两部分的符号都挪错了，用它做更新会朝根的反方向走。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 推导 TD 目标的偏差 (20.6) 时，把 $r(s)$ 消掉靠的是哪一个等式？</p>
+      <ol class="mcq-options">
+        <li>期望的线性性：把期望拆成 $\E[R_{t+1}]$ 与 $\E[\gamma v_t(S_{t+1})]$ 两项相加</li>
+        <li>全方差公式：把总方差拆成条件方差的期望与条件期望的方差，再相加</li>
+        <li>独立同分布假设：每一步的奖励与状态互不影响，因此可以把期望分开算</li>
+        <li>贝尔曼方程：把 $v_\pi(s)$ 写成 $r(s)+\gamma\sum_{s'}p(s'\mid s)v_\pi(s')$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两边都写开之后，一边是 $r(s)+\gamma\sum p(s'\mid s)v_t(s')$，
+          另一边是 $r(s)+\gamma\sum p(s'\mid s)v_\pi(s')$。两个 $r(s)$ 是同一个数，相减就消掉了，
+          剩下 $\gamma$ 乘以两套状态值估计之差。</p>
+        <p>A 只允许把期望拆成两项，消去靠的是把 $v_\pi(s)$ 写成贝尔曼方程 (20.2) 的右侧。
+          B 是方差那条链上的公式，与偏差无关。C 需要独立同分布，这里各步严重相关，前提不成立。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 证明方差分解 (20.7) 时，交叉项 $\E[X\cdot Y\mid S_t=s]=0$ 用到的性质是？</p>
+      <ol class="mcq-options">
+        <li>$X$ 与 $Y$ 都是有界函数，有界就说明两者不相关</li>
+        <li>给定 $S_{t+1}$ 后 $Y$ 的条件期望为零，而 $X$ 到 $S_{t+1}$ 为止就定下来了</li>
+        <li>$X$ 与 $Y$ 相互独立，而且服从同一个分布</li>
+        <li>蒙特卡洛回报的期望等于状态值，所以 $X$ 的期望为零</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：先用全期望公式固定 $S_{t+1}$，此时 $Y$ 的条件期望是
+          $\gamma(\E[G_{t+1}\mid S_{t+1}]-v_\pi(S_{t+1}))=0$，而 $X$ 在给定 $S_{t+1}$ 后就是已知的，
+          可以提到内层期望外面，乘 0 还是 0。</p>
+        <p>A 只说到有界，有界推不出不相关。C 说反了：$Y$ 由往后的轨迹决定，与 $X$ 明显不独立。
+          D 是蒙特卡洛无偏那一条，它保证的是 $\E[G_t]=v_\pi(s)$，与交叉项无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 学习率取 $\alpha_t=1/t^2$ 时，收敛定理的哪一条不成立？</p>
+      <ol class="mcq-options">
+        <li>学习率非负这一条不成立</li>
+        <li>学习率的平方可和这一条不成立</li>
+        <li>每个状态被访问无穷多次这一条不成立</li>
+        <li>学习率之和发散这一条不成立</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\sum_t1/t^2=\pi^2/6$ 收敛，所以"之和发散"不成立，见式 (20.8)。
+          总步长有限，估计可能只走了有限的一段就停了。</p>
+        <p>A 错在 $1/t^2$ 一直是正的。B 恰好相反：$1/t^2$ 满足平方可和。
+          C 只管数据怎么来，与学习率的取法无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 若某状态 $s_0$ 在策略 $\pi$ 下从来不会被访问，表格型 TD 对 $v(s_0)$ 会怎样？</p>
+      <ol class="mcq-options">
+        <li>一直停在初始值，因为它从来没被更新过</li>
+        <li>收敛到 $\gamma v(s_0)$，由折扣因子决定</li>
+        <li>收敛到 0，因为没有奖励进入它</li>
+        <li>自动收敛到相邻状态值的平均</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：TD 每次只更新 $s_t$ 这一个状态，见式 (20.4)。没被访问过，就连一次更新都没有机会执行，
+          估计只能停在初始值上。"每个状态被访问无穷多次"这条条件就是用来排除这种情形的。</p>
+        <p>B、C、D 都假设了某种"顺带被更新"的机制，而表格型 TD 没有这种机制。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 已知 $v(s_t)=0.5$、$v(s_{t+1})=0.8$、$r_{t+1}=1$、$\gamma=0.9$、$\alpha=0.1$，
+        按 (20.4) 更新后 $v(s_t)$ 是多少？</p>
+      <ol class="mcq-options">
+        <li>0.5（估计不变）</li>
+        <li>0.672（忘了减去当前估计）</li>
+        <li>0.622（按 (20.4) 更新）</li>
+        <li>1.72（只算到 TD 目标）</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\delta=1+0.9\times0.8-0.5=1.22$，
+          于是 $v(s_t)\leftarrow0.5+0.1\times1.22=0.622$。</p>
+        <p>A 相当于学习率取 0。B 把 TD 目标 1.72 当成了 $\delta$，
+          算成 $0.5+0.1\times1.72=0.672$，漏掉了减当前估计这一步。
+          D 算的是 TD 目标本身，既没减当前估计，也没乘学习率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">9. 用例 5.4 的设定（两个奖励分别以 $1/2$ 得 0、以 $1/2$ 得 2，$\gamma=0.9$），
+        蒙特卡洛回报的方差与 TD 目标的方差相比如何？</p>
+      <ol class="mcq-options">
+        <li>蒙特卡洛是 1，TD 目标是 1.81</li>
+        <li>蒙特卡洛是 1.81，TD 目标是 1</li>
+        <li>两者都是 1.81，因为奖励的方差一样</li>
+        <li>两者都是 1，因为两者的期望一样</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：蒙特卡洛回报 $G_t=R_{t+1}+0.9R_{t+2}$，两项独立，方差是 $1+0.81\times1=1.81$；
+          TD 目标 $R_{t+1}+0.9v_\pi(s')$ 里只有一个随机项，方差是 1。
+          相差的 0.81 正好是 $0.9^2$ 乘以后一段回报的方差，与 (20.7) 对上了。</p>
+        <p>A 把两者调了个位置。C 忽略了折现系数带来的差别。D 把"期望相等"当成了"方差相等"。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. TD 更新式里为什么要把未知的 $v_\pi(s_{t+1})$ 换成当前的估计 $v_t(s_{t+1})$？</p>
+      <ol class="mcq-options">
+        <li>因为换成估计之后，TD 误差就变成了无偏估计</li>
+        <li>因为 $v_\pi(s_{t+1})$ 的期望恰好等于 $v_t(s_{t+1})$</li>
+        <li>因为状态值必须保持非负，估计值保证了这一点</li>
+        <li>因为真值拿不到，换掉之后只用一步经验就能凑出目标</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：算法的前提是只用能观测到的量。$r_{t+1}$ 与 $s_{t+1}$ 拿得到，$v_\pi(s_{t+1})$ 拿不到，
+          手头只有 $v_t(s_{t+1})$，用它顶上才凑得出 TD 目标。</p>
+        <p>A 说反了：这个替换就是偏差的来源，命题 5.1 的 (20.6) 在量化它。
+          B 完全不对，估计与真值一般不相等。C 与符号无关，状态值可以是负数。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 7 章第 7.1 节「Temporal-Difference Learning of State Values」。
+        本课的求根式推导、TD 更新式的记号与偏差方差对比都对齐这一节。</p>
+      <p>经典教材里对应的是 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em>
+        (2nd ed.) 第 6 章（时序差分学习）与第 7 章（n 步自举法）。</p>
+      <p>收敛性结论来自 A. Dvoretzky, "On Stochastic Approximation", 1956；
+        本课只引用它，完整证明见 0018 课。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "用掷骰子的例子把 TD 误差再讲一遍"，
+      或者 "为什么 $1/t^2$ 这种学习率不够用，直观上会发生什么？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

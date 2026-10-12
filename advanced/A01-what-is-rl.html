@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A01 · 强化学习到底是什么 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A01" data-slug="what-is-rl" data-part="进阶篇 · 第一部分 · 基础概念">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第一部分 · 基础概念</p>
+    <h1>强化学习到底是什么</h1>
+    <p class="lede">这一节只回答一个问题：你手上的问题该不该用强化学习（RL）。
+      它会先让你看懂五个词，再告诉你它和"有标准答案的那种学习"差在哪里，
+      最后给你三道筛子；过不了筛子的，越早换别的办法越省事。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能用自己的话定义智能体、环境、状态、动作、奖励这五个词</li>
+        <li>能说出它和"有标准答案的学习"（监督学习）差在哪三点，并各举一个业务例子</li>
+        <li>拿到一个新问题，能用三个筛子判断它是否适合 RL</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>一个真实的决策问题</h2>
+    <p>假设你在电商公司管库存。每天你要决定每种商品补多少货：补多了压资金、占仓库，补少了丢订单、收差评。
+      难处在于：<em>你手上没有"标准答案"可以学</em>。历史记录只写下了你当时补了多少、后来卖得怎么样，
+      却没写"如果当时补 80 件会怎样"。（SKU 是 stock keeping unit 的缩写，库存量单位，就是"一种商品"；下面直接用"商品"。）</p>
+    <p>推荐系统也一样。你给用户推了 A，就永远看不到"如果推 B，他会不会更喜欢"。
+      你能拿到的只是一个数：他点了吗、买了吗、待了多久。</p>
+    <p>这两类问题长得一样：<em>你的决定会改变你以后能看到的数据，而你只能拿到一个分数，拿不到答案。</em>
+      强化学习（reinforcement learning，RL）就是专门处理这种问题的。</p>
+  </section>
+
+  <section>
+    <h2>五个词，一个循环</h2>
+    <p>RL 把这类问题抽象成一个不断重复的循环：</p>
+    <ul>
+      <li><span class="term">智能体（agent）</span>：做决策的一方，比如你的补货算法。</li>
+      <li><span class="term">环境（environment）</span>：智能体之外的一切，包括用户、市场、供应链。</li>
+      <li><span class="term">状态（state）</span>：此刻环境给智能体的信息，比如当前库存、在途、最近七天销量。</li>
+      <li><span class="term">动作（action）</span>：智能体的选择，比如补 0 件、补 50 件。</li>
+      <li><span class="term">奖励（reward）</span>：环境给这个动作的即时评分，比如当天的毛利减仓储成本。</li>
+    </ul>
+    <p>循环是：观察状态 <var>s</var> → 选动作 <var>a</var> → 环境换成一个新状态 <var>s'</var> 并给出奖励 <var>r</var>
+      → 再观察、再决策。就这么一圈一圈转下去。</p>
+    <p>你要学的东西叫<strong>策略（policy）</strong>：一套"看到什么状态就选什么动作"的规则。
+      换个说法，策略就是你写在程序里的那份"出招习惯"。</p>
+    <p>这里有个坑：<var>r</var> 只是<em>这一步</em>拿到的分数，而真正要最大的是<em>长期</em>总分。
+      中间隔着一长串决策，所以"这一步分高"不等于"长期总分高"。第一个难点就在这里。</p>
+  </section>
+
+  <section>
+    <h2>它和"有标准答案的学习"差在哪</h2>
+    <p>你可能听过<strong>监督学习（supervised learning）</strong>：给你一大堆"题目 + 标准答案"，
+      让程序学会看到题目就写出答案，像做一本有答案的练习册。下面三点是它和 RL 的根本差别，
+      也是判断"该不该用 RL"的全部依据。</p>
+
+    <h3>一、没有标准答案，只有一个分数</h3>
+    <p>监督学习拿到的样本是"输入 → 正确答案"，错就是错，答案摆在那里。
+      RL 拿到的是"动作 → 这个动作得了多少分"。分数是<em>比较性</em>的，不是<em>指示性</em>的：
+      告诉你"这次补货扣了 3 分"，并不会告诉你"应该补 42 件"，你得自己从分数里摸索出该怎么做。</p>
+
+    <h3>二、分数来得晚：到底该怪哪一步</h3>
+    <p>你今天补了 200 件，三天后才发现货压在仓库里。这个"错"该算在哪一天的决策头上？
+      把最终结果分摊到中间若干步决策，这件事叫<span class="term">信用分配</span>，通俗说就是"分锅"：一个团队项目搞砸了，责任怎么摊到每个人头上。</p>
+    <p>这是 RL 比监督学习难的核心原因之一。</p>
+
+    <h3>三、你看到的数据，是你自己的决策挑出来的</h3>
+    <p>这一点最容易被忽略，代价也最大。监督学习的数据集是固定的一批，你可以反复看同一批样本。
+      但 RL 里，你能采到什么数据取决于你现在怎么决策。<em>你手头这批数据偏向哪些情况，是被你自己的做法决定的</em>（这批数据的"偏向"，下面叫<span class="term">数据分布</span>）。</p>
+    <p>后果很直接：如果你一直只补"看起来最热"的那几件商品，你就永远不知道其他商品多补一点会怎样。
+      更糟的是，你可能因为早期一次坏运气，从此永久放弃一个本来更好的做法。</p>
+    <p>所以 RL 必须在"用现在觉得最好的"和"试试别的"之间做权衡，这叫<span class="term">探索与利用</span>：
+      <em>利用</em>是"点你最爱吃的那道菜"，<em>探索</em>是"换个没吃过的菜试试"。</p>
+  </section>
+
+  <figure class="sim" data-sim="bandit" data-arms="10" data-steps="1000" data-runs="200"></figure>
+
+  <section>
+    <h2>三个筛子：什么时候不该用 RL</h2>
+    <p>RL 昂贵、不稳定、难调试。动手之前先过这三个筛子。任何一条不满足，就先回去用更简单的办法。</p>
+    <table>
+      <thead><tr><th>筛子</th><th>满足的条件</th><th>不满足时用什么</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>有标签吗</td>
+          <td>没有可用的"正确答案"，只有评价性反馈</td>
+          <td>直接用监督学习。有标签就别上 RL。</td>
+        </tr>
+        <tr>
+          <td>能试错吗</td>
+          <td>能在可接受的成本和风险下反复尝试，或者有一个可信的<strong>仿真环境</strong>（一个能让你随便试错的模拟器）</td>
+          <td>先用仿真器或历史数据评估；实在不能试错，就考虑<strong>离线</strong>（只用已经攒下来的历史记录学，不再与真实环境交互）的办法，或者干脆不做</td>
+        </tr>
+        <tr>
+          <td>奖励可定义吗</td>
+          <td>能写出一个可计算、且与真实目标一致的标量奖励</td>
+          <td>先解决度量问题。奖励写错，RL 只会高效地学坏。</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <p><strong>应用向的经验：</strong>实际项目翻车，多数出在<em>奖励设计</em>和<em>不能安全试错</em>上，不在算法选型。
+        第 <a href="A06-modeling-your-problem.html">0006 课</a>会专门花一整课讲建模，第
+        <a href="A27-capstone.html">0027 课</a>讲怎么为你的问题选算法。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>接下来会发生什么</h2>
+    <p>接下来你会先学一个最简版本：<a href="A02-bandits.html">多臂老虎机</a>（一排老虎机摆在你面前，你不知道哪台吐钱多，只能一台台试），它连"局面会变"都没有，只看"选哪个"。探索与利用的权衡，在它身上被剥得只剩骨架。</p>
+    <p>然后把"局面会变"加回来，进入<a href="A03-mdp.html">马尔可夫决策过程</a>（简单说，就是"下一步会怎样<em>只取决于现在</em>，跟更早的历史无关"的那类标准问题设定）。</p>
+    <p>术语不确定时随时查<a href="../reference/glossary.html">术语表</a>，符号不确定时查<a href="../reference/notation.html">符号表</a>。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 与监督学习相比，强化学习最本质的特点是什么？</p>
+      <ol class="mcq-options">
+        <li>训练数据规模通常更大，因此需要显著更强的算力支撑</li>
+        <li>没有给定标签，反馈来自奖励且取决于自己选择的动作</li>
+        <li>只能处理序列决策问题，监督学习只能处理单步预测</li>
+        <li>必须与环境交互，而监督学习完全不需要任何训练数据</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：核心在于"没有标准答案，只有对所选动作的评价"。奖励是相对的评分，
+          不是正确的输出，而且你必须先做动作才能拿到它。</p>
+        <p>A 错在把"数据量/算力"当成本质区别；那是工程代价，不是问题结构。
+          C 错在把边界画得太死：监督学习也能做序列建模（如机器翻译）。
+          D 错得很明显：监督学习当然需要数据，只是那些数据带标签。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 在 RL 语境里，"延迟反馈"具体指的是什么？</p>
+      <ol class="mcq-options">
+        <li>奖励要在若干步之后才出现，把结果归因到哪一步很困难</li>
+        <li>奖励的计算需要额外的资源开销，因此拖慢了整体训练速度</li>
+        <li>环境返回的观测带有噪声，需要额外的滤波模块来做处理</li>
+        <li>策略更新依赖离线数据，因此无法与环境直接交互来训练</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：延迟反馈直接导致信用分配问题：最终的好结果或坏结果，
+          要摊到中间哪几个决策上？后面 0004 课要讲的两件工具就是为了解决这件事。一件是价值函数（站在某个局面估计最终能拿多少分），另一件是贝尔曼方程（把"这一步的分数"和"下一步的分数"连起来的等式）。</p>
+        <p>B 把它误解成性能问题，C 说的是观测噪声（是另一个独立问题），
+          D 描述的是离线 RL 的一种设定，与延迟反馈无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. 关于"数据分布由策略决定"，下列哪一项描述是准确的？</p>
+      <ol class="mcq-options">
+        <li>数据分布由环境本身固定下来，与智能体选择什么动作无关</li>
+        <li>数据分布只在离线 RL 中才会变化，在线训练过程中始终稳定</li>
+        <li>数据分布由当前策略决定，会随训练推进不断发生漂移变化</li>
+        <li>数据分布由奖励函数决定，策略只影响动作而不影响其分布</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：你采到的样本是你自己行为的结果。策略一改，访问到的状态和动作分布就变，
+          这让"反复看同一批数据"这种监督学习式的做法在 RL 里不成立。</p>
+        <p>A 和 D 都把分布归给了环境或奖励函数，忽略了策略的作用；
+          B 说反了：在线训练本身就是分布持续漂移的场景。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 下列哪种情形，最不应该优先考虑强化学习？</p>
+      <ol class="mcq-options">
+        <li>需要做长期决策，且短期收益与长期目标之间存在冲突</li>
+        <li>可以低成本地反复试错，并且能量化最终带来的业务收益</li>
+        <li>动作会改变系统状态，同时没有现成的监督标签可供使用</li>
+        <li>已有大量带标签的历史数据，目标是预测一个已知的量</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：有标签、有明确预测目标，这就是监督学习的标准场景。
+          用 RL 去解它属于自找麻烦：你会丢掉标签信息，还要额外承担探索的成本和风险。</p>
+        <p>A、B、C 描述的恰好是 RL 的三个适用信号：长期决策、可安全试错、无标签但有反馈。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 探索与利用之所以存在冲突，根本原因是什么？</p>
+      <ol class="mcq-options">
+        <li>环境的可能状态太多（术语叫状态空间太大），没法一个一个列出来</li>
+        <li>当前的最优估计可能是错的，而验证它需要付出真实代价</li>
+        <li>奖励函数往往难以设计，导致智能体最终学到错误行为</li>
+        <li>直接学策略这类办法波动太大（方差高），往往还要额外加一个基线（一个用来压住波动的参照值）</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：你手上的是"估计"，不是真值。只按估计挑眼前最好的那个（这叫贪心）可能锁死在不够好的选择上；
+          要纠正它就得去试那些当前看起来更差的动作，而尝试本身有成本。</p>
+        <p>A 说的是状态空间太大带来的困难，C 是奖励设计问题，D 是策略梯度（直接调整策略参数的那类方法）的细节。
+          三者都真实存在，但都不是探索-利用冲突的根源。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0001-code-1">
+      <h3>代码题 1 · 计算折扣回报</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>从这里开始，你写的代码要真的算东西了。折扣回报（discounted return）就是 RL 要最大化的那个总分：
+      从当前时刻起把每一步的奖励加起来，但<em>越靠后的奖励，算进总分时权重越小</em>，等于给它打了个折；这个折的力度由折扣因子（就是 <var>γ</var>，取值 0 到 1，越小打折越狠）决定。
+      为什么要打折？因为越远的未来越不确定；而且不打折的话总分可能是无穷大，就没法比较了。
+      这个函数把一串已经记下来的奖励折算成一个数，后面算"这套策略值多少分"时会反复用到它。</p>
+        <p>请实现 <code>discounted_return(rewards, gamma)</code>。</p>
+        <div class="eq">
+          <span class="eq-body">G<sub>t</sub> = r<sub>t</sub> + γ r<sub>t+1</sub> + γ² r<sub>t+2</sub> + … = Σ<sub>k=0</sub><sup>∞</sup> γ<sup>k</sup> r<sub>t+k</sub></span>
+          <span class="eq-num">(1.1)</span>
+        </div>
+
+        <p>公式里的 Σ 是求和号，意思是"把后面那串东西全加起来"；除了 Σ 之外，
+          右边那个看起来无穷长的加法实际上只有有限项（奖励序列有多长就有多少项）。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：一串奖励，Python 列表或一维 numpy 数组都行（numpy 数组就是一排数字的容器），长度允许为 0；</li>
+          <li><code>gamma</code>：float，折扣因子，取值在 0 到 1 之间；第 k 步的奖励要乘上 <var>γ</var><sup>k</sup>
+              （也就是 γ 连乘 k 次：第 0 步乘 1，第 1 步乘 γ，第 2 步乘 γ×γ……）。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回一个 Python <code>float</code>，即从第 0 步起算的折扣回报 <span class="math">G<sub>0</sub></span>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>gamma=1</code> 时等于各步奖励之和；<code>gamma</code> 小于 1 时越靠后的奖励被衰减得越重；只有一步时回报等于那一步的奖励；<code>rewards</code> 为空时必须返回 <code>0.0</code>，测试用 <code>==</code> 比较。只用标准库与 numpy，本题不需要随机数。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>准备两个变量：<code>total = 0.0</code> 存总分，<code>g = 1.0</code> 存"这一步该乘的权重"
+              （第 0 步的权重是 γ<sup>0</sup> = 1）。</li>
+          <li>依次遍历 <code>rewards</code> 里的每个 <code>r</code>，做两件事：先把 <code>g * r</code> 累加进 <code>total</code>，
+              再让 <code>g = g * gamma</code>（为下一步把折扣再乘一次）。</li>
+          <li>循环结束后 <code>return total</code>。不要每一步都写 <code>gamma ** k</code>，累乘更简单也更快。</li>
+          <li><code>rewards</code> 可能是列表也可能是 numpy 数组，<code>for r in rewards</code> 两种都能遍历；
+              它为空时循环一次都不执行，正好返回 0.0。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def discounted_return(rewards, gamma):
+    # TODO: 计算 G_0 = sum_k gamma**k * rewards[k]
+    return 0.0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+check(abs(discounted_return([1.0, 1.0, 1.0], 1.0) - 3.0) < 1e-9,
+      "gamma=1 时三个 1 应当得到 3.0")
+check(abs(discounted_return([1.0, 1.0, 1.0], 0.5) - 1.75) < 1e-9,
+      "gamma=0.5 时应当是 1 + 0.5 + 0.25 = 1.75")
+check(abs(discounted_return([0.0, 0.0, 10.0], 0.9) - 8.1) < 1e-9,
+      "奖励在第 3 步才出现时，应当被 gamma**2 衰减：10*0.81 = 8.1")
+check(abs(discounted_return([5.0], 0.9) - 5.0) < 1e-9,
+      "只有一步时，回报就等于那一步的奖励")
+check(discounted_return([], 0.9) == 0.0, "空列表应当返回 0.0")
+check(abs(discounted_return([0.0, 1.0], 0.99) - 0.99) < 1e-9,
+      "gamma 应当作用在后续每一步上，而不是最后一步")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def discounted_return(rewards, gamma):
+    total = 0.0
+    g = 1.0
+    for r in rewards:
+        total += g * r
+        g *= gamma
+    return total
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0001-code-2">
+      <h3>代码题 2 · 实现 ε-greedy 动作选择（ε 是探索率）</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>这个函数负责决定"下一步做什么"。手上的价值估计都带误差，
+      如果一直挑当前看起来最好的动作，就可能一直锁死在某个不够好的选择上；
+      所以要留出一部分概率去试试别的。它在智能体与环境交互的每一步都会被调用：
+      给它当前的价值估计和探索率（英文 epsilon，写作 ε，意思是有多大比例的概率去随便试一个动作），它告诉你这一步实际执行哪个动作。它只负责选动作，不负责更新任何估计。</p>
+        <p>请实现 <code>epsilon_greedy(Q, epsilon, rng)</code>。</p>
+        <div class="eq">
+          <span class="eq-body">a&nbsp;=&nbsp;<span class="eq-cases"><span class="brace">⎧<br>⎩</span><span class="rows">随机动作，&nbsp;&nbsp;以概率 ε<br>arg max<sub>a</sub>&thinsp;Q(a)，&nbsp;&nbsp;否则</span></span></span>
+          <span class="eq-num">(1.2)</span>
+        </div>
+
+        <p>式子里的 argmax 读作"arg-max"，意思是"挑出让后面那个式子最大的那个选择"：
+          <code>arg max<sub>a</sub> Q(a)</code> 就是"挑出 Q 值最大的那个动作下标"。
+          注意下标从 0 开始，所以 n 个动作的下标是 0 到 n−1。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>Q</code>：长度 <code>n</code> 的一维 numpy 数组（一排数字的容器），第 i 个数表示"第 i 个动作现在估计值多少分"；</li>
+          <li><code>epsilon</code>：0 到 1 之间的 float 探索率。按"平均一百次里大约多少次"来理解：
+              <code>0.1</code> 就是大约每十次里有一次随便试一个动作；</li>
+          <li><code>rng</code>：测试传进来的随机数生成器 <code>numpy.random.Generator</code>。
+              <em>随机数只能从它取</em>：同一个种子（seed）必然给出同一串数，测试才能复现；
+              用全局的 <code>np.random</code> 就复现不了。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回被选中动作的整数下标，取值 <code>0</code> 到 <code>n-1</code>；类型应当是 <code>int</code> 或 <code>np.integer</code>，不能是浮点数或数组。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>epsilon=0.0</code> 时连续 50 次都必须选 <code>Q</code> 最大的动作，<code>epsilon=1.0</code> 时 4000 次的选择次数近似均匀，每个动作在 700 到 1300 次之间；下标 1 是 <code>Q</code> 的最大值所在位置；平局时返回下标最小的动作。随机数只能取自传入的 <code>rng</code>，不要用全局 <code>np.random</code>，否则测试无法复现；只用标准库与 numpy。</p>
+      </div>
+
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>第一步：抽一个 0 到 1 之间的随机小数，<code>r = rng.random()</code>。
+              它小于 <code>epsilon</code> 的可能性正好是 epsilon，这就是"以概率 ε 探索"的实现办法。</li>
+          <li>第二步：如果 <code>r &lt; epsilon</code>（抽中了探索），就用
+              <code>rng.integers(0, len(Q))</code> 在 0 到 n−1 之间随机取一个动作下标。
+              注意 <code>integers</code> 的右端是<em>取不到</em>的，所以要写 <code>len(Q)</code> 而不是 <code>len(Q)-1</code>。</li>
+          <li>第三步：否则（利用）用 <code>np.argmax(Q)</code> 取 Q 最大值的下标。
+              平局时它天然返回最小的那个下标，正好符合要求。</li>
+          <li>最后把它转成 Python 的整数再返回：<code>return int(...)</code>。
+              numpy 有自己的整数类型，测试要求返回的是普通整数，不要返回数组。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def epsilon_greedy(Q, epsilon, rng):
+    # TODO: 以 epsilon 的概率随机探索，否则选 Q 最大的动作
+    return 0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+Q = np.array([1.0, 5.0, 2.0, 0.5])
+
+rng0 = np.random.default_rng(0)
+check(epsilon_greedy(Q, 0.0, rng0) == 1,
+      "epsilon=0 时必须选 Q 最大的动作（下标 1）")
+check(all(epsilon_greedy(Q, 0.0, rng0) == 1 for _ in range(50)),
+      "epsilon=0 时连续 50 次都应当贪心，不能出现随机探索")
+
+rng1 = np.random.default_rng(1)
+counts = np.zeros(4, dtype=int)
+for _ in range(4000):
+    counts[epsilon_greedy(Q, 1.0, rng1)] += 1
+check(counts.min() > 700,
+      f"epsilon=1 时应当近似均匀地探索，但某个动作只被选了 {counts.min()} 次：{counts}")
+check(counts.max() < 1300,
+      f"epsilon=1 时应当近似均匀地探索，但某个动作被选了 {counts.max()} 次：{counts}")
+
+rng2 = np.random.default_rng(7)
+vals = [epsilon_greedy(Q, 0.3, rng2) for _ in range(3000)]
+check(set(vals) <= {0, 1, 2, 3}, f"返回值必须是 0..3 的整数下标，实际出现 {sorted(set(vals))}")
+check(isinstance(vals[0], (int, np.integer)), "返回值应当是整数，而不是浮点数或数组")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def epsilon_greedy(Q, epsilon, rng):
+    if rng.random() < epsilon:
+        return int(rng.integers(0, len(Q)))
+    return int(np.argmax(Q))
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.), 第 1 章与第 3.1 节。
+        第 1 章对"试错学习"和"探索-利用"的界定是理解全书的起点。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>想先建立工程直觉，可以并行读 OpenAI Spinning Up 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/spinningup/rl_intro.html">Key Concepts in RL</a>，
+        它用工程从业者的语言重述了本课内容。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "我在做的 XX 业务问题，用这三个筛子过一遍是什么结果？" 或者 "把信用分配问题用我的场景讲一遍"。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

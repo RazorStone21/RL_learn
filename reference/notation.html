@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>符号表 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson">
+  <header class="lesson-head">
+    <p class="eyebrow">参考文档 · 随时查阅</p>
+    <h1>符号表</h1>
+    <p class="lede">全课程统一使用这套记号，主要遵循 Sutton &amp; Barto 的约定。
+      公式看不懂时先回来这里对符号。</p>
+    <p><a href="../index.html">← 回到课程</a> ·
+      另见 <a href="glossary.html">术语表</a> · <a href="algorithms.html">算法速查表</a></p>
+  </header>
+
+  <section>
+    <h2>环境与过程</h2>
+    <table>
+      <thead><tr><th>符号</th><th>读法</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><var>s</var> ∈ <var>S</var></td><td>state</td><td>状态；<var>S</var> 是状态集合</td></tr>
+        <tr><td><var>a</var> ∈ <var>A</var></td><td>action</td><td>动作；<var>A</var> 是动作集合（可依赖 <var>s</var>，记 <var>A</var>(<var>s</var>)）</td></tr>
+        <tr><td><var>r</var> ∈ <var>R</var></td><td>reward</td><td>奖励；<var>R</var> 是实数集上的奖励取值</td></tr>
+        <tr><td><var>t</var></td><td>time step</td><td>时间步下标，如 <var>s<sub>t</sub></var></td></tr>
+        <tr><td><var>γ</var></td><td>gamma</td><td>折扣因子，0 ≤ <var>γ</var> &lt; 1（连续任务）或 <var>γ</var> = 1（回合任务）</td></tr>
+        <tr><td><var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>)</td><td>—</td><td>转移概率：在 <var>s</var> 做 <var>a</var> 后到 <var>s</var>′ 并得 <var>r</var> 的概率</td></tr>
+        <tr><td><var>P</var><sup><var>a</var></sup><sub><var>ss</var>′</sub></td><td>—</td><td>状态转移矩阵的简写，= Σ<sub><var>r</var></sub> <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>)</td></tr>
+        <tr><td><var>R</var><sup><var>a</var></sup><sub><var>s</var></sub></td><td>—</td><td>从 <var>s</var> 做 <var>a</var> 的期望即时奖励</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>回报与价值</h2>
+    <table>
+      <thead><tr><th>符号</th><th>读法</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><var>G<sub>t</sub></var></td><td>return</td><td>从 <var>t</var> 时刻起的折扣回报 = <var>r</var><sub><var>t</var>+1</sub> + <var>γr</var><sub><var>t</var>+2</sub> + <var>γ</var>²<var>r</var><sub><var>t</var>+3</sub> + …</td></tr>
+        <tr><td><var>G</var><sub><var>t</var></sub><sup>(<var>n</var>)</sup></td><td>n-step return</td><td>只用前 <var>n</var> 步奖励、末尾接 bootstrap 的回报</td></tr>
+        <tr><td><var>v<sub>π</sub></var>(<var>s</var>)</td><td>V of s</td><td>在策略 <var>π</var> 下状态 <var>s</var> 的<strong>状态价值</strong> = 𝔼<sub><var>π</var></sub>[<var>G<sub>t</sub></var> | <var>S<sub>t</sub></var>=<var>s</var>]</td></tr>
+        <tr><td><var>q<sub>π</sub></var>(<var>s</var>, <var>a</var>)</td><td>Q of s,a</td><td>在策略 <var>π</var> 下 <strong>动作价值</strong> = 𝔼<sub><var>π</var></sub>[<var>G<sub>t</sub></var> | <var>S<sub>t</sub></var>=<var>s</var>, <var>A<sub>t</sub></var>=<var>a</var>]</td></tr>
+        <tr><td><var>v</var><sub>*</sub>, <var>q</var><sub>*</sub></td><td>—</td><td>最优价值函数，对所有策略取最大</td></tr>
+        <tr><td><var>V</var>(<var>s</var>), <var>Q</var>(<var>s</var>,<var>a</var>)</td><td>—</td><td><strong>估计值</strong>（带帽子之前），算法实际维护的量</td></tr>
+        <tr><td><var>δ<sub>t</sub></var></td><td>TD error</td><td>时序差分误差 = <var>r</var><sub><var>t</var>+1</sub> + <var>γV</var>(<var>S</var><sub><var>t</var>+1</sub>) − <var>V</var>(<var>S<sub>t</sub></var>)</td></tr>
+        <tr><td><var>A<sub>π</sub></var>(<var>s</var>,<var>a</var>)</td><td>advantage</td><td>优势函数 = <var>q<sub>π</sub></var>(<var>s</var>,<var>a</var>) − <var>v<sub>π</sub></var>(<var>s</var>)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>策略与算法超参</h2>
+    <table>
+      <thead><tr><th>符号</th><th>读法</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td><var>π</var>(<var>a</var> | <var>s</var>)</td><td>pi</td><td>随机策略：在 <var>s</var> 选 <var>a</var> 的概率</td></tr>
+        <tr><td><var>π</var>(<var>s</var>)</td><td>pi</td><td>确定性策略：在 <var>s</var> 选的那个动作</td></tr>
+        <tr><td><var>π</var><sub>θ</sub>, <var>μ</var><sub>θ</sub>(<var>s</var>)</td><td>—</td><td>参数化策略；<var>μ</var> 专指确定性策略</td></tr>
+        <tr><td><var>θ</var></td><td>theta</td><td>策略参数（如神经网络权重）</td></tr>
+        <tr><td><var>w</var>, <var>φ</var></td><td>w / phi</td><td>价值函数的参数</td></tr>
+        <tr><td><var>α</var></td><td>alpha</td><td>学习率 / 步长</td></tr>
+        <tr><td><var>ε</var></td><td>epsilon</td><td>ε-greedy 的探索概率；PPO 里也用作裁剪半径</td></tr>
+        <tr><td><var>λ</var></td><td>lambda</td><td>TD(λ) 与 GAE 的迹衰减参数，0 ≤ <var>λ</var> ≤ 1</td></tr>
+        <tr><td><var>β</var></td><td>beta</td><td>KL 惩罚系数；PER 里也用作重要性采样退火指数</td></tr>
+        <tr><td><var>τ</var></td><td>tau</td><td>目标网络的软更新系数（Polyak）</td></tr>
+        <tr><td><var>α</var><sub>ent</sub>, <var>η</var></td><td>—</td>
+          <td>熵正则系数 / 温度系数。SAC 原文把它写作 <var>α</var>，PPO 实现里常叫 <code>ent_coef</code>；
+            为了不与"学习率 <var>α</var>"混淆，本课程需要区分时写作 <var>α</var><sub>ent</sub> 或 <var>η</var></td></tr>
+        <tr><td><var>α</var><sub>CQL</sub></td><td>—</td>
+          <td>离线 RL 中 CQL 的保守惩罚权重（原文亦写作 <var>α</var>）</td></tr>
+        <tr><td><var>ω</var></td><td>omega</td>
+          <td>PER 的优先级指数：采样概率正比于 <var>p</var><sub>i</sub><sup><var>ω</var></sup>（原文写作 <var>α</var>）</td></tr>
+        <tr><td><var>ρ</var><sub><var>t</var></sub></td><td>rho</td><td>重要性采样比；PPO 里 <var>r<sub>t</sub></var>(<var>θ</var>) 是同类的概率比</td></tr>
+        <tr><td><var>H</var>(<var>π</var>(·|<var>s</var>))</td><td>entropy</td><td>策略熵，衡量随机性；SAC 用它做探索</td></tr>
+        <tr><td>ℋ</td><td>—</td><td>同上（手写体 H）</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>算符与集合记号</h2>
+    <table>
+      <thead><tr><th>符号</th><th>含义</th></tr></thead>
+      <tbody>
+        <tr><td>𝔼<sub><var>π</var></sub>[·]</td><td>在策略 <var>π</var> 诱导的分布下求期望</td></tr>
+        <tr><td>∇<sub>θ</sub></td><td>对参数 <var>θ</var> 求梯度</td></tr>
+        <tr><td>arg max<sub><var>a</var></sub></td><td>使后面的量最大的那个 <var>a</var></td></tr>
+        <tr><td><var>x</var> ← <var>y</var></td><td>赋值 / 更新（伪代码里的写法）</td></tr>
+        <tr><td>≐</td><td>定义为（Sutton &amp; Barto 用来区分定义与推导）</td></tr>
+        <tr><td>(<var>s</var>, <var>a</var>, <var>r</var>, <var>s</var>′)</td><td>一条转移样本，经验回放里的基本单位</td></tr>
+        <tr><td><var>D</var></td><td>经验回放缓冲区 / 离线数据集</td></tr>
+        <tr><td><var>B</var></td><td>一个 mini-batch</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>记号约定取自 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 的
+        Notation 与 Summary of Notation 两节。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a>
+        少数与 Spinning Up 不同的地方（如 PPO 的 <var>ε</var> 与 <var>r<sub>t</sub></var>(<var>θ</var>)）在该课正文里会单独说明。</p>
+    </div>
+  </footer>
+</article>
+</body>
+</html>

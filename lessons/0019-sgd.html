@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0019 · 随机梯度下降：BGD/SGD/mini-batch（一小批样本）与收敛性 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0019" data-slug="sgd" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 · 基础工具 ／ 第 19 课</p>
+    <h1>随机梯度下降：BGD/SGD/mini-batch 与收敛性</h1>
+    <p class="lede">上一课把随机梯度下降当成 Dvoretzky 定理的一个特例。本课把它单独拿出来看：
+      批量、单样本、小批量三种做法差在哪里，为什么它的轨迹会抖，
+      以及步长应该怎么排才能让它稳稳落到最优点上。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出优化目标 $J(w)=\E[f(w,X)]$ 与它的梯度</li>
+        <li>能说出批量梯度下降、随机梯度下降、小批量梯度下降的差别</li>
+        <li>能把随机梯度下降写成"真实梯度加零均值噪声"，并说明它是 Robbins-Monro 算法的特例</li>
+        <li>能陈述它的收敛条件，并用二次目标手算几步展示震荡</li>
+        <li>能解释常数步长下为什么停在最优点附近的一个邻域里</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 优化目标与它的梯度</h2>
+    <p>随机梯度下降要解的问题是最小化</p>
+    <div class="eq">
+      <span class="eq-body">$$J(w)=\E\big[f(w,X)\big],$$</span>
+      <span class="eq-num">(19.1)</span>
+    </div>
+    <p>式中 $w$ 是待优化的参数，$X$ 是随机变量，$f$ 是取标量值的函数，期望是对 $X$ 取的。
+      这里 $w$ 可以是标量也可以是向量。$J$ 对 $w$ 的梯度就是</p>
+    <div class="eq">
+      <span class="eq-body">$$\nabla_wJ(w)=\nabla_w\E\big[f(w,X)\big]=\E\big[\nabla_wf(w,X)\big].$$</span>
+      <span class="eq-num">(19.2)</span>
+    </div>
+    <p>式 (19.2) 右边那句话很实用：整批数据的平均梯度，可以先对每个样本各算一个梯度再取平均。</p>
+    <div class="rem">
+      <span class="label">注记 19.1（交换求导与求期望）</span>
+      <p>式 (19.2) 把 $\nabla_w$ 与 $\E$ 交换了次序，这需要条件：$\nabla_wf$ 要足够"乖"，
+        好让求导与积分能换来换去。严格条件要用测度论中求导与积分交换次序的定理，本课把它当假设用，
+        后面定理里的二阶导数有界就是用来兜住它的。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 三种做法：BGD、SGD、mini-batch</h2>
+    <div class="def">
+      <span class="label">定义 19.2（三种梯度下降）</span>
+      <p>设手上有样本 $\{x_i\}_{i=1}^n$，$\alpha_k$ 是步长，也就是学习率（每次更新时，往新信息的方向挪多远）。</p>
+      <p>批量梯度下降 BGD（batch gradient descent，每次迭代用全部样本）：</p>
+      <div class="eq">
+        <span class="eq-body">$$w_{k+1}=w_k-\alpha_k\frac{1}{n}\sum_{i=1}^{n}\nabla_wf(w_k,x_i);$$</span>
+        <span class="eq-num">(19.3)</span>
+      </div>
+      <p>小批量梯度下降 MBGD（mini-batch gradient descent，每次用一小批样本）：</p>
+      <div class="eq">
+        <span class="eq-body">$$w_{k+1}=w_k-\alpha_k\frac{1}{m}\sum_{j\in\mathcal{I}_k}\nabla_wf(w_k,x_j),\qquad |\mathcal{I}_k|=m;$$</span>
+        <span class="eq-num">(19.4)</span>
+      </div>
+      <p>随机梯度下降 SGD（stochastic gradient descent，每次只用一个样本）：</p>
+      <div class="eq">
+        <span class="eq-body">$$w_{k+1}=w_k-\alpha_k\nabla_wf(w_k,x_k).$$</span>
+        <span class="eq-num">(19.5)</span>
+      </div>
+      <p>式中 $\mathcal{I}_k$ 是第 $k$ 步抽到的那一小批样本的下标集合，mini-batch（一小批样本）指的就是它。</p>
+    </div>
+    <p>三者的差别集中在一处：每步用多少样本来估计真实梯度。</p>
+    <ul>
+      <li>BGD 每步都用全部 $n$ 个样本，梯度估计没有随机性，方向最准；代价是每步计算量最大，
+        样本流式到达时还得把全部样本留着。</li>
+      <li>SGD 每步只用一个样本，代价最小，新样本立刻生效；代价是方向很抖。</li>
+      <li>MBGD 取中间：$m$ 越大方向越准也越贵，$m=1$ 就退化成 SGD。</li>
+    </ul>
+    <div class="rem">
+      <span class="label">注记 19.3（$m=n$ 并不等于 BGD）</span>
+      <p>MBGD 取 $m=n$ 时看起来和 BGD 一样，实际并不同：MBGD 是从 $\{x_i\}$ 里随机抽 $n$ 个，
+        允许重复抽到同一个，也可能漏掉某些样本；BGD 用的是全部 $n$ 个，一个不少。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 19.4（均值估计下三种做法的闭式）</span>
+      <p>取 $f(w,x)=\frac{1}{2}(w-x)^2$，则 $J(w)=\frac{1}{2n}\sum_i(w-x_i)^2$，最优解是 $\bar x$。
+        取 $\alpha_k=1/k$ 时，三个算法分别是</p>
+      <p>$$w_{k+1}=\bar x,\qquad w_{k+1}=\frac{1}{k}\sum_{j=1}^{k}\bar x_j^{(m)},\qquad w_{k+1}=\frac{1}{k}\sum_{j=1}^{k}x_j,$$</p>
+      <p>式中 $\bar x_j^{(m)}$ 是第 $j$ 批样本的平均。BGD 每步都用全部样本，所以第一步就得到最优解；
+        MBGD 与 SGD 都要迭代很多次，但每一次都便宜得多。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 210" role="img" aria-label="三种做法在每步样本数、梯度方差与每步计算量上的对比">
+        <text x="26" y="22" class="val-b">每步样本数</text>
+        <rect x="30" y="34" width="140" height="22" class="bar-hi"/><text x="176" y="50" class="lbl">BGD：n 个</text>
+        <rect x="30" y="64" width="60" height="22" class="bar"/><text x="96" y="80" class="lbl">MBGD：m 个</text>
+        <rect x="30" y="94" width="18" height="22" class="bar"/><text x="54" y="110" class="lbl">SGD：1 个</text>
+        <text x="30" y="146" class="val-b">梯度估计的方差</text>
+        <rect x="30" y="156" width="18" height="20" class="bar-hi"/><text x="54" y="171" class="lbl">BGD：最小</text>
+        <rect x="200" y="156" width="72" height="20" class="bar"/><text x="278" y="171" class="lbl">MBGD：居中</text>
+        <rect x="380" y="156" width="126" height="20" class="bar-hi"/><text x="380" y="194" class="lbl">SGD：最大</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 19.1</span>
+        每步样本越多，梯度估计的方差越小，但每步的计算量越大。小批量梯度下降就在这条线上取折中，
+        实践中它比另外两个极端更常用。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 它是 RM 的特例</h2>
+    <p>把随机梯度拆成两部分：一部分是真实梯度，另一部分是它自己的误差。</p>
+    <div class="eq">
+      <span class="eq-body">$$\nabla_wf(w_k,x_k)=\underbrace{\E\big[\nabla_wf(w_k,X)\big]}_{\text{真实梯度}}
+        +\underbrace{\big(\nabla_wf(w_k,x_k)-\E[\nabla_wf(w_k,X)]\big)}_{\eta_k}
+        =\nabla_wJ(w_k)+\eta_k .$$</span>
+      <span class="eq-num">(19.6)</span>
+    </div>
+    <p>因为 $x_k$ 与历史 $\mathcal{H}_k=\{w_k,w_{k-1},\dots\}$ 独立，噪声 $\eta_k$ 的条件均值为零：
+      $\E[\eta_k\mid\mathcal{H}_k]=0$。把式 (19.6) 代进式 (19.5)：</p>
+    <div class="eq">
+      <span class="eq-body">$$w_{k+1}=w_k-\alpha_k\big(\nabla_wJ(w_k)+\eta_k\big).$$</span>
+      <span class="eq-num">(19.7)</span>
+    </div>
+    <p>式 (19.7) 叫 SGD 的确定性等价形式：它等于"用真实梯度做梯度下降，再叠加一个零均值噪声"。
+      与 0017 课的 RM（罗宾斯-门罗算法）迭代式 $w_{k+1}=w_k-a_k\tilde{g}(w_k,\eta_k)$ 对照，只要取
+      $g(w)=\nabla_wJ(w)$、$\tilde{g}(w_k,\eta_k)=\nabla_wf(w_k,x_k)$，两者完全一样。
+      所以 SGD 是 RM 的特例，0018 课的 Dvoretzky 定理也就能直接罩住它。</p>
+    <div class="eg">
+      <span class="label">例 19.5（均值估计又是 SGD 的特例）</span>
+      <p>取 $f(w,X)=\frac{1}{2}\|w-X\|^2$，则 $\nabla_wf(w,X)=w-X$，于是 $\nabla_wJ(w)=w-\E[X]$，
+        令它为零得 $w^*=\E[X]$。对应的 SGD 更新是 $w_{k+1}=w_k-\alpha_k(w_k-x_k)$，
+        就是 0017 课的增量式均值估计。三个算法被串成一条链：RM 包含 SGD，SGD 包含均值估计。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 收敛性</h2>
+    <div class="thm">
+      <span class="label">定理 19.6（SGD 最终会落到哪里）</span>
+      <p>对式 (19.5) 的 SGD，若</p>
+      <p>(a) $0\lt c_1\le\nabla_w^2f(w,X)\le c_2$ 对一切 $w$ 与 $X$ 成立；</p>
+      <p>(b) $\sum_{k=1}^{\infty}\alpha_k=\infty$ 且 $\sum_{k=1}^{\infty}\alpha_k^2<\infty$；</p>
+      <p>(c) $\{x_k\}$ 独立同分布；</p>
+      <p>那么 $w_k$ 几乎必然收敛（一轮轮算下去，数值不再明显变化，稳定下来了）到 $\nabla_w\E[f(w,X)]=0$ 的根。</p>
+    </div>
+    <p>条件 (a) 里 $\nabla_w^2f$ 是二阶导数。它大于 $c_1$ 说明 $f$ 对 $w$ 是凸的
+      （函数图像像一个碗，只有一个最低点），小于 $c_2$ 说明碗不会陡到无穷。
+      $w$ 是向量时，$\nabla_w^2f$ 换成海森矩阵，条件读作它的特征值落在 $c_1$ 与 $c_2$ 之间。</p>
+    <div class="proof">
+      <span class="label">证明（引用 0017 课的定理 17.8，逐条核对它的三个条件）</span>
+      <p>令 $g(w)=\nabla_wJ(w)$，则 SGD 就是求解 $g(w)=0$ 的 RM 算法，其中观测是
+        $\tilde{g}(w_k,\eta_k)=\nabla_wf(w_k,x_k)$，噪声由式 (19.6) 给出。</p>
+      <p>条件 1：由式 (19.2)，$\nabla_wg(w)=\nabla_w\E[\nabla_wf(w,X)]=\E[\nabla_w^2f(w,X)]$，
+        由假设 (a) 得 $c_1\le\nabla_wg(w)\le c_2$。</p>
+      <p>条件 2：与假设 (b) 完全相同。</p>
+      <p>条件 3：因为 $x_k$ 与 $\mathcal{H}_k$ 独立，
+        $\E[\nabla_wf(w_k,x_k)\mid\mathcal{H}_k]=\E_{x_k}[\nabla_wf(w_k,x_k)]$，
+        而 $\E[\nabla_wf(w_k,X)]$ 只依赖 $w_k$，可以从条件期望里提出来，两者相减得零。
+        若对一切 $w,x$ 都有 $|\nabla_wf(w,x)|<\infty$，则条件二阶矩也有限。</p>
+      <p>三条都满足，由定理 17.8 即得 $w_k$ 几乎必然收敛到根。注意这里用的是 0017 课的定理，
+        而它本身由 0018 课用 Dvoretzky 定理证明。所以整条链只有拟鞅收敛定理是外部引用。</p>
+      <span class="qed">∎</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>5. 收敛模式：为什么轨迹会抖</h2>
+    <p>随机梯度与真实梯度之间的相对误差能说明很多问题。定义</p>
+    <p>$$\delta_k\doteq\frac{\big|\nabla_wf(w_k,x_k)-\E[\nabla_wf(w_k,X)]\big|}
+      {\big|\E[\nabla_wf(w_k,X)]\big|},$$</p>
+    <p>式中分母是真实梯度的大小。由中值定理，$\E[\nabla_wf(w_k,X)]=\E[\nabla_w^2f(\tilde{w}_k,X)(w_k-w^*)]$，
+      其中 $\tilde{w}_k$ 介于 $w_k$ 与 $w^*$ 之间；再由条件 (a) 得</p>
+    <div class="eq">
+      <span class="eq-body">$$\delta_k\le\frac{\big|\nabla_wf(w_k,x_k)-\E[\nabla_wf(w_k,X)]\big|}{c_1\,|w_k-w^*|}.$$</span>
+      <span class="eq-num">(19.8)</span>
+    </div>
+    <p>式 (19.8) 说了一件很重要的事：相对误差与"离最优点还有多远"成反比。
+      离得远时分母大，相对误差小，SGD 的行为像普通梯度下降，走得又快又直；
+      离得近时分母小，相对误差可能很大，噪声开始主导，轨迹就抖起来。
+      这也解释了为什么"减小噪声"要靠更多样本或更小的步长。</p>
+    <p>在均值估计这个例子里，$\nabla_wf(w_k,x_k)=w_k-x_k$、$\E[\nabla_wf(w_k,X)]=w_k-w^*$，
+      于是</p>
+    <div class="eq">
+      <span class="eq-body">$$\delta_k=\frac{\big|w_k-x_k-(w_k-w^*)\big|}{|w_k-w^*|}=\frac{\big|w^*-x_k\big|}{|w_k-w^*|}.$$</span>
+      <span class="eq-num">(19.9)</span>
+    </div>
+    <p>式 (19.9) 里分子就是单个样本与真实期望之差。数据本身的方差越小，分子越小，
+      SGD 的表现就越接近普通梯度下降。</p>
+    <div class="rem">
+      <span class="label">注记 19.7（常数步长下抖动不会消失）</span>
+      <p>取一维二次目标 $J(w)=\frac{1}{2}cw^2$。最省事的例子是 $f(w,x)=\frac{1}{2}(w-x)^2$、$\E[X]=0$、$\E[X^2]=1$，
+        此时 $c=1$，而 $\nabla_wf(w_k,x_k)=w_k-x_k$。SGD 递推可以写成</p>
+      <p>$$w_{k+1}=(1-\alpha c)w_k-\alpha\eta_k.$$</p>
+      <p>两边平方取期望，用 $w_k$ 与 $\eta_k$ 独立、$\E[\eta_k]=0$、$\var(\eta_k)=\sigma^2$：</p>
+      <div class="eq">
+        <span class="eq-body">$$\E[w_{k+1}^2]=(1-\alpha c)^2\E[w_k^2]+\alpha^2\sigma^2
+          \quad\Longrightarrow\quad
+          \E[w_\infty^2]=\frac{\alpha\sigma^2}{2c-\alpha c^2}.$$</span>
+        <span class="eq-num">(19.10)</span>
+      </div>
+      <p>右边那个平稳值随 $\alpha$ 变小而变小，但 $\alpha>0$ 时永远不为零。这就是"停在最优点附近的邻域里"的定量说法。
+        另外要 $\alpha c\lt2$ 才有 $|1-\alpha c|\lt1$，否则方差会越滚越大，估计直接发散。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 19.8（手算 SGD：震荡）</span>
+      <p>取 $c=1$，即 $J(w)=\frac{w^2}{2}$，步长恒为 $\alpha=\frac{1}{2}$，$w_1=1$，
+        样本依次为 $x_1=-1$、$x_2=+1$、$x_3=-1$、$x_4=+1$、$x_5=-1$。更新式是
+        $w_{k+1}=w_k-\frac{1}{2}(w_k-x_k)$，逐步算：</p>
+      <p>$$w_2=1-\tfrac{1}{2}(1+1)=0,\qquad w_3=0-\tfrac{1}{2}(0-1)=\tfrac{1}{2},$$</p>
+      <p>$$w_4=\tfrac{1}{2}-\tfrac{1}{2}\big(\tfrac{1}{2}+1\big)=-\tfrac{1}{4},\qquad
+        w_5=-\tfrac{1}{4}-\tfrac{1}{2}\big(-\tfrac{1}{4}-1\big)=\tfrac{3}{8},\qquad
+        w_6=\tfrac{3}{8}-\tfrac{1}{2}\big(\tfrac{3}{8}+1\big)=-\tfrac{5}{16}.$$</p>
+      <p>序列 $1,\ 0,\ \frac{1}{2},\ -\frac{1}{4},\ \frac{3}{8},\ -\frac{5}{16}$ 在 $0$ 两边来回换，
+        幅度不见缩小。与式 (19.10) 对照：$\sigma^2=1$、$\alpha=\frac{1}{2}$、$c=1$，
+        平稳方差是 $\frac{0.5}{2-0.5}=\frac{1}{3}$，标准差约 $0.58$，和上面的数值量级一致。</p>
+    </div>
+    <div class="eg">
+      <span class="label">例 19.9（把步长改成递减）</span>
+      <p>同一个目标，改用 $\alpha_k=1/k$，$w_1=1$，样本依次为 $+1,-1,-1,+1,-1,+1$。
+        由 0017 课命题 17.3，此时 $w_{k+1}$ 就是前 $k$ 个样本的平均：
+        $w_2=1$，$w_3=0$，$w_4=-\frac{1}{3}$，$w_5=0$，$w_6=-\frac{1}{5}$，$w_7=0$。
+        轨迹仍然左右摇摆，但幅度按 $1/k$ 衰减。作为对比，BGD 在同一个目标上取 $\alpha_1=1$，
+        第一步就把 $w$ 落到最优点上。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 200" role="img" aria-label="批量梯度下降的轨迹平滑地落到最优点，随机梯度下降一路抖动">
+        <line x1="60" y1="100" x2="500" y2="100" class="mark"/>
+        <text x="426" y="92" class="val-b">最优解</text>
+        <line x1="60" y1="26" x2="60" y2="180" class="axis-b"/>
+        <line x1="60" y1="180" x2="500" y2="180" class="axis-b"/>
+        <text x="60" y="196" class="lbl">迭代步数</text>
+        <path d="M70 40 C 130 44 190 92 300 99 C 380 100 440 100 490 100" class="curve2"/>
+        <text x="150" y="34" class="lbl">BGD：平滑落到最优点</text>
+        <path d="M70 40 L110 130 L150 62 L190 138 L230 70 L270 132 L310 78 L350 126 L390 84 L430 120 L470 92" class="curve"/>
+        <text x="300" y="152" class="lbl">SGD：一直在最优解两侧抖</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 19.2</span>
+        同一个二次目标、同一套步长下两条轨迹。批量梯度下降每步都沿着真实梯度走，轨迹很快贴到最优点；
+        随机梯度下降每步只看到一个样本，方向时对时错，于是在最优点附近来回换。</figcaption>
+    </figure>
+    <figure class="fig">
+      <svg viewBox="0 0 520 190" role="img" aria-label="常数步长的抖动不衰减，递减步长的抖动按 1 比 k 变小">
+        <line x1="60" y1="100" x2="500" y2="100" class="axis-b"/>
+        <line x1="60" y1="26" x2="60" y2="174" class="axis-b"/>
+        <text x="60" y="190" class="lbl">迭代步数</text>
+        <path d="M70 40 L110 142 L150 58 L190 144 L230 60 L270 142 L310 62 L350 140 L390 64 L430 138 L470 66" class="curve"/>
+        <path d="M70 40 L120 118 L180 78 L250 106 L330 90 L420 100 L490 96" class="curve2"/>
+        <text x="300" y="46" class="lbl">常数步长：幅度不衰减</text>
+        <text x="330" y="160" class="lbl">递减步长：幅度按 1/k 变小</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 19.3</span>
+        实线是常数步长的轨迹，摆动幅度始终不降；虚线是递减步长的轨迹，摆动幅度按 1/k 收缩，
+        最后贴到最优点。这就是定理 19.6 里步长条件为什么要分成两条的原因。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>6. 步长怎么排</h2>
+    <p>定理 19.6 的步长条件给出一个范围，常用的排法有三种。</p>
+    <div class="eq">
+      <span class="eq-body">$$\alpha_k=\frac{1}{k},\qquad
+        \alpha_k=\frac{\alpha_0}{(1+k)^{\beta}}\quad(\beta\in(0.5,1]).$$</span>
+      <span class="eq-num">(19.11)</span>
+    </div>
+    <ul>
+      <li>$\alpha_k=1/k$：两条条件都满足，最省心。缺点是后期几乎不再吸收新样本。</li>
+      <li>多项式衰减：$\beta=1$ 时与 $1/k$ 同阶；$\beta\le0.5$ 会破坏 $\sum\alpha_k^2<\infty$，
+        于是抖动不收敛。$\beta$ 取 $0.5$ 到 $1$ 之间都能用。</li>
+      <li>分段常数：每一段里步长不变，段长有限时这一段内的平方和有限，折几次就满足条件。
+        它实现最简单，还能随时调整，是深度学习里最常见的做法。</li>
+    </ul>
+    <div class="rem">
+      <span class="label">注记 19.10（为什么不用固定的小步长）</span>
+      <p>常数步长 $a$ 不满足 $\sum_k\alpha_k^2<\infty$，所以 $w_k$ 不会收敛到一个点，
+        而是停在最优点附近的邻域里，宽度由式 (19.10) 给出。实践中这样选有两个理由：
+        数据分布（样本是从哪儿来的、各占多大比例）随时间缓慢变化时，常数步长还能继续吸收新样本；
+        起步阶段用大一点的步长能快速接近最优点，后期再缩小步长把抖动压下去。
+        单纯用一个很小的固定步长，两个好处都拿不到。</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 520 190" role="img" aria-label="三种常见步长形状：调和衰减、多项式衰减、分段常数">
+        <line x1="56" y1="150" x2="500" y2="150" class="axis-b"/>
+        <line x1="56" y1="26" x2="56" y2="150" class="axis-b"/>
+        <text x="56" y="172" class="lbl">迭代步数</text>
+        <text x="16" y="24" class="lbl">步长</text>
+        <path d="M60 34 Q 110 110 490 142" class="curve"/>
+        <text x="150" y="60" class="lbl">1/k：衰减最快</text>
+        <path d="M60 46 Q 180 116 490 130" class="curve2"/>
+        <text x="250" y="106" class="lbl">多项式衰减：β 取 0.5 到 1</text>
+        <path d="M60 74 H180 V96 H300 V118 H420 V136 H500" class="arrow-a"/>
+        <text x="330" y="60" class="lbl">分段常数：跑一段打个折</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 19.4</span>
+        三条曲线都要满足"总步长无限、平方和有限"。分段常数是把前一条曲线用阶梯近似，
+        实现上只需要在固定的步数处把步长乘一个小于 1 的因子。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>7. 数据不是随机抽的怎么办</h2>
+    <p>有时手上只有一批固定的数 $\{x_i\}_{i=1}^n$，要最小化的是 $\frac{1}{n}\sum_{i=1}^n f(w,x_i)$，
+      看起来根本没有随机变量，SGD 也就无从谈起。</p>
+    <p>补救办法是把 $X$ 看成在这批数上均匀取值的随机变量：
+      $\frac{1}{n}\sum_i f(w,x_i)=\E[f(w,X)]$ 是严格成立的等式，不是近似。
+      此时要让它真的算 SGD，每一步就必须独立均匀地从 $\{x_i\}$ 里抽一个，允许重复抽到同一个数。
+      按固定顺序一个接一个循环地喂数据，样本之间就不独立了，定理 19.6 的条件 (c) 也就不成立。
+      这就是实践中每个 epoch 都要把数据重新打乱一次的理由。</p>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>目标 $J(w)=\E[f(w,X)]$，梯度 $\nabla_wJ(w)=\E[\nabla_wf(w,X)]$，交换求导与求期望需要条件。</li>
+      <li>BGD 每步用全部样本、方差最小；SGD 每步一个样本、方差最大、最便宜；MBGD 取中间，$m=1$ 退化成 SGD。</li>
+      <li>随机梯度等于真实梯度加零均值噪声，所以 SGD 是 RM 的特例，收敛性由 0017 课的定理接管。</li>
+      <li>收敛条件是二阶导数有界在 $[c_1,c_2]$、两条步长条件、样本独立同分布。</li>
+      <li>相对误差与离最优点的距离成反比，所以远的阶段平滑、近的阶段抖；常数步长会停在邻域里，宽度是 $\frac{\alpha\sigma^2}{2c-\alpha c^2}$。</li>
+    </ul>
+    <p>下一课进入时序差分（用走一步之后的新估计更新旧估计）：状态值估计。
+      它把本课的 SGD 用到贝尔曼误差上，会同时出现自举（用自己当前的估计更新自己当前的估计）
+      带来的偏差与采样带来的方差，两者怎么权衡是那一课的主线。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">1. 小批量梯度下降每步用 $m$ 个样本，$m$ 取多少时它退化成 SGD？</p>
+      <ol class="mcq-options">
+        <li>$m=n$，即全部样本</li>
+        <li>$m=0$，即不使用任何样本</li>
+        <li>$m=1$，即每步只用一个样本</li>
+        <li>无论 $m$ 取多少都不行</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每步只用一个样本就是 SGD 的定义，所以 $m=1$ 时两者重合。</p>
+        <p>A 是另一个极端，样本越多越接近 BGD。B 没有样本就没有梯度。
+          D 错在 $m=1$ 这个特例是成立的。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 关于 BGD 与 SGD 在每步用多少样本上的差别，下列说法正确的是哪个？</p>
+      <ol class="mcq-options">
+        <li>BGD 每步用全部样本，梯度估计没有随机性；SGD 每步一个样本，梯度估计是随机的</li>
+        <li>BGD 每步用一个样本，SGD 每步用全部样本</li>
+        <li>两者每步用的样本数相同，只是取样本的顺序不同</li>
+        <li>SGD 的梯度估计没有随机性，BGD 的才有</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：BGD 的梯度是 $n$ 个样本梯度的平均，写成式 (19.3) 后不含随机变量；
+          SGD 只用 $x_k$，梯度本身是随机的。</p>
+        <p>B 把两者说反了。C 错在样本数差别才是核心。D 也把随机性安反了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 把 SGD 写成 RM 的形式时，观测 $\tilde{g}(w_k,\eta_k)$ 与噪声 $\eta_k$ 分别取什么？</p>
+      <ol class="mcq-options">
+        <li>取真实梯度，噪声来自样本 $x_k$ 本身</li>
+        <li>取随机梯度，噪声等于随机梯度减去真实梯度</li>
+        <li>取目标函数值 $f(w_k,x_k)$，噪声等于 $J(w_k)$</li>
+        <li>取随机梯度，噪声等于目标函数值之差</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由式 (19.6)，随机梯度等于真实梯度加噪声，噪声就是这两者之差，
+          它的条件均值为零。</p>
+        <p>A 取的是真实梯度，那就不是 SGD 了。C 与 D 都把梯度换成了函数值，量纲上就对不上。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">4. 均值估计可以写成 SGD 求解 $\min_w\E[f(w,X)]$，其中 $f$ 取什么？</p>
+      <ol class="mcq-options">
+        <li>$f(w,X)=w-X$，它对 $w$ 的梯度与 $w$ 无关</li>
+        <li>$f(w,X)=\sqrt{(w-X)^2}$，在 $w=X$ 处不可导</li>
+        <li>$f(w,X)=|w-X|$，在 $w=X$ 处也不可导</li>
+        <li>$f(w,X)=\frac{1}{2}\|w-X\|^2$，梯度是 $w-X$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\frac{1}{2}\|w-X\|^2$ 对 $w$ 求梯度得 $w-X$，令期望梯度为零就得 $w^*=\E[X]$，
+          所以它对应的 SGD 正好是增量式均值估计。</p>
+        <p>A 对 $w$ 的梯度恒为 $1$，跟 $w$ 无关。B 就是 $|w-X|$，在 $w=X$ 处不可导。
+          C 在 $w=X$ 处也不可导，而且它对应的随机梯度不是 $w-X$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 递推 $w_{k+1}=(1-\alpha c)w_k-\alpha\eta_k$ 在常数步长下的平稳方差是多少？</p>
+      <ol class="mcq-options">
+        <li>$\sigma^2$，与步长无关，无论步长多小都是它</li>
+        <li>$\frac{\sigma^2}{2}$，噪声正负抵消只留一半</li>
+        <li>$\frac{\alpha\sigma^2}{2c-\alpha c^2}$，步长越小越接近零</li>
+        <li>$0$，因为噪声均值是零，长期一定会抵消干净</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两边平方取期望并令平稳值相等，得到 $V=(1-\alpha c)^2V+\alpha^2\sigma^2$，
+          解出 $V=\frac{\alpha\sigma^2}{2c-\alpha c^2}$，它随 $\alpha$ 单调趋于零。</p>
+        <p>A 丢掉了步长的收缩作用。B 没有任何依据，噪声不会自己减半。
+          D 错在均值为零只保证不被系统地推偏，方差仍然会被噪声不断注入。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">6. 手上只有固定的一批数 $\{x_i\}$，想用 SGD 最小化它们的平均。做法正确的是哪个？</p>
+      <ol class="mcq-options">
+        <li>每步独立均匀地随机抽一个，允许重复抽到同一个数</li>
+        <li>按固定顺序从头到尾循环使用，一遍又一遍</li>
+        <li>每步取这批数的中位数当作下一个样本</li>
+        <li>每步用全部样本算出平均梯度，像 BGD 那样</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把这批数看成均匀分布，$\frac{1}{n}\sum_i f(w,x_i)$ 严格等于 $\E[f(w,X)]$，
+          此时要满足独立同分布，就必须每步独立均匀地抽，允许重复。</p>
+        <p>B 会让样本之间产生依赖，破坏定理的条件 (c)。C 取的不是随机梯度。
+          D 描述的是 BGD，不是 SGD。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">7. 一维二次目标 $J(w)=\frac{1}{2}cw^2$ 上做 SGD，用常数步长 $\alpha$。要不让误差被逐步放大，需要什么条件？</p>
+      <ol class="mcq-options">
+        <li>只要 $\alpha>0$ 就一定收敛</li>
+        <li>需要 $\alpha c>2$，步子越大越好</li>
+        <li>需要 $\alpha<0$，反着走更稳</li>
+        <li>需要 $\alpha c\lt2$，否则误差会被放大</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：递推里的因子是 $1-\alpha c$，要它落在 $-1$ 与 $1$ 之间，误差才会一步步缩小，
+          也就是 $\alpha c\lt2$。</p>
+        <p>A 漏掉了上界。B 恰好越过了上界，因子会小于 $-1$。C 的负步长等于朝梯度上升方向走。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">8. 取 $J(w)=\frac{w^2}{2}$（即 $f(w,x)=\frac{1}{2}(w-x)^2$，且 $\E[X]=0$），
+        步长恒为 $\frac{1}{2}$，$w_1=1$，第一个样本 $x_1=-1$。$w_2$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$w_2=-1$，与第一个样本相同</li>
+        <li>$w_2=0$，误差被一步消掉</li>
+        <li>$w_2=\frac{1}{2}$，只走了一半</li>
+        <li>$w_2=2$，越过了最优点</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$w_2=w_1-\frac{1}{2}(w_1-x_1)=1-\frac{1}{2}\big(1-(-1)\big)=1-1=0$。</p>
+        <p>A 忘了更新式里用的是误差 $w_1-x_1$ 而不是 $x_1$。C 是下一步 $w_3$ 的值。
+          D 把减号看成了加号。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 同一个目标，改用 $\alpha_k=1/k$，$w_1=1$，样本依次为 $+1,-1,-1,+1$。$w_5$ 等于多少？</p>
+      <ol class="mcq-options">
+        <li>$w_5=1$，与第一个样本相同</li>
+        <li>$w_5=\frac{1}{3}$，三个正样本的平均</li>
+        <li>$w_5=0$，因为前四个样本的平均就是零</li>
+        <li>$w_5=-\frac{1}{3}$，因为第三个样本是负的</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\alpha_k=1/k$ 时 $w_5$ 等于前四个样本的平均，
+          $(1-1-1+1)/4=0$。</p>
+        <p>A 只是初值，第一个样本是 $+1$ 而 $w_2$ 确实等于 $1$，但 $w_5$ 已经不同。
+          B 忽略了负样本。D 那是 $w_4$ 的值。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 实践中为什么常用小批量而不是纯 SGD 或纯 BGD？</p>
+      <ol class="mcq-options">
+        <li>因为小批量的梯度方差最大，能帮助跳出局部最优解</li>
+        <li>因为小批量每步不需要任何样本，计算量最小</li>
+        <li>因为 BGD 根本无法收敛，而 SGD 又太慢</li>
+        <li>因为它在方差与计算量之间取折中，比 SGD 稳，也比 BGD 省</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每步样本数越多方差越小但越贵，小批量取的是这条曲线上的中间点，
+          还能利用矩阵运算把一批样本并行算完。</p>
+        <p>A 说反了，方差随批量变大而变小。B 没有样本就没有梯度。
+          C 错在 BGD 也会收敛，只是每步太贵。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 6 章 6.4 节，含三种算法的定义、均值估计的例子、收敛模式的分析与定理 6.4。
+        本课的式 (19.1) 到式 (19.7)、例 19.4 与定理 19.6 的口径都取自这一节。</p>
+      <p>更细的学习率调度与二阶方法，可读 L. Bottou, F. Curtis, J. Nocedal,
+        <em>Optimization Methods for Large-Scale Machine Learning</em>, 2018, 第 4 至 5 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把例 19.8 的六步再算一遍"，
+      或者 "为什么 $\alpha_k=1/\sqrt{k}$ 会让抖动一直存在？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

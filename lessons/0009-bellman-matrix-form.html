@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0009 · 贝尔曼方程的矩阵形式与求解；动作值 — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0009" data-slug="bellman-matrix-form" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第一部分 · 基础工具 5／15</p>
+    <h1>贝尔曼方程的矩阵形式与求解；动作值</h1>
+    <p class="lede">上一课把状态价值（只看状态、不管具体选哪个动作的那个价值）写成了自洽方程。
+      本课把它排成矩阵与向量的一行等式，
+      给出两个解法：闭式解 $(I-\gamma P_\pi)^{-1}r_\pi$ 与迭代解 $v_{k+1}=r_\pi+\gamma P_\pi v_k$，
+      式中 $\gamma$ 读作"伽马"，$\pi$ 读作"派"，两个解法都给出证明。最后把动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）
+      也纳入同一套矩阵运算。</p>
+    <div class="objectives">
+      <h2>学完这一课你会</h2>
+      <ul>
+        <li>能写出 $P_\pi$ 与 $r_\pi$ 的元素定义，并说清 $P_\pi$ 为什么每一行加起来等于 1</li>
+        <li>能用 Neumann 级数证明 $I-\gamma P_\pi$ 可逆，并写出闭式解</li>
+        <li>能证明迭代解收敛（一轮轮算下去，数值稳定到不再变化）到不动点，并写出误差上界与迭代次数估计</li>
+        <li>能把动作值写成矩阵形式，并说明它与状态值方程是同一件事</li>
+        <li>能在 2×2 网格世界上把两个解法都算一遍并互相对照</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 从逐状态方程到一行等式</h2>
+    <p>状态（此刻你能看到的信息，是你做决定的依据）用 $s$ 表示，
+      动作（你这一步能做的选择）用 $a$ 表示，策略（一套"看到什么状态就选什么动作"的规则）
+      在状态 $s$ 下选动作 $a$ 的概率记作 $\pi(a\mid s)$，$\pi$ 读作"派"。
+      奖励的期望记作 $r(s,a)$，转移概率（这个跳转有可能跳到好几个地方，每个地方各带一个概率）
+      记作 $p(s'\mid s,a)$，其中状态这一维的跳转叫状态转移。折扣因子（越往后的奖励，
+      算进总分时权重越小）记作 $\gamma$，$\gamma$ 读作"伽马"，它是一个 $[0,1)$ 里的数。</p>
+    <p>上一课得到的贝尔曼方程（把"这一步的价值"和"下一步的价值"连起来的等式）是：对每个状态 $s$，</p>
+    <div class="eq">
+      <span class="eq-body">$$v_\pi(s)=\sum_a\pi(a\mid s)\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)\,v_\pi(s')\Big].$$</span>
+      <span class="eq-num">(9.1)</span>
+    </div>
+    <p>把状态编号成 $1,2,\dots,n$，$v_\pi$ 就是一个 $n$ 维列向量，第 $s$ 个分量是 $v_\pi(s)$。
+      式 (9.1) 对每个 $s$ 各写一条，合起来就是一组线性方程。</p>
+    <div class="def">
+      <span class="label">定义 1.1（策略 $\pi$ 下的转移矩阵与奖励向量）</span>
+      <p>记 $n$ 为状态个数。$P_\pi$ 是 $n\times n$ 方阵，$r_\pi$ 是 $n$ 维列向量，元素定义为
+        $$[P_\pi]_{s,s'}=\sum_a\pi(a\mid s)\,p(s'\mid s,a),\qquad
+          [r_\pi]_s=\sum_a\pi(a\mid s)\,r(s,a).$$
+        式中 $[P_\pi]_{s,s'}$ 表示矩阵第 $s$ 行第 $s'$ 列的元素，
+        $\mid\cdot\mid$ 在这里只表示下标位置，不是绝对值；
+        $P_\pi$ 叫状态转移矩阵（把"策略下从哪跳到哪"的整套概率排成一张表），
+        $r_\pi$ 叫奖励向量。$P_\pi$ 与 $r_\pi$ 都只跟策略 $\pi$ 有关，与时间 $t$ 无关。</p>
+    </div>
+    <p>两个元素定义各做了一次平均：$P_\pi$ 的第 $s$ 行是"在状态 $s$ 按 $\pi$ 选动作之后，
+      下一个状态落在各处的概率"，所以这一行加起来等于 1：</p>
+    <div class="eq">
+      <span class="eq-body">$$\sum_{s'}[P_\pi]_{s,s'}=\sum_a\pi(a\mid s)\sum_{s'}p(s'\mid s,a)=\sum_a\pi(a\mid s)=1.$$</span>
+      <span class="eq-num">(9.2)</span>
+    </div>
+    <p>满足式 (9.2) 的非负方阵叫行随机矩阵。把式 (9.1) 右边的两层求和按定义 1.1 合并，
+      就得到矩阵形式：</p>
+    <div class="eq">
+      <span class="eq-body">$$v_\pi=r_\pi+\gamma P_\pi v_\pi.$$</span>
+      <span class="eq-num">(9.3)</span>
+    </div>
+    <p>见式 (9.3)：一个 $n$ 维未知向量，一行等式。式中 $\gamma$ 读作"伽马"，
+      $\pi$ 读作"派"，状态个数不再是麻烦的来源，麻烦只剩下"怎么把这行等式解出来"。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 250" role="img" aria-label="矩阵形式的结构：n维向量等于奖励向量加上折扣因子乘方阵再乘向量">
+        <text x="30" y="60" class="val-b">v策略</text>
+        <text x="30" y="82" class="lbl">n×1</text>
+        <text x="96" y="70" class="val-b">=</text>
+        <text x="130" y="60" class="val-b">r策略</text>
+        <text x="130" y="82" class="lbl">n×1</text>
+        <text x="200" y="70" class="val-b">+</text>
+        <text x="234" y="60" class="val-b">折扣因子</text>
+        <text x="272" y="60" class="val-b">P策略</text>
+        <text x="266" y="82" class="lbl">n×n</text>
+        <text x="352" y="70" class="val-b">·</text>
+        <text x="378" y="60" class="val-b">v策略</text>
+        <text x="378" y="82" class="lbl">n×1</text>
+        <rect x="24" y="24" width="512" height="76" rx="4" class="box"/>
+        <rect x="262" y="110" width="86" height="70" rx="4" class="box-a"/>
+        <text x="270" y="132" class="lbl">第 s 行</text>
+        <text x="270" y="152" class="lbl">是"从 s</text>
+        <text x="270" y="172" class="lbl">跳到哪"</text>
+        <path d="M305 106 V96" class="arrow-a"/>
+        <path d="M299 100 l6 -10 l6 10" class="arrow-a"/>
+        <text x="30" y="150" class="lbl">每一行加起来等于 1</text>
+        <text x="30" y="172" class="lbl">所以折后矩阵的"伸缩能力"小于 1</text>
+        <text x="30" y="206" class="lbl">这条性质是下一节可逆性证明的全部依据</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 9.1</span>
+        式 (9.3) 的形状：左边是待求的状态值向量，右边是一个已知向量加上
+        折扣因子乘转移矩阵再乘同一个向量。转移矩阵每一行加起来等于 1，
+        这条性质让折后矩阵的"伸缩能力"不超过折扣因子。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 1.2（续用 2×2 网格世界）</span>
+      <p>第 0008 课定义的网格世界（四个状态 $s_1$ 到 $s_4$，动作只有向右与向下，
+        走成一步得 1 分、撞墙扣 1 分、$s_4$ 是终点）继续使用。
+        取策略 $\pi_1$（在 $s_1,s_3$ 向右，在 $s_2,s_4$ 向右越界）与 $\gamma=0.9$。
+        把状态按 $s_1,s_2,s_3,s_4$ 排序，$P_{\pi_1}$ 的第 $s$ 行只在
+        "从 $s$ 出发走到的那个状态"处是 1：$s_1\to s_2$，$s_2\to s_2$，
+        $s_3\to s_4$，$s_4\to s_4$。于是
+        $$P_{\pi_1}=\begin{pmatrix}
+          0&1&0&0\\ 0&1&0&0\\ 0&0&0&1\\ 0&0&0&1
+        \end{pmatrix},\qquad r_{\pi_1}=\begin{pmatrix}1\\ -1\\ 1\\ 0\end{pmatrix}.$$
+        两个矩阵都直接来自上一课逐状态写下的方程，没有任何新东西。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 闭式解与可逆性</h2>
+    <p>式 (9.3) 里未知量出现在两边。把右边的未知量移到左边：$(I-\gamma P_\pi)v_\pi=r_\pi$，
+      其中 $I$ 是单位矩阵（对角线上是 1，其余是 0）。只要 $I-\gamma P_\pi$ 可逆，解就唯一。
+      下面用 Neumann 级数（把矩阵的逆写成一串矩阵幂的和）证明它可逆。</p>
+    <div class="thm">
+      <span class="label">引理 2.1（Neumann 级数）</span>
+      <p>设 $A$ 是方阵，若存在一种矩阵范数 $\|\cdot\|$ 使 $\|A\|<1$，则 $I-A$ 可逆，并且
+        $$(I-A)^{-1}=I+A+A^2+A^3+\cdots,$$
+        右端的级数按该范数绝对收敛（一项项加下去，总和不再无限变大）。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：先说明右端的级数收敛（一项项加下去，总和不再无限变大）（一轮轮加下去，数值不再明显变化，稳定下来了），
+        再把它与 $I-A$ 相乘验证乘积为单位矩阵。</p>
+      <p>先看收敛。记部分和 $S_m=I+A+\cdots+A^m$。对 $m>k$，由三角不等式与
+        矩阵范数的次可乘性 $\|A^i\|\le\|A\|^i$，
+        $$\|S_m-S_k\|\le\sum_{i=k+1}^{m}\|A\|^i\le\frac{\|A\|^{k+1}}{1-\|A\|}.$$
+        因为 $\|A\|$ 小于 1，右端随 $k$ 趋于 0，所以 $\{S_m\}$ 收敛（第 0004 课），记极限为 $S$。</p>
+      <p>再看乘积。由 $(I-A)S_m=S_m(I-A)=I-A^{m+1}$，令 $m\to\infty$。
+        左端趋于 $(I-A)S$ 与 $S(I-A)$；右端趋于 $I$。
+        于是 $(I-A)S=S(I-A)=I$，$S$ 就是 $I-A$ 的逆。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 2.2（$I-\gamma P_\pi$ 可逆与闭式解）</span>
+      <p>设状态数有限，$\gamma\in[0,1)$。则 $I-\gamma P_\pi$ 可逆，且式 (9.3) 的解唯一，等于</p>
+      <div class="eq">
+        <span class="eq-body">$$v_\pi=(I-\gamma P_\pi)^{-1}r_\pi.$$</span>
+        <span class="eq-num">(9.4)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>由式 (9.2)，$P_\pi$ 每一行的绝对值之和等于 1，所以它的无穷范数
+        $\|P_\pi\|_\infty=1$，其中无穷范数指矩阵每一行绝对值之和的最大值。
+        于是 $\|\gamma P_\pi\|_\infty=\gamma<1$。把引理 2.1 用在 $A=\gamma P_\pi$ 上，
+        $I-\gamma P_\pi$ 可逆，式 (9.3) 两边左乘它的逆就得到式 (9.4)，
+        解也就唯一。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>把引理 2.1 的级数代进式 (9.4)：</p>
+    <div class="eq">
+      <span class="eq-body">$$v_\pi=\Big(I+\gamma P_\pi+\gamma^2P_\pi^2+\cdots\Big)r_\pi
+        =r_\pi+\gamma P_\pi r_\pi+\gamma^2P_\pi^2r_\pi+\cdots.$$</span>
+      <span class="eq-num">(9.5)</span>
+    </div>
+    <p>见式 (9.5)：第 $k$ 项 $P_\pi^k r_\pi$ 的第 $s$ 个分量，是"从 $s$ 出发走 $k$ 步之后
+      拿到的即时奖励的平均"，前面乘了 $\gamma^k$。无穷多项加起来，正好把从 $s$ 出发的全部未来奖励折现，
+      这与回报（从现在起一直到结束，把每一步奖励加起来的总分）的定义对上了。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 220" role="img" aria-label="Neumann级数的每一项都打一次折扣，部分和越来越接近精确解">
+        <line x1="60" y1="170" x2="510" y2="170" class="axis-b"/>
+        <line x1="60" y1="40" x2="60" y2="170" class="axis-b"/>
+        <rect x="76"  y="96" width="34" height="74" class="bar"/>
+        <rect x="130" y="116" width="34" height="54" class="bar"/>
+        <rect x="184" y="130" width="34" height="40" class="bar"/>
+        <rect x="238" y="140" width="34" height="30" class="bar"/>
+        <rect x="292" y="148" width="34" height="22" class="bar"/>
+        <rect x="346" y="154" width="34" height="16" class="bar"/>
+        <rect x="400" y="158" width="34" height="12" class="bar"/>
+        <rect x="454" y="161" width="34" height="9" class="bar"/>
+        <line x1="60" y1="66" x2="510" y2="66" class="mark"/>
+        <text x="404" y="60" class="val-b">精确解 v策略</text>
+        <text x="76" y="188" class="lbl">k=0</text>
+        <text x="238" y="188" class="lbl">k=3</text>
+        <text x="454" y="188" class="lbl">k=7</text>
+        <text x="60" y="208" class="lbl">每多一项就多绕 折扣因子 圈：柱高按 折扣因子 倍缩，加起来刚好补到精确解</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 9.2</span>
+        式 (9.5) 里每一项的贡献按折扣因子的幂缩小。前几项占了大头，后面越来越扁；
+        把所有柱高接起来正好等于精确解。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 迭代解与收敛性</h2>
+    <p>闭式解要算一次矩阵求逆，状态多时很贵。换一条路：把式 (9.3) 的右边当成一个映射，
+      反复作用在当前的估计上。</p>
+    <div class="def">
+      <span class="label">定义 3.1（贝尔曼算子 $T_\pi$）</span>
+      <p>对任意 $v\in\R^n$，定义
+        $$(T_\pi v)(s)=\sum_a\pi(a\mid s)\Big[r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)v(s')\Big],$$
+        写成向量形式就是 $T_\pi v=r_\pi+\gamma P_\pi v$。
+        这个映射叫贝尔曼算子（把一整组价值估计按方程右边重新算一遍的规则），记作 $T_\pi$。
+        式 (9.3) 于是可以读成 $v_\pi=T_\pi v_\pi$，意思是 $v_\pi$ 是 $T_\pi$ 的不动点
+        （再迭代一次也不变的那种解）。</p>
+    </div>
+    <p>迭代解就是 $v_{k+1}=T_\pi v_k$，写成显式：</p>
+    <div class="eq">
+      <span class="eq-body">$$v_{k+1}=r_\pi+\gamma P_\pi v_k,\qquad k=0,1,2,\dots$$</span>
+      <span class="eq-num">(9.6)</span>
+    </div>
+    <p>起点 $v_0$ 可以任取。要证明的是：无论从哪里出发，$v_k$ 都会靠近 $v_\pi$。
+      关键性质是 $T_\pi$ 会把两个不同估计之间的距离缩小 $\gamma$ 倍。</p>
+    <div class="thm">
+      <span class="label">定理 3.2（$T_\pi$ 是 $\gamma$-压缩）</span>
+      <p>对任意 $u,v\in\R^n$ 成立
+        $$\|T_\pi u-T_\pi v\|_\infty\le\gamma\,\|u-v\|_\infty,$$
+        式中 $\|x\|_\infty=\max_s|x(s)|$ 是无穷范数（取各分量绝对值里最大的那个）。
+        特别地，$T_\pi$ 在 $\R^n$ 上有唯一不动点。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>思路：先把两个估计之差的无穷范数提出来，再用 $P_\pi$ 的行和为 1 收尾。</p>
+      <p>由 $T_\pi$ 的定义（定义 3.1），对每个 $s$，
+        $$(T_\pi u)(s)-(T_\pi v)(s)=\gamma\sum_{s'}[P_\pi]_{s,s'}\big(u(s')-v(s')\big).$$
+        记 $d=\|u-v\|_\infty$，则每个 $|u(s')-v(s')|\le d$。把上式取绝对值，
+        用三角不等式并把 $d$ 提出来：
+        $$\big|(T_\pi u)(s)-(T_\pi v)(s)\big|\le\gamma\,d\sum_{s'}[P_\pi]_{s,s'}=\gamma\,d,$$
+        最后一步用了式 (9.2) 的行和为 1，以及 $P_\pi$ 的元素非负。
+        右端与 $s$ 无关，对 $s$ 取最大值仍成立，这就得到定理的结论。</p>
+      <p>唯一性：若 $u,v$ 都是不动点，则 $\|u-v\|_\infty\le\gamma\|u-v\|_\infty$，
+        由 $\gamma$ 小于 1 只能 $u=v$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <div class="thm">
+      <span class="label">定理 3.3（迭代解收敛，并给出误差上界）</span>
+      <p>任取 $v_0\in\R^n$，按式 (9.6) 生成序列 $\{v_k\}$。则对每个 $k$ 成立</p>
+      <div class="eq">
+        <span class="eq-body">$$\|v_{k+1}-v_\pi\|_\infty\le\gamma\,\|v_k-v_\pi\|_\infty
+          \le\gamma^{k+1}\|v_0-v_\pi\|_\infty.$$</span>
+        <span class="eq-num">(9.7)</span>
+      </div>
+      <p>于是 $v_k\to v_\pi$（每个分量都收敛），并且达到 $\|v_k-v_\pi\|_\infty\le\varepsilon$
+        所需的迭代次数不超过 $\log\big(\varepsilon/\|v_0-v_\pi\|_\infty\big)/\log\gamma$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>因为 $v_\pi=T_\pi v_\pi$（定义 3.1），所以 $v_{k+1}-v_\pi=T_\pi v_k-T_\pi v_\pi$。
+        由定理 3.2 得第一段不等式，对它做数学归纳得第二段不等式。</p>
+      <p>令 $k\to\infty$：右端趋于 0，于是每个分量都收敛到真值。
+        要让 $\gamma^k\|v_0-v_\pi\|_\infty\le\varepsilon$，两边取对数；
+        因为 $\gamma$ 小于 1 时 $\log\gamma$ 是负数，除以它时不等号反转，
+        得到 $k\ge\log(\varepsilon/\|v_0-v_\pi\|_\infty)/\log\gamma$。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>这个证明说明了迭代解与闭式解的关系：迭代解是式 (9.5) 那个级数的部分和。
+      从 $v_0=0$ 出发，$v_1=r_\pi$，$v_2=r_\pi+\gamma P_\pi r_\pi$，第 $k$ 步正好把前 $k$ 项加起来。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 240" role="img" aria-label="迭代的压缩过程：每迭代一次，估计与真值之间的差距缩小折扣因子倍">
+        <line x1="60" y1="180" x2="520" y2="180" class="axis-b"/>
+        <line x1="60" y1="40" x2="60" y2="180" class="axis-b"/>
+        <path d="M70 60 L130 96 L190 122 L250 142 L310 155 L370 164 L430 170 L490 174" class="curve"/>
+        <line x1="60" y1="66" x2="520" y2="66" class="mark"/>
+        <text x="424" y="60" class="val-b">真值 v策略</text>
+        <path d="M70 60 L70 62" class="dot-a"/>
+        <circle cx="70" cy="60" r="4" class="dot-a"/>
+        <circle cx="130" cy="96" r="4" class="dot"/>
+        <circle cx="190" cy="122" r="4" class="dot"/>
+        <circle cx="250" cy="142" r="4" class="dot"/>
+        <circle cx="310" cy="155" r="4" class="dot"/>
+        <text x="66" y="198" class="lbl">v0</text>
+        <text x="126" y="198" class="lbl">v1</text>
+        <text x="186" y="198" class="lbl">v2</text>
+        <text x="246" y="198" class="lbl">v3</text>
+        <text x="306" y="198" class="lbl">v4</text>
+        <text x="60" y="222" class="lbl">每步把与真值的差距乘上 折扣因子：差距 = 折扣因子^k 乘初始差距</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 9.3</span>
+        定理 3.3 的图像：纵轴是"当前估计与真值差多少"，每迭代一次这个差就乘上折扣因子。
+        折扣因子越接近 1 曲线越平，需要的迭代次数越多；折扣因子越小收敛越快。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 3.4（在网格世界上真算几轮）</span>
+      <p>用例 1.2 的 $P_{\pi_1}$、$r_{\pi_1}$ 与 $\gamma=0.9$，从 $v_0=(0,0,0,0)^\top$ 出发，
+        按式 (9.6) 算前三轮：$v_1=(1,-1,1,0)^\top$，$v_2=(0.1,-1.9,1,0)^\top$，
+        $v_3=(-0.71,-2.71,1,0)^\top$。真值是 $v_\pi=(-8,-10,1,0)^\top$（第 0008 课例 4.3）。
+        $\|v_3-v_\pi\|_\infty=7.29$，正好等于 $\gamma^3\|v_0-v_\pi\|_\infty=0.729\times10$，
+        与式 (9.7) 一致。$s_3,s_4$ 已经到位，因为它们的方程不依赖别的状态。
+        要把误差降到 0.1 以下，大约要 44 轮。</p>
+    </div>
+    <div class="thm">
+      <span class="label">定理 4.2（动作值的两种矩阵形式）</span>
+      <p>记 $v_\pi$ 为状态值列向量，$Q$ 为动作值矩阵，则</p>
+      <div class="eq">
+        <span class="eq-body">$$Q=R+\gamma\,\mathcal{P}\,v_\pi,\qquad\text{即}\qquad
+          q_\pi(s,a)=r(s,a)+\gamma\sum_{s'}p(s'\mid s,a)\,v_\pi(s'),$$</span>
+        <span class="eq-num">(9.8)</span>
+      </div>
+      <p>并且动作值按策略加权就还原成状态值：</p>
+      <div class="eq">
+        <span class="eq-body">$$v_\pi(s)=\sum_a\pi(a\mid s)\,q_\pi(s,a).$$</span>
+        <span class="eq-num">(9.9)</span>
+      </div>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>第一段按第 0008 课同样的五步推导（回报递推、期望线性性、全期望公式，以及"下一个状态只取决于当前状态和动作"这一性质），
+        只是把第一步的动作固定成 $a$，对动作求平均那一层就不出现，于是得到式 (9.8)。
+        写成矩阵就是把 $s$ 与 $a$ 两个下标摆成行与列。</p>
+      <p>第二段：对 $q_\pi(s,a)$ 用一次全期望公式，把第一个动作 $A_t$ 取遍，
+        $$v_\pi(s)=\sum_a\pi(a\mid s)\,q_\pi(s,a).$$
+        把式 (9.8) 代进去，右边就是式 (9.1) 的右边，
+        所以两段合起来与式 (9.3) 是同一个方程。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>把式 (9.9) 代进式 (9.8)，并注意 $P_\pi$ 与 $r_\pi$ 就是 $P_a$ 与 $r_a$ 按 $\pi$ 加权的结果，
+      得到的恰好是式 (9.3)。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 560 260" role="img" aria-label="动作值矩阵：行是状态、列是动作，按策略对列加权平均得到状态值">
+        <rect x="40" y="40" width="200" height="160" rx="4" class="box"/>
+        <text x="52" y="66" class="lbl">行：状态 s</text>
+        <text x="52" y="102" class="lbl">列：动作 a</text>
+        <text x="52" y="140" class="val-b">Q(s, a) =</text>
+        <text x="52" y="166" class="lbl">r(s,a) + 折扣因子 Σ p(s′|s,a) v策略(s′)</text>
+        <rect x="300" y="40" width="70" height="160" rx="4" class="box-a"/>
+        <text x="304" y="66" class="lbl">策略概率</text>
+        <text x="304" y="102" class="lbl">每列</text>
+        <text x="304" y="126" class="lbl">一个</text>
+        <text x="304" y="150" class="lbl">权重</text>
+        <rect x="430" y="82" width="94" height="76" rx="4" class="box-a"/>
+        <text x="440" y="112" class="val-b">v策略(s)</text>
+        <text x="440" y="136" class="lbl">状态值</text>
+        <path d="M380 120 H424" class="arrow-a"/>
+        <path d="M414 114 l10 6 l-10 6" class="arrow-a"/>
+        <text x="40" y="228" class="lbl">左乘一个"按策略取平均"的权重，动作这一维就被消掉</text>
+        <text x="40" y="248" class="lbl">所以两个方程是同一个方程</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 9.4</span>
+        动作值是一个"状态 × 动作"的表。每一格是"先选这个动作，之后按策略走"的平均总分。
+        对动作这一列按策略概率加权平均，剩下的就是状态值；下一课会在这张表的每一行里挑最大的一格。</figcaption>
+    </figure>
+
+    <div class="eg">
+      <span class="label">例 4.3（在网格世界上核对式 (9.9)）</span>
+      <p>策略 $\pi_1$ 在 $s_1$ 只选向右，所以 $\pi_1(\text{向右}\mid s_1)=1$、
+        $\pi_1(\text{向下}\mid s_1)=0$。用式 (9.8) 算两个动作值：
+        $$q_{\pi_1}(s_1,\text{向右})=1+0.9\times v_{\pi_1}(s_2)=1-9=-8,$$
+        $$q_{\pi_1}(s_1,\text{向下})=1+0.9\times v_{\pi_1}(s_3)=1+0.9=1.9.$$
+        按式 (9.9) 加权：$1\times(-8)+0\times1.9=-8=v_{\pi_1}(s_1)$，与第 0008 课一致。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.4（两个解法怎么选）</span>
+      <p>闭式解适合状态少、$P_\pi$ 完全已知的场合。迭代解每轮只做一次矩阵乘向量，
+        适合状态多的场合，代价是只得到近似值，误差按 $\gamma^k$ 缩小。
+        两条路的终点相同，因为定理 2.2 说解唯一。</p>
+    </div>
+    <div class="rem">
+      <span class="label">注记 4.5（$\gamma$ 在这里的两种面孔）</span>
+      <p>$\gamma$ 既是"让级数收敛的折价系数"，也是"每一步把误差缩小多少的压缩率"，
+        这两件事是同一件事的两面。第 0011 课会把"压缩率小于 1 蕴含唯一不动点"
+        单独证成一条定理。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>把逐状态方程排成 $v_\pi=r_\pi+\gamma P_\pi v_\pi$，未知量就是一个 $n$ 维向量。</li>
+      <li>$P_\pi$ 每行加起来等于 1，因此 $\|\gamma P_\pi\|_\infty\le\gamma<1$。</li>
+      <li>Neumann 级数给出 $(I-\gamma P_\pi)^{-1}=I+\gamma P_\pi+\gamma^2P_\pi^2+\cdots$ 与闭式解。</li>
+      <li>迭代解 $v_{k+1}=r_\pi+\gamma P_\pi v_k$ 每轮把误差乘上 $\gamma$，是级数的部分和。</li>
+      <li>动作值写成表 $Q=R+\gamma\mathcal{P}v_\pi$，按策略对动作加权平均就还原状态值。</li>
+    </ul>
+    <p>下一课换一个问题：不再固定策略，而是问"在所有策略里，每个状态的最高分是多少"。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 关于 $P_\pi$ 与 $r_\pi$ 的元素定义，下面哪一种说法最准确？</p>
+      <ol class="mcq-options">
+        <li>两者都只对动作求平均，与下一个状态无关</li>
+        <li>两者都先按策略对动作求平均，$P_\pi$ 再对下一状态取概率</li>
+        <li>两者都只对下一状态求平均，与策略无关</li>
+        <li>两者都等于某个固定动作下的量和，与策略取值无关</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$[P_\pi]_{s,s'}=\sum_a\pi(a\mid s)p(s'\mid s,a)$ 与
+          $[r_\pi]_s=\sum_a\pi(a\mid s)r(s,a)$ 都先对动作按 $\pi$ 求平均；
+          区别在于 $P_\pi$ 保留了对下一个状态的指标。</p>
+        <p>A 错在 $P_\pi$ 明确带着 $s'$ 这个指标。
+          C 错在两者都依赖策略，换个策略这两个量就都变。
+          D 错在固定动作的版本是 $P_a$ 与 $r_a$，不是 $P_\pi$ 与 $r_\pi$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. 证明 $I-\gamma P_\pi$ 可逆时，第一步用到的是哪条性质？</p>
+      <ol class="mcq-options">
+        <li>$P_\pi$ 的行和恒等于 1，所以无穷范数是 1</li>
+        <li>$P_\pi$ 的元素都非负，所以它的行列式为正</li>
+        <li>$P_\pi$ 的列和等于 1，所以它是双随机矩阵</li>
+        <li>$P_\pi$ 的行和等于 1，所以折后矩阵的范数至多为折扣因子</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：证明的入口是 $\|P_\pi\|_\infty=\max_s\sum_{s'}|[P_\pi]_{s,s'}|=1$，
+          这一步只用到行和等于 1。有了 $\|\gamma P_\pi\|_\infty$ 小于 1 这个事实，Neumann 级数就能用上。</p>
+        <p>A 错在 $P_\pi$ 一般不对称，转移矩阵的行与列含义不同。
+          B 错在元素非负推不出行列式为正。
+          C 错在列和不等于 1 是常见情形，行随机不等于双随机。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 式 (9.5) 的级数 $r_\pi+\gamma P_\pi r_\pi+\gamma^2P_\pi^2r_\pi+\cdots$ 中，
+        第 $k+1$ 项 $(P_\pi^kr_\pi)_s$ 的直观含义是什么？</p>
+      <ol class="mcq-options">
+        <li>从 $s$ 出发走 $k$ 步之后拿到的那份即时奖励的平均</li>
+        <li>从 $s$ 出发走 $k$ 步的过程中拿到的奖励总和</li>
+        <li>走了 $k$ 步之后还留在 $s$ 的概率</li>
+        <li>前 $k$ 步奖励的算术平均，与折扣无关</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$P_\pi^k$ 把"$k$ 步之后落到哪个状态"的分布算出来，
+          左乘 $r_\pi$ 得到那一份即时奖励的平均，前面再乘 $\gamma^k$ 折现。</p>
+        <p>B 错在它只含第 $k$ 步那一份奖励，途中的奖励在别的项里。
+          C 错在 $P_\pi^k$ 是分布而不是"留在原地的概率"，
+          而且 $r_\pi$ 已经把奖励乘进去了。
+          D 错在每项都带 $\gamma^k$，算术平均的说法丢掉了折价。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 在例 1.2 的网格世界与 $\gamma=0.9$ 下，从 $v_0=0$ 出发迭代，
+        $v_1$ 中 $s_1$ 与 $s_2$ 的分量分别是多少？</p>
+      <ol class="mcq-options">
+        <li>都是 $0$，因为起点是零向量</li>
+        <li>$-8$ 与 $-10$，一步就到位</li>
+        <li>$1$ 与 $-1$，正好等于各自的即时奖励</li>
+        <li>$0.9$ 与 $-0.9$，因为要乘折扣因子</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_1=r_\pi+\gamma P_\pi v_0=r_\pi$，因为 $v_0=0$。
+          而 $r_{\pi_1}=(1,-1,1,0)^\top$，所以 $s_1$ 与 $s_2$ 分别是 $1$ 与 $-1$。</p>
+        <p>A 错在 $r_\pi$ 那一项不为零。B 错在一步只算到即时奖励，
+          后续那部分要迭代很多轮才补上。
+          D 错在折扣乘的是 $v_0$ 而不是 $r_\pi$。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 承上题，$v_2$ 中 $s_1$ 的分量是多少？</p>
+      <ol class="mcq-options">
+        <li>$1.9$</li>
+        <li>$0.1$</li>
+        <li>$-0.71$</li>
+        <li>$-8$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_2=r_\pi+0.9P_\pi v_1$，$s_1$ 那一行指向 $s_2$，
+          而 $v_1$ 在 $s_2$ 上的分量是 $-1$，所以是 $1+0.9\times(-1)=0.1$。</p>
+        <p>A 错在 $1.9$ 是"在 $s_1$ 选向下"的动作值，不是 $\pi_1$ 的状态值。
+          C 错在 $-0.71$ 是 $v_3$ 的分量，多迭代了一轮。
+          D 错在 $-8$ 是精确解，迭代两步到不了。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 定理 3.2 的证明里，把 $|u(s')-v(s')|\le d$ 换成 $d$ 之后，
+        靠哪一步把 $\sum_{s'}[P_\pi]_{s,s'}$ 消掉？</p>
+      <ol class="mcq-options">
+        <li>靠 $\gamma<1$，它让这一项可以忽略</li>
+        <li>靠 $P_\pi$ 的元素都相等，求和后互相抵消</li>
+        <li>靠 $u,v$ 是固定点，所以两者之差为零</li>
+        <li>靠行和等于 1，求和后恰好剩下一个因子 1</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\sum_{s'}[P_\pi]_{s,s'}=1$ 是式 (9.2)，
+          它把加权平均变成一个不放大差距的操作，于是差距只剩 $\gamma$ 倍。</p>
+        <p>A 错在 $\gamma<1$ 用于"唯一性"那一步，消掉求和靠的是行和。
+          B 错在元素一般不相等，而且相等也抵消不出 1。
+          C 错在压缩性对任意 $u,v$ 都要成立，不能预设它们是不动点。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 若把 $\gamma$ 从 $0.9$ 改成 $0.5$，其他不变，
+        要让 $\|v_k-v_\pi\|_\infty\le\varepsilon$ 所需的迭代次数会怎样？</p>
+      <ol class="mcq-options">
+        <li>明显减少，因为每次把误差缩小得更多</li>
+        <li>明显增加，因为折价变小后信息传得更慢</li>
+        <li>不变，因为迭代次数只由状态个数决定</li>
+        <li>变成原来的两倍，因为 $\gamma$ 减半</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：误差每轮乘 $\gamma$，$\gamma$ 越小缩得越快。
+          按式 (9.7) 后面的估计，次数约为 $\log\varepsilon/\log\gamma$，
+          $\gamma=0.5$ 时约为 $0.9$ 时的三分之一。</p>
+        <p>B 错在把"折价小、看得近"与"收敛慢"混为一谈，收敛速度由压缩率决定。
+          C 错在状态数决定每轮的计算量，不决定迭代次数。
+          D 错在 $\log\gamma$ 不是 $\gamma$ 的线性函数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 关于式 (9.8) 与式 (9.3) 的关系，下面哪一种说法对？</p>
+      <ol class="mcq-options">
+        <li>两式互相独立，一个成立不代表另一个成立</li>
+        <li>式 (9.8) 是近似，式 (9.3) 才是精确等式</li>
+        <li>把式 (9.9) 代进式 (9.8) 就得到式 (9.3)</li>
+        <li>式 (9.3) 只对确定性策略（同一状态下永远只选同一个动作）成立</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：把 $v_\pi(s)=\sum_a\pi(a\mid s)q_\pi(s,a)$ 代回式 (9.8)，
+          对动作求和就还原成 $v_\pi=r_\pi+\gamma P_\pi v_\pi$。</p>
+        <p>A 错在两者等价，只是观察的层次不同。
+          B 错在式 (9.8) 也是精确等式，它直接从 $q_\pi$ 的定义推出。
+          D 错在两式对任意策略都成立，确定性策略（同一个状态下永远只选同一个动作）只是它的特例。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">9. 在网格世界与 $\pi_1$ 下，用式 (9.9) 核对 $s_1$ 的状态值，
+        加权平均的两个权重分别是多少？</p>
+      <ol class="mcq-options">
+        <li>都是 $0.5$，因为两个动作都要考虑</li>
+        <li>向右是 $1$，向下是 $0$，因为 $\pi_1$ 在 $s_1$ 只选向右</li>
+        <li>向右是 $0.9$，向下是 $0.1$，因为折扣因子要参与加权</li>
+        <li>向右是 $1$，向下是 $1$，因为两个动作值都要算进来</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$\pi_1$ 是确定性策略，$\pi_1(\text{向右}\mid s_1)=1$。
+          所以 $v_{\pi_1}(s_1)=1\times(-8)+0\times1.9=-8$。</p>
+        <p>A、D 错在它们不是概率分布，权重加起来必须等于 1，而 D 加起来是 2。
+          C 错在折扣因子 $\gamma$ 作用在未来的价值上，不参与动作加权。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">10. 为什么定理 3.3 只给出误差上界 $\gamma^k\|v_0-v_\pi\|_\infty$，
+        而不是直接说 $v_k$ 等于 $v_\pi$？</p>
+      <ol class="mcq-options">
+        <li>因为 $\gamma$ 可能大于 1，所以级数不一定收敛</li>
+        <li>因为 $v_\pi$ 本身就不是精确解，只是一个估计</li>
+        <li>因为迭代解只在状态数有限时才收敛，状态多就不收敛</li>
+        <li>因为有限轮迭代只加到级数的有限项，剩下的是被截断的尾项</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：$v_k$ 对应式 (9.5) 的部分和，与全级数差一个尾巴，
+          尾巴的大小按 $\gamma^k$ 衰减。取极限才等于精确解。</p>
+        <p>A 错在本课固定 $\gamma\in[0,1)$。
+          B 错在 $v_\pi$ 是方程的唯一精确解（定理 2.2）。
+          C 错在收敛性由 $\gamma<1$ 保证，与状态个数无关。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025,
+        第 2 章 2.6–2.8 节。$P_\pi$、$r_\pi$ 的元素定义、闭式解与迭代解的口径均取自该书。</p>
+      <p>R. S. Sutton and A. G. Barto, <em>Reinforcement Learning: An Introduction</em>, 2nd ed.,
+        麻省理工学院出版社 2018 年版，第 4.1 节用同样的矩阵记号写出策略评估
+        （给定一套策略，算出它到底值多少分），可对照阅读。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "把 $P_{\pi_1}$ 的幂 $P_{\pi_1}^2$ 算出来，看看级数第二项是什么"，
+      或者 "为什么行和等于 1 就能保证 $I-\gamma P_\pi$ 可逆？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>

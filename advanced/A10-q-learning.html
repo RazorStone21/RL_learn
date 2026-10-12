@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A10 · Q-Learning：off-policy 控制 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A10" data-slug="q-learning" data-part="进阶篇 · 第二部分 · 无模型方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第二部分 · 无模型方法</p>
+    <h1>Q-Learning：off-policy 控制</h1>
+    <p class="lede">上一课那套算法只会给"自己正在用的这套打法"打分。
+      这一节换一个目标：拿别人留下的数据、旧记录，甚至随手乱选产生的数据，
+      也能学出最好的那套打法。要改的地方只有一个符号，
+      代价是多了一种会系统性高估的毛病。下面一步一步说清它是怎么来的。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能一眼看出 SARSA（state-action-reward-state-action，同轨策略时序差分控制）与 Q-learning 在更新目标上的唯一差别</li>
+        <li>能解释在 ε-greedy（ε 是探索率）采数据时，Q-learning 为什么仍收敛到最优策略</li>
+        <li>能说出最大化偏差怎么产生，以及什么场景该改用 SARSA</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>从上一课留下的问题说起</h2>
+    <p><a href="A09-sarsa.html">上一课</a>的 SARSA 学的是"我正在执行的这套选动作办法"值多少分。
+      这套办法叫 ε-greedy（ε 读作 epsilon，是探索率，意思是每次决策有多大概率去做"随便试一个"）。
+      它本身是一套策略（策略就是"看到什么状态就选什么动作"的规则）。</p>
+    <p>这套规则的副作用在于：那 <var>ε</var> 比例的随机尝试会被诚实地算进分数里。
+      于是学出的 Q 永远带着"我随时可能乱来"的折价。
+      悬崖行走那个例子里，SARSA 学会贴着悬崖外侧走远一点，
+      因为它评估的就是"我随时可能随机掉下去"这个现实。</p>
+    <p>Q-learning 换了一个目标。它同样从一条转移
+      <span class="math">(S<sub>t</sub>, A<sub>t</sub>, R<sub>t+1</sub>, S<sub>t+1</sub>)</span>
+      学习，但更新式里根本没有 <span class="math">A<sub>t+1</sub></span>：</p>
+    <p>Q-learning 换了一个目标。它同样从一条转移
+      <span class="math">(S<sub>t</sub>, A<sub>t</sub>, R<sub>t+1</sub>, S<sub>t+1</sub>)</span>
+      学习，但更新式里根本没有 <span class="math">A<sub>t+1</sub></span>：</p>
+    <div class="eq">
+      <span class="eq-body">Q(S<sub>t</sub>,A<sub>t</sub>) ← Q(S<sub>t</sub>,A<sub>t</sub>) + α[ R<sub>t+1</sub> + γ max<sub>a</sub> Q(S<sub>t+1</sub>,a) − Q(S<sub>t</sub>,A<sub>t</sub>) ]</span>
+      <span class="eq-num">(10.1)</span>
+    </div>
+    <p>先把式子里的记号逐个读一遍。下标 <var>t</var> 表示"第 t 步"，
+      所以 <span class="math">S<sub>t</sub></span> 是第 t 步的状态，
+      <span class="math">A<sub>t</sub></span> 是第 t 步选的动作，
+      <span class="math">R<sub>t+1</sub></span> 是这一步拿到的即时奖励。
+      向左的箭头读作"更新为"：左边的数在这一步之后被右边的结果替换掉。
+      式中 α 是学习率（每次更新时往新信息的方向挪多远），
+      γ 是折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折）。
+      max<sub>a</sub> 的意思是"在所有可选动作 a 里挑一个，让后面那个式子最大"。"挑当前估计里最好的那个"有个名字，叫贪心（在当前估计里挑看起来最好的那个）。</p>
+    <p>再固定两个词。回报（从现在起一直到结束，把每一步奖励加起来的总分）；
+      折扣回报（把回报里越靠后的奖励打上越重的折之后得到的总分）。
+      这两个词后面会反复出现。</p>
+    <p>把两式并排看，差别只是一个符号的写法：</p>
+    <table>
+      <thead><tr><th>算法</th><th>目标里的下一项</th><th>它在评估谁</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>SARSA</td>
+          <td><span class="math">γ Q(S<sub>t+1</sub>, A<sub>t+1</sub>)</span></td>
+          <td>行为策略本身（含 ε 探索）</td>
+        </tr>
+        <tr>
+          <td>Q-learning</td>
+          <td><span class="math">γ max<sub>a</sub> Q(S<sub>t+1</sub>, a)</span></td>
+          <td>对当前 Q 的贪心策略</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>那个 <code>max</code> 的含义是：不管下一步实际会走哪，我都假设自己以后永远挑当前看起来最好的动作。
+      "挑当前看起来最好的"有个专门的名字，叫贪心（在当前估计里挑看起来最好的那个）。
+      它只代表"眼下的估计里最好"，不代表"真的最好"。
+      这条更新只依赖 Q 自己的当前值，不依赖实际采取的动作，
+      所以它学到的东西与"数据是怎么来的"无关。</p>
+    <p>最后把三个容易混的词分开。状态价值（只看状态、不管具体选哪个动作的那个分数）；
+      动作价值（在某个状态下先选某个具体动作、之后再好好走，能拿多少总分）；
+      价值函数（这两者的统称，泛指从某个状态出发平均能拿多少总分）。
+      本课从头到尾只跟动作价值打交道，也就是 Q 表里的那些格子。</p>
+  </section>
+
+  <figure class="sim" data-sim="gridworld" data-rows="4" data-cols="4" data-gamma="0.9" data-mode="q-learning"></figure>
+
+  <section>
+    <h2>off-policy 到底意味着什么</h2>
+    <p>先把两个角色分清。<span class="term">行为策略（behavior policy）</span>是真正与环境交互、
+      产生数据的那个策略，这里就是 ε-greedy。
+      <span class="term">目标策略（target policy）</span>是算法想要评估和改进的那个策略，
+      这里是对 Q 的贪心策略。顺带把一个词说清：智能体（做决策的那一方，也就是你写的程序），
+      与环境交互、产生数据的就是它。行为策略与目标策略是同一个东西，叫
+      <span class="term">on-policy（同策略，边学的那套策略就是正在产生数据的那套）</span>；两者分离，叫
+      <span class="term">off-policy（离策略，边学的那套策略不是产生数据的那套，数据来自另一套旧策略）</span>。</p>
+    <p>这个区分直接决定你能拿什么数据来训练：</p>
+    <ul>
+      <li>你可以用很久以前的数据、别人留下的数据，甚至随机策略（不挑好坏、纯靠概率乱选动作的规则）
+        产生的数据。因为它们只被用来估计最优动作价值 <span class="math">q<sub>*</sub></span>，
+        不需要"是我当前策略产生的"。</li>
+      <li>你可以一边用 ε-greedy 保证把各种情况都摸到，一边学一个不含随机尝试的贪心规则。
+        上线时把 <var>ε</var> 设成 0，拿到的就是干净的最优做法。</li>
+      <li>反过来，SARSA 的数据必须来自它正在评估的那套规则；混入别处的数据会直接引入偏差。</li>
+      <li>这里还要顺手分清两个词。你做完动作之后，环境从当前状态跳到下一个状态，这叫状态转移；
+        这个跳转往往带有随机性：结果是一组可能性，每种各带着自己的概率，这叫转移概率。</li>
+    </ul>
+    <p>代价是：off-policy 只在"每个 (s,a) 都被访问足够多次"时才能稳定学到最优。
+      收敛（一轮轮算下去，数值不再明显变化，稳定下来了）说的就是这个意思。
+      如果你的行为策略从不去碰某个动作，<code>max</code> 就永远没机会看到它的真实价值，
+      Q 也就不会把它抬起来。覆盖不足是 off-policy 最常见的失败原因。</p>
+    <p>还有一个相邻的词要提前说清。重要性采样（用另一套策略产生的数据来估计当前策略的表现，
+      需要按概率比例做修正）在这里用不上：Q-learning 的目标里没有实际动作，
+      所以不需要它，这也是它比另一类做法波动更小的原因之一。</p>
+  </section>
+
+  <section>
+    <h2>最大化偏差：max 的隐藏价格</h2>
+    <p>注意 <code>max</code> 这个操作的统计性质。假设某个状态有 10 个动作，每个动作的真实价值都是 0，
+      而你的估计带着噪声。取 max 等于专门挑那份噪声里偏大的一个。
+      要描述这件事的平均结果，就要用到期望（同一件事重复很多次之后的平均结果），
+      写成 <span class="math">𝔼</span>，读作"E"，后面跟什么就表示"把那个东西重复很多次再取平均"。
+      于是 <span class="math">𝔼[max] &gt; max 𝔼[·] = 0</span> 的意思是：
+      先取最大值再求平均，会比先求平均再取最大值更大。这就是
+      <span class="term">最大化偏差（maximization bias，取最大值会让估计偏高）</span>：
+      Q-learning 每次都用这个被抬高的值当目标，等于把虚假的收益当成真的传播回去。</p>
+    <p>Sutton &amp; Barto 的例 6.7 是最干净的演示。从状态 A 往右走到 B，奖励 0；
+      B 有 10 个动作，每个都返回「均值 −0.1、方差 1」的奖励然后终止。
+      最优做法是"在 A 一直往右"，因为
+      <span class="math">q(A,右) = 0 &gt; q(A,左) = −0.1</span>。
+      但 Q-learning 对 B 的估计被 max 抬高到约 +0.2，于是 Q(A,右) 也是正的；
+      它会以可观的概率学出"从 A 往左"这个不够好的做法。</p>
+    <p>SARSA 用实际动作做目标，所以不会这样被抬高。另一类做法干脆不取最大值，
+      而是把整局走完再算总分，这叫蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值），
+      它也不吃这个亏。下一道代码题让你亲手把这份偏差量出来。</p>
+  </section>
+
+  <section>
+    <h2>该选哪一个</h2>
+    <table>
+      <thead><tr><th>你的场景</th><th>建议</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>探索有真实代价（生产系统、库存、医疗）</td>
+          <td>SARSA。它学到的策略在训练期间就倾向于避开危险区。</td>
+        </tr>
+        <tr>
+          <td>数据来自别人的策略或旧日志，或你想把样本反复用很多遍</td>
+          <td>Q-learning。off-policy 在这里不是选项，是前提。</td>
+        </tr>
+        <tr>
+          <td>只在仿真里跑，目标是尽快收敛到最优</td>
+          <td>Q-learning，配合 <var>ε</var> 衰减。</td>
+        </tr>
+        <tr>
+          <td>动作空间（你这一步所有能选的动作合起来）很大，Q 要用神经网络表示</td>
+          <td>Q-learning 的路线。<a href="A13-dqn.html">0013 课</a>的 DQN（deep Q-network，深度 Q 网络）就是它加两件工程装备。</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <p>训练学坏有三个常见症状。Q 值一路膨胀到很大，先查奖励尺度有没有归一化、<var>α</var> 是不是太大；
+        策略早早锁死在一条明显很差的路上，多半是 <var>ε</var> 太小，或者行为策略覆盖不到好动作；
+        训练时表现很好，但换一套贪心做法去评估就掉下来，那是你在拿两套不同规则的标准互相比较。
+        这里说的评估有个专门的名字，叫策略评估（给定一套策略，算出它到底值多少分）。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>本课在整条线上的位置</h2>
+    <p>下一步，<a href="A11-nstep-td-lambda.html">0011 课</a>把自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）从"只往前看一步"推广到 n 步。它是这一族算法的共同点。
+      把 n 步都用上之后你会发现，SARSA 与 Q-learning 只是同一族算法的两个成员。</p>
+    <p>当 Q 表装不下时，<a href="A12-function-approximation.html">0012 课</a>讲函数逼近
+      （状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值），
+      以及 off-policy 与自举凑在一起为什么危险。0013 课要修的就是它，靠的是两个工程技巧。
+      一个叫经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用），
+      另一个叫目标网络（另存一份"稍旧"的网络专门用来算目标，隔一阵才同步一次，
+      避免追着自己跑）。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. Q-learning 与 SARSA 的更新目标，唯一的差别在哪里？</p>
+      <ol class="mcq-options">
+        <li>Q-learning 使用折扣回报，SARSA 只使用未折扣的即时奖励</li>
+        <li>Q-learning 取下一状态的最大 Q 值，SARSA 用实际采取动作的 Q 值</li>
+        <li>Q-learning 只更新状态价值，SARSA 只更新动作价值函数</li>
+        <li>Q-learning 需要环境模型，SARSA 完全不需要转移模型</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两式的骨架完全一样，都是
+          <span class="math">Q ← Q + α[目标 − Q]</span>，差别只在目标里的下一项：
+          SARSA 用它真的采到的 <span class="math">A<sub>t+1</sub></span>，
+          Q-learning 用 <span class="math">max<sub>a</sub> Q(S<sub>t+1</sub>,a)</span>。
+          这一个 max 就是 on-policy 与 off-policy 的分水岭。</p>
+        <p>A 错在折扣：两者都用 <var>γ</var> 折扣。C 错在对象：两者都学动作价值 Q。
+          D 错在前提：两者都是无模型方法，都不需要转移概率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. "off-policy" 在这门课里的准确含义是什么？</p>
+      <ol class="mcq-options">
+        <li>行为策略与目标策略分离，所学的最优策略与采数据的策略不同</li>
+        <li>训练数据必须一次性提前采好，训练过程中不再与环境交互</li>
+        <li>算法可以完全不使用奖励信号，只依靠状态转移来判断优劣</li>
+        <li>每次更新只使用一条样本，而不是使用整个回合的累积回报</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：判据是"产生数据的策略"与"被评估改进的策略"是否为同一个。
+          Q-learning 用 ε-greedy 采数据，却在学贪心策略的最优价值，所以是 off-policy。
+          它带来的实际能力是：数据来源可以自由，不必是自己的当前策略。</p>
+        <p>B 描述的是离线（不能与真实环境交互，只能用已经攒下来的历史数据学）数据设定
+          （第 <a href="A25-offline-imitation.html">0025 课</a>），
+          虽然也用 off-policy 算法，但 off-policy 本身不要求数据提前采好。
+          C 与奖励无关。D 说的是单样本更新，那是随机梯度下降的问题，不是 off-policy。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">3. 用 ε-greedy 行为策略采数据时，Q-learning 为什么仍能收敛到最优策略？</p>
+      <ol class="mcq-options">
+        <li>因为 ε 会随训练衰减到零，行为策略最终会变成完全的贪心策略</li>
+        <li>因为更新目标里不含实际动作，Q 直接逼近与行为策略无关的最优值</li>
+        <li>因为它在更新时对 ε-greedy 做重要性采样，修正了行为策略的偏差</li>
+        <li>因为它只用贪心动作更新，探索动作产生的样本会被自动过滤掉</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：更新式右边的 <span class="math">max<sub>a</sub> Q(S<sub>t+1</sub>,a)</span>
+          不含实际动作，所以它逼近的是最优动作价值 <span class="math">q<sub>*</sub></span>，
+          而 <span class="math">q<sub>*</sub></span> 的定义与行为策略无关。
+          前提是所有 (s,a) 都被访问足够多次：行为策略的作用只是提供覆盖，不决定学到的目标。</p>
+        <p>A 是常见误读：ε 不衰减到 0，Q-learning 照样收敛到最优策略（只是探索会持续）。
+          C 说反了，Q-learning 不需要重要性采样，这也是它比 off-policy MC（Monte Carlo，蒙特卡洛）方差低的原因。
+          D 错：探索动作的样本仍然被使用，只是目标里换成 max。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 关于最大化偏差，下列哪一项描述是准确的？</p>
+      <ol class="mcq-options">
+        <li>折扣因子取值过大，使远期奖励在回报里占到了过高的权重</li>
+        <li>探索率设置得过小，使智能体过早锁定在次优动作上无法纠正</li>
+        <li>用 max 估计动作价值时，噪声最大的估计被选中导致系统性高估</li>
+        <li>学习率设置得过大，使价值估计在更新中不断震荡并最终发散</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：<span class="math">max</span> 是凸函数，
+          <span class="math">𝔼[max<sub>a</sub> Q̂(a)] ≥ max<sub>a</sub> 𝔼[Q̂(a)]</span>。
+          只要估计带噪声，取 max 就会偏向噪声里偏大的那一个，期望上被抬高；
+          这个偏差还会被自举一层层往回传播。</p>
+        <p>A、B、D 都是真实的训练问题（折扣设计、探索不足、学习率过大），
+          但它们不产生一致向上的高估：偏差的根源是 max 这个非线性操作，
+          不是超参（需要你自己设定、而不是训练学出来的参数）这种要手调的量。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. 下列哪种场景更该选 SARSA 而不是 Q-learning？</p>
+      <ol class="mcq-options">
+        <li>只有一个离线日志，需要在完全不能交互的条件下学到最优策略</li>
+        <li>追求最终收敛后的最优性能，并且能承担探索过程中的试错代价</li>
+        <li>想让价值估计无偏，从而彻底避免 max 操作带来的系统性高估</li>
+        <li>探索本身会带来严重代价，希望训练期间的策略也足够安全</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：SARSA 评估的就是当前含探索的行为策略，
+          所以它会把"随机动作可能造成的损失"算进 Q 里，学出的策略在训练期间就倾向于远离悬崖这类危险区。
+          当试错代价高、或者你必须用一个还在学习中的策略去执行时，这个性质比"最终最优"更重要。</p>
+        <p>A 恰好是 off-policy 的主场，只能用 Q-learning 这一类算法。
+          B 是在仿真里求最优，Q-learning 更合适。C 是概念错误：SARSA 确实避开了
+          max 偏差，但它评估的是含探索的策略，引入的是另一种偏差（策略本身的偏差）。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0010-code-1">
+      <h3>代码题 1 · 实现 Q-learning 的单步更新</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>Q-learning 与上一课的 SARSA 只差更新目标里的一项：
+          用下一状态上所有动作的最大值，而不是下一步实际会执行的那个动作。
+          这个函数是 Q-learning 训练循环里最内层的一步，每拿到一条 (s, a, r, s') 转移就调用一次。
+          它在 off-policy 下工作，产生数据的 ε-greedy 规则与被评估的贪心规则是分开的，
+          所以目标里不需要 <code>a_next</code>。输入是更新前的 Q 表与这一步的转移，
+          输出是改好一格的新 Q 表。先说清 Q 表长什么样：它是形状 <code>(n_states, n_actions)</code>
+          的二维 numpy 数组，可以想成一排数字摆成 <code>n_states</code> 行、<code>n_actions</code> 列；
+          <code>Q[s, a]</code> 就是第 <code>s</code> 行第 <code>a</code> 列那一格。
+          numpy 的下标从 0 开始，所以 3 个状态的行号是 0、1、2。
+          <code>np.max(Q[s_next])</code> 返回这一行里最大的那个数。</p>
+        <p>请实现 <code>q_learning_update(Q, s, a, r, s_next, done, alpha, gamma)</code>，对 Q 表做一次式 (10.1) 的更新。</p>
+        <div class="eq">
+          <span class="eq-body">目标 = r + γ · max<sub>a'</sub> Q[s_next, a']&nbsp;&nbsp;（<code>done=True</code> 时目标就是 r）</span>
+          <span class="eq-num">(10.2)</span>
+        </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>Q</code>：形状 <code>(n_states, n_actions)</code> 的二维 numpy 数组，是训练到目前为止的动作价值估计；</li>
+          <li><code>s</code>、<code>a</code>：当前状态与动作的整数下标，两者一起指定被改的那一格；</li>
+          <li><code>r</code>：这一步拿到的即时奖励，float；</li>
+          <li><code>s_next</code>：下一状态的整数下标，它的整行 Q 值都会被读到，但不会被改；</li>
+          <li><code>done</code>：布尔值，表示 <code>s_next</code> 是不是终止状态；</li>
+          <li><code>alpha</code>：学习率 α；<code>gamma</code>：折扣因子 γ，两者都是标量。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状与 <code>Q</code> 相同 <code>(n_states, n_actions)</code>：只有第 <code>[s, a]</code> 个格子按目标更新，
+            <code>Q[s_next]</code> 整行与其余格子都保持原值。不要就地修改传入的 <code>Q</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>传入的 <code>Q</code> 在调用后保持原值，返回的是新数组；
+          自举项取 <code>Q[s_next]</code> 里的最大值而不是均值，测试里 <code>[8.0, 0.0]</code> 应得 8.0，用均值会得 4.0；
+          <code>done=True</code> 时目标只有 <code>r</code>，<code>Q[s_next]</code> 再大也不参与；
+          <code>Q[s_next]</code> 整行与其他 <code>(s, a)</code> 都不被更新。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>第一步，复制一份可写的 Q：<code>Q = np.array(Q, dtype=float)</code>。
+              <code>np.array(...)</code> 返回一个新数组，改它不会动到调用方传进来的那个。</li>
+          <li>第二步，先定目标值 <code>target</code>。如果 <code>done</code> 为真，直接
+              <code>target = r</code>，因为终止状态没有未来，不能再自举。</li>
+          <li>第三步，<code>done</code> 为假时取
+              <code>target = r + gamma * float(np.max(Q[s_next]))</code>。
+              <code>float(...)</code> 把 numpy 标量转成普通 Python 浮点数。</li>
+          <li>第四步，只更新被选中的那一格：<code>Q[s, a] += alpha * (target - Q[s, a])</code>。
+              <code>Q[s_next]</code> 整行以及其他格子都不能动。</li>
+          <li>最后 <code>return Q</code>。判断终止要在算 max 之前做，别写完 max 再补条件。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def q_learning_update(Q, s, a, r, s_next, done, alpha, gamma):
+    # TODO: 用 r + gamma * max_a' Q(s', a') 作为目标（done=True 时目标就是 r）
+    return Q
+</script>
+
+      <script type="text/x-python" data-role="tests">
+Q0 = np.zeros((3, 2))
+Q1 = q_learning_update(Q0, 0, 0, 1.0, 2, True, 0.5, 0.9)
+check(abs(Q1[0, 0] - 0.5) < 1e-9,
+      f"终止转移的目标就是 r：alpha*(r-Q)=0.5*1=0.5，实际 {Q1[0,0]:.4f}")
+check(np.allclose(Q0, 0.0), "不应就地修改传入的 Q，要返回新的数组")
+
+Q = np.zeros((3, 2))
+Q[2, :] = [4.0, 10.0]
+Q2 = q_learning_update(Q, 0, 0, 1.0, 2, False, 0.5, 0.9)
+check(abs(Q2[0, 0] - 5.0) < 1e-9,
+      f"目标 = 1 + 0.9*max(4,10) = 10，更新后 Q[0,0] = 0.5*10 = 5.0，实际 {Q2[0,0]:.4f}")
+check(np.allclose(Q2[2, :], [4.0, 10.0]), "只更新 (s,a) 一个格子，Q(s',·) 不能被改动")
+check(np.allclose(Q2[0, 1], 0.0) and np.allclose(Q2[1, :], 0.0), "其他 (s,a) 不应被更新")
+
+Q3 = np.zeros((2, 2))
+Q3[1, :] = [8.0, 0.0]
+Q4 = q_learning_update(Q3, 0, 1, 0.0, 1, False, 1.0, 1.0)
+check(abs(Q4[0, 1] - 8.0) < 1e-9,
+      f"目标必须取 max 而不是均值：max=8 应得 8.0，用均值 4 会得到 4.0，实际 {Q4[0,1]:.4f}")
+
+Q5 = np.zeros((2, 2))
+Q5[1, 1] = 100.0
+Q6 = q_learning_update(Q5, 0, 0, 2.0, 1, False, 0.25, 0.9)
+check(abs(Q6[0, 0] - 23.0) < 1e-9,
+      f"应为 0.25*(2 + 0.9*100) = 23.0，实际 {Q6[0,0]:.4f}")
+
+Q7 = np.zeros((2, 2))
+Q7[1, :] = [50.0, 0.0]
+Q8 = q_learning_update(Q7, 0, 0, 3.0, 1, True, 1.0, 0.9)
+check(abs(Q8[0, 0] - 3.0) < 1e-9,
+      f"done=True 时目标只有 r=3，Q(s',·)=50 不能参与，实际 {Q8[0,0]:.4f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def q_learning_update(Q, s, a, r, s_next, done, alpha, gamma):
+    Q = np.array(Q, dtype=float)
+    if done:
+        target = r
+    else:
+        target = r + gamma * float(np.max(Q[s_next]))
+    Q[s, a] += alpha * (target - Q[s, a])
+    return Q
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0010-code-2">
+      <h3>代码题 2 · 亲手复现最大化偏差</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>上一题里的 max 不是免费午餐。当每个动作的估计都带噪声时，
+          取 max 等于专门挑噪声偏大的那一个，估值整体偏高，
+          Q-learning 再把这份虚假收益当目标传播回去，这就是最大化偏差。
+          这道题用一个最干净的统计实验把偏差量出来：状态 B 有 <code>n_actions</code> 个动作，
+          真实价值都是 0，你只能看到有限个样本的平均值。
+          它对应本课"max 的隐藏价格"那一节，返回的两个数分别是 Q-learning 式目标与 SARSA 式目标的平均估计。</p>
+        <p>请实现 <code>measure_bias(n_actions=10, n_samples=50, n_runs=300, seed=0)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>n_actions</code>：动作数，默认 10，每个动作的真实价值都是 0；</li>
+          <li><code>n_samples</code>：每个动作采的样本数，默认 50，用样本均值作为该动作的估计；</li>
+          <li><code>n_runs</code>：独立重复的实验次数，默认 300；</li>
+          <li><code>seed</code>：随机种子，用 <code>np.random.default_rng(seed)</code>，不要用全局 <code>np.random</code>。
+            种子是"随机数生成器的起点"：同一个种子必然给出同一串数，测试才能复现。
+            <code>rng.normal(0.0, 1.0, size=(n_samples, n_actions))</code> 返回形状
+            <code>(n_samples, n_actions)</code> 的数组，里面每个数都是从"均值 0、标准差 1"
+            的那类随机数里抽出的一个样本。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回两个 Python <code>float</code> 组成的元组 <code>(ql, sa)</code>。</li>
+          <li><code>ql</code>：每次实验取所有动作估计的最大值，再对 <code>n_runs</code> 次实验求平均，对应 Q-learning 式目标；</li>
+          <li><code>sa</code>：每次实验随机挑一个动作取其估计值，再对 <code>n_runs</code> 次实验求平均，对应 SARSA 式目标。
+            两者的真值都是 0。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>两个返回值都是 Python <code>float</code>；
+          默认参数下 <code>ql</code> 明显大于 0（&gt; 0.15），而 <code>sa</code> 接近 0（绝对值 &lt; 0.04）；
+          偏差随每个动作的样本数增加而缩小，<code>n_samples=400</code> 时的 <code>ql</code> 明显小于 50 时的（约按 1/√n 缩小）；
+          <code>n_actions=1</code> 时没有 max 可选，<code>ql</code> 与 <code>sa</code> 相等且都不含偏差。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>一个实验的写法：先抽样本
+              <code>x = rng.normal(0.0, 1.0, size=(n_samples, n_actions))</code>，
+              再 <code>means = x.mean(axis=0)</code>。<code>mean(axis=0)</code> 表示"沿着行的方向压下去"，
+              返回长度 <code>n_actions</code> 的一维数组，第 j 个数是第 j 列的平均值，
+              也就是第 j 个动作的估计。</li>
+          <li>Q-learning 式的目标用 <code>means.max()</code>：它返回整个数组里最大的那个数。
+              把这个值记进一个列表，重复 <code>n_runs</code> 次后对列表取平均。</li>
+          <li>SARSA 式的目标用 <code>means[rng.integers(0, n_actions)]</code>：
+              <code>rng.integers(0, n_actions)</code> 返回 0 到 <code>n_actions-1</code> 之间的一个随机整数，
+              右端取不到。同样重复 <code>n_runs</code> 次再取平均。</li>
+          <li>偏差量级约为 <code>1/sqrt(n_samples)</code> 乘一个常数，所以 <code>n_samples=50</code> 时约 0.2，
+              <code>n_samples=400</code> 时会明显变小。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def measure_bias(n_actions=10, n_samples=50, n_runs=300, seed=0):
+    # TODO: 返回 (Q-learning 式的平均估计, SARSA 式的平均估计)，两者真值都是 0
+    return 0.0, 0.0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+ql50, sa50 = measure_bias(n_actions=10, n_samples=50, n_runs=300, seed=0)
+check(isinstance(ql50, float) and isinstance(sa50, float), "必须返回两个 Python float")
+check(ql50 > 0.15,
+      f"max 会挑中噪声最大的那个动作，估计被系统性地抬高：真值 0，实际 {ql50:.4f}")
+check(abs(sa50) < 0.04,
+      f"SARSA 用实际选中的动作做目标，是无偏的：真值 0，实际 {sa50:.4f}")
+
+ql400, _ = measure_bias(n_actions=10, n_samples=400, n_runs=300, seed=0)
+check(ql50 > 1.6 * ql400,
+      f"偏差随每个动作的样本数增加而缩小（约正比于 1/sqrt(n)）：n=50 时 {ql50:.4f}，n=400 时 {ql400:.4f}")
+
+ql1, sa1 = measure_bias(n_actions=1, n_samples=50, n_runs=300, seed=0)
+check(abs(ql1) < 0.05, f"只有一个动作时没有 max 可选，偏差应当消失：实际 {ql1:.4f}")
+check(abs(ql1 - sa1) < 1e-9, "只有一个动作时 Q-learning 与 SARSA 的目标完全相同")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def measure_bias(n_actions=10, n_samples=50, n_runs=300, seed=0):
+    rng = np.random.default_rng(seed)
+    ql, sa = [], []
+    for _ in range(n_runs):
+        means = rng.normal(0.0, 1.0, size=(n_samples, n_actions)).mean(axis=0)
+        ql.append(float(means.max()))
+        sa.append(float(means[rng.integers(0, n_actions)]))
+    return float(np.mean(ql)), float(np.mean(sa))
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.)，第 6.5 节
+        "Q-learning" 给出式 (10.1) 与它的收敛条件；第 6.7 节 "Maximization Bias and Double Learning"
+        用一个可复现的小例子量化了本课的偏差，并引出 Double Q-learning。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>想接着看这个偏差在深度 RL（reinforcement learning，强化学习）里怎么修，读 Lilian Weng 的
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">A (Long) Peek into Reinforcement Learning</a>
+        中 Q-learning 与 DQN 变体那一节；第 <a href="A14-double-dueling-dqn.html">0014 课</a>会展开 Double DQN。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "我的场景里探索的代价很高，SARSA 和 Q-learning 的差别具体会体现在哪一次决策上？"
+      或者 "把我的日志数据当成 off-policy 的经验回放，会有什么坑？"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

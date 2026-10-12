@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A11 · n-step 回报与 TD(λ) — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A11" data-slug="nstep-td-lambda" data-part="进阶篇 · 第二部分 · 无模型方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第二部分 · 无模型方法</p>
+    <h1>n-step 回报与 TD(λ)</h1>
+    <p class="lede">这一节回答一个问题：估计一个局面值多少分时，往前看几步最合适？
+      只看一步最省事，看完一整局最准但来得最慢。中间还有一整排选择，
+      而且可以用一个旋钮把它们平滑地混在一起。下面从两个极端说起。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出 n-step 回报，并说出 n=1 与 n=∞ 各退化成什么</li>
+        <li>能解释资格迹为什么让"看未来多步"变成单步在线更新</li>
+        <li>知道实践中 n 与 λ 该取多少，以及迹的累积式与替换式之别</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>两个极端之间是一整条谱</h2>
+    <p>先看两个极端。<a href="A08-td-learning.html">TD(0)</a> 是最省事的那一种：
+      它的更新目标只有一步真实奖励，再加上一项自举（用自己当前的估计去更新自己当前的估计，等于自己拽自己的鞋带往上提）。它说的是：
+      目标里那个 <span class="math">V(S<sub>t+1</sub>)</span> 并不是真实答案，它只是自己当前的估计。
+      式中 γ 是折扣因子（越往后的奖励，算进总分时权重越小，相当于给它打了个折）。
+      TD(0) 是时序差分（不用等到一局结束，用"走一步之后的新估计"来更新"走这一步之前的估计"）
+      里最简单的一种，这个做法英文叫 temporal difference，简称 TD。</p>
+    <p>TD(0) 的两项统计性质正好相反：方差小，偏差大。
+      这两个词要先说清。偏差（估计值稳定地偏离真值）说的是"平均下来是歪的"；
+      方差（同一个做法重复很多次，结果波动有多大）说的是"每次上下抖多少"。
+      TD(0) 的偏差来自 <span class="math">V(S<sub>t+1</sub>)</span> 本身还没学准，
+      方差小是因为目标里只有一步随机奖励。</p>
+    <p>另一个极端是<a href="A07-monte-carlo.html">蒙特卡洛</a>
+      （把一整局走完，用真实拿到的总分来估计价值）：它用完整的回报（从现在起一直到结束，把每一步奖励加起来的总分）
+      <span class="math">G<sub>t</sub></span>，没有偏差，
+      但方差大，而且必须等一整局结束才能更新一次。
+      折扣回报（把回报里越靠后的奖励打上越重的折之后得到的总分）是它实际在算的那个数。</p>
+    <p>这两者之间还有一整排选择。<span class="term">n-step 回报（n-step return：先往前看 n 步拿真实奖励，剩下的用估计补上）</span>把自举往后推了 n 步：</p>
+    <div class="eq">
+      <span class="eq-body">G<sub>t</sub><sup>(n)</sup> = R<sub>t+1</sub> + γ R<sub>t+2</sub> + … + γ<sup>n−1</sup> R<sub>t+n</sub> + γ<sup>n</sup> V(S<sub>t+n</sub>)</span>
+      <span class="eq-num">(11.1)</span>
+    </div>
+    <p>式子里每个符号在实现里都很直白。<var>n</var> 是"自举之前先走几步真实奖励"。
+      式子里的 <span class="math">γ<sup>n</sup></span> 读作"γ 的 n 次方"，也就是 γ 连乘 n 次；
+      <span class="math">γ<sup>n−1</sup></span> 同理，是连乘 n−1 次。
+      <var>n</var>=1 时右边只剩 <span class="math">R<sub>t+1</sub> + γ V(S<sub>t+1</sub>)</span>，就是 TD(0)；
+      <var>n</var> 一直取到回合结束、把 <span class="math">V</span> 那一项换成 0，就是蒙特卡洛的
+      <span class="math">G<sub>t</sub></span>。中间的每个 n 都合法，也都是不用环境模型的。</p>
+    <p>调 <var>n</var> 就是在调偏差与方差的配比：n 越大，越少依赖自己那个可能不准的
+      <span class="math">V</span>（偏差小），但要累积越多步真实奖励（方差大）。
+      代价是延迟更新（delayed update）：要更新 t 时刻的价值，
+      得先观察到 t+n 步。离线（不能与真实环境交互，只能用已经攒下来的历史数据学）
+      批量学习无所谓，在线控制里要缓存最近 n 步。</p>
+  </section>
+
+  <figure class="sim" data-sim="random-walk" data-states="5" data-runs="100"></figure>
+
+  <section>
+    <h2>λ-回报：把所有 n 加权平均</h2>
+    <p>与其在 <var>n</var> 上做单选题，不如把所有 n 一起用，按几何权重平均。
+      每一个 n 拿到的权重按 λ 的幂次递减，所以越近的 n 说话越算数。
+      这就是 <span class="term">λ-回报（λ-return）</span>：</p>
+    <div class="eq">
+      <span class="eq-body">G<sub>t</sub><sup>λ</sup> = (1 − λ) Σ<sub>n=1</sub><sup>∞</sup> λ<sup>n−1</sup> G<sub>t</sub><sup>(n)</sup></span>
+      <span class="eq-num">(11.2)</span>
+    </div>
+    <p>前面的 <span class="math">(1 − λ)</span> 只是让所有权重加起来等于 1。
+      <var>λ</var>=0 时权重全给了 <span class="math">G<sub>t</sub><sup>(1)</sup></span>，退化成 TD；
+      <var>λ</var>=1 时权重均匀铺到无穷步上，等于蒙特卡洛回报。
+      以 <var>λ</var>=0.9 为例，n=1 的权重是 0.1，n=10 的权重约 0.035，越近的 n 说话越算数。</p>
+    <p>式子里那个 Σ（求和号，把后面那串东西全加起来）表示从 n=1 开始，
+      把每一个 n 对应的 n-step 回报乘上它的权重，一项一项加下去。</p>
+  </section>
+
+  <section>
+    <h2>前向视图与后向视图</h2>
+    <p>式 (11.2) 叫<span class="term">前向视图（forward view，站在 t 时刻往未来看）</span>。
+      它的概念干净，但要求在 t 时刻就知道未来所有步的奖励，没法在线实现。
+      工程里实际能用的是<span class="term">后向视图（backward view，从当前这一步往回记账）</span>。</p>
+    <p>后向视图给每个 (s,a) 配一个<span class="term">资格迹（eligibility trace，刚做过的事记得最清，越久越淡）</span>。
+      可以想成给最近走过的每个状态动作对记一笔"欠账"：被访问时这笔账加 1，
+      之后每一步都乘 <span class="math">γλ</span> 慢慢缩水。</p>
+    <p>更新量是 <span class="math">δ<sub>t</sub></span> 乘 <span class="math">E<sub>t</sub>(s,a)</span>，
+      其中 <span class="math">δ<sub>t</sub></span> 是 TD 误差（这一步的目标减去当前的估计，
+      表示"这一步估计得偏高还是偏低"），<span class="math">E<sub>t</sub>(s,a)</span> 就是那笔欠账。
+      刚刚走过的、走过多次的 (s,a) 被更新得更多。
+      迹就是一份短期记忆，记录哪些状态动作对最近参与过决策，
+      好把当前这个 TD 误差按贡献分摊回去。
+      把最后的结果摊回中间若干步，这件事叫信用分配（最后的结果该算在哪几步头上），
+      迹在这里给了它一个可实现的解法。</p>
+    <p>两种视图在数学上是等价的（S&amp;B 第 12.2 节）。工程上的差别才是关键：
+      后向视图每步都能更新，内存只需要一张和 Q 一样大的表，不用等未来。</p>
+  </section>
+
+  <section>
+    <h2>SARSA(λ) 与两种迹</h2>
+    <p>把后向视图接到上一课的 SARSA 上，就是 <span class="term">SARSA(λ)</span>。
+      SARSA 学的是一套策略（策略就是"看到什么状态就选什么动作"的规则）值多少分，
+      也就是在某个状态下先选某个具体动作、之后再好好走能拿多少总分。
+      更细一点说，价值函数（从某个状态出发、按某套策略走下去，平均能拿多少总分）
+      和动作价值（在某个状态下先选某个具体动作、之后再好好走，能拿多少总分）是它的两种形式，
+      本课更新的是动作价值 Q，也就是每个状态动作对占一格的那张表。</p>
+    <div class="eq">
+      <span class="eq-body">E<sub>t</sub>(s,a) = γλ E<sub>t−1</sub>(s,a) + 1{S<sub>t</sub>=s, A<sub>t</sub>=a}</span>
+      <span class="eq-num">(11.3)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body">Q(s,a) ← Q(s,a) + α δ<sub>t</sub> E<sub>t</sub>(s,a),&nbsp;&nbsp; δ<sub>t</sub> = R<sub>t+1</sub> + γ Q(S<sub>t+1</sub>,A<sub>t+1</sub>) − Q(S<sub>t</sub>,A<sub>t</sub>)</span>
+      <span class="eq-num">(11.4)</span>
+    </div>
+    <p>式中 α 是学习率（每次更新时往新信息的方向挪多远），
+      <span class="math">δ<sub>t</sub></span> 是上面那个 TD 误差。
+      式 (11.4) 里的箭头 ← 读作"更新为"，左边那个数被右边的结果替换掉。</p>
+    <p>其中 <span class="math">1{·}</span> 是指示函数，条件成立取 1，否则取 0。
+      式 (11.3) 叫<span class="term">累积式迹（accumulating trace）</span>：重复访问同一个 (s,a) 会不断累加。
+      另一种是<span class="term">替换式迹（replacing trace）</span>：命中时把该位置直接置为 1。
+      长回合里替换式通常更稳、学得更快，因为它不会让一个反复经过的状态把权重吃满。</p>
+    <p>把 <var>λ</var> 设成 0，式 (11.4) 每一步之后迹就清零，只剩下当前 (s,a) 被更新，正好退化回普通的 SARSA。
+      你上一课写的那个算法，就是这一族算法的 λ=0 端点。</p>
+    <p>再把几个容易混的名字分开，后面的选择题会用到它们。
+      策略评估（给定一套策略，算出它到底值多少分）；
+      策略改进（根据算出的分数，把策略里明显吃亏的选择换掉）；
+      策略迭代（反复"打分 → 改招"，直到改不动为止）。
+      这几个名字属于动态规划那一族方法，本课只借它们的名字做对照，不展开。</p>
+  </section>
+
+  <section>
+    <h2>实践建议与诊断</h2>
+    <ul>
+      <li><var>n</var> 取 3–5，<var>λ</var> 取 0.9 左右。这两个数都是超参（需要你自己设定、
+        而不是训练学出来的参数）。中间值通常比两个端点都好，这是 S&amp;B 第 7 章的核心结论。</li>
+      <li>量级直觉：<var>γ</var>=0.9、<var>λ</var>=0.9 时，10 步之前的迹权重是
+        <span class="math">(γλ)<sup>10</sup> ≈ 0.35</span>，20 步之前只剩 0.12。再远的经历基本被忘掉。</li>
+      <li>λ 太小：学得慢，而且继承了 <span class="math">V</span> 的偏差。λ 太大：方差大，学习曲线抖。</li>
+      <li>本课的定位：n-step 与 TD(λ) 算不上新算法族，它们只是把"TD 还是 MC（Monte Carlo，蒙特卡洛）"从选择题变成了两个旋钮。</li>
+      <li>状态空间（所有可能状态的集合）很大时，这张表本身就装不下，那得换一条路，
+        叫函数逼近（状态太多记不下整张表，干脆用一个带参数的函数去"猜"价值）。
+        那是 <a href="A12-function-approximation.html">0012 课</a>的事。</li>
+    </ul>
+    <div class="note">
+      <p>为什么后面还要用：<a href="A19-gae-trpo.html">0019 课</a>的
+        GAE（generalized advantage estimation）就是把这里的 TD(λ) 原封不动搬去估计优势（在某个状态下，选这个动作比"平均水平"好多少），
+        也就是优势函数（在某个状态下，选这个动作比"平均水平"好多少）。
+        这套做法中文译作广义优势估计，说的就是这件事。
+        它们都属于信赖域（规定这一步只允许在"离旧策略不太远"的范围内改）这一类"别改太狠"的思路；
+        TRPO（trust region policy optimization，信赖域策略优化）与
+        PPO（proximal policy optimization，近端策略优化）里的 λ 就是这个 λ。
+        n-step 回报也常出现在 <a href="A13-dqn.html">0013 课</a>之后的 DQN（deep Q-network，深度 Q 网络）变体里，用来缩短自举链。</p>
+    </div>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">1. n-step 回报里，n=1 与 n=∞ 分别对应哪两种方法？</p>
+      <ol class="mcq-options">
+        <li>n=1 对应时序差分 TD(0)，n=∞ 对应蒙特卡洛方法</li>
+        <li>n=1 对应蒙特卡洛方法，n=∞ 对应时序差分 TD(0)</li>
+        <li>n=1 对应动态规划的策略评估，n=∞ 对应蒙特卡洛方法</li>
+        <li>n=1 对应时序差分 TD(0)，n=∞ 对应动态规划的策略迭代</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：n=1 时式 (11.1) 只剩一步真实奖励加一个自举项，就是 TD(0) 的目标；
+          n 取到回合结束、不再自举，得到的就是完整回报 <span class="math">G<sub>t</sub></span>，即蒙特卡洛。
+          中间任意 n 都落在两者之间。</p>
+        <p>B 把两端对调了。C、D 混进了动态规划，动态规划需要环境模型，而这一族方法都不需要。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 把 n 调大（多走几步真实奖励、少自举几次）会怎样？</p>
+      <ol class="mcq-options">
+        <li>偏差与方差同时减小，因此 n 取得越大，结果总是越好</li>
+        <li>偏差增大但方差减小，因为向价值估计自举的次数变少了</li>
+        <li>偏差减小但方差增大，因为要累积更多步的随机奖励</li>
+        <li>偏差与方差都不变，n 只影响更新发生的先后顺序</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：自举项 <span class="math">γ<sup>n</sup>V(S<sub>t+n</sub>)</span>
+          带着 <span class="math">V</span> 的偏差，n 越大它权重越小，所以偏差下降；
+          同时真实奖励项变多，每步奖励的随机性累加起来，方差上升。
+          这就是 TD 与 MC 的权衡被 n 参数化之后的样子。</p>
+        <p>A 错在假设可以两全。B 把两个方向说反了。D 错：n 改变的是估计量的统计性质，不只是时序。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 资格迹（后向视图）在实现上最本质的好处是什么？</p>
+      <ol class="mcq-options">
+        <li>它完全消除了自举带来的偏差，让估计变得与蒙特卡洛一样无偏</li>
+        <li>它把状态空间压缩成一个低维向量，从而避免了维度爆炸问题</li>
+        <li>它让学习率可以安全地取到 1，因此不再需要手动调任何超参数</li>
+        <li>它把"等未来 n 步"变成单步在线更新，记忆量只是一张额外表</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：前向视图要等未来所有步的奖励，后向视图只用当前这一条转移
+          和一张资格迹表，就能实现同一个 λ-回报。这是"数学上等价、工程上可行"的典型例子。</p>
+        <p>A 错：迹不消除偏差，偏差由 λ 与自举决定。B 说的是函数逼近，与迹无关
+          （见 <a href="A12-function-approximation.html">0012 课</a>）。
+          C 错：学习率仍然要调，迹不改变步长条件。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. 累积式资格迹与替换式资格迹的区别是什么？</p>
+      <ol class="mcq-options">
+        <li>累积式只在回合结束时清零，替换式在每一步都会清零迹值</li>
+        <li>累积式每次访问都做累加，替换式把该位置直接置为 1</li>
+        <li>累积式只用于离策略学习，替换式只用于同策略的学习</li>
+        <li>累积式需要同时维护两张表，替换式只需要维护其中一张表</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：差别只在"命中时怎么记"：累积式执行
+          <span class="math">E ← E + 1</span>，替换式执行 <span class="math">E ← 1</span>。
+          前者会让反复经过的 (s,a) 权重越堆越高，后者给了一个上限。</p>
+        <p>A 错：两种迹都按 <span class="math">γλ</span> 每步衰减，不是只在回合末清零。
+          C 错：与 on/off-policy 无关。D 错：两者都只需一张与 Q 同形状的表。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">5. 关于 n 与 λ 的常用取值，下列哪一项符合实践建议？</p>
+      <ol class="mcq-options">
+        <li>n 常用 1，λ 常用 0，优先追求最低的估计方差</li>
+        <li>n 常用 50 以上，λ 常用 1，优先追求最低的估计偏差</li>
+        <li>n 常用 3 到 5，λ 常用 0.9 左右，兼顾估计偏差与方差</li>
+        <li>n 常用 10，λ 常用 0.1，两项超参数都取偏小的值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：n 与 λ 都在偏差-方差之间插值，中间值通常优于两个端点，
+          这也是 S&amp;B 第 7 章的经验结论。n=3–5 意味着自举之前先看三到五步真实奖励，
+          λ=0.9 意味着更远的经历按几何速度被遗忘。</p>
+        <p>A 与 B 分别取了两端的极端值，通常会落在折中方案的下风。
+          D 把两个旋钮都压小，结果接近 TD(0)，等于放弃了这一节的收益。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0011-code-1">
+      <h3>代码题 1 · 计算 n-step 回报</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>TD(0) 的目标只走一步真实奖励就自举，蒙特卡洛要等回合结束，n-step 回报把自举往后推 n 步，是这两端之间的一整条谱。
+          这个函数算的是式 (11.1) 里自举之前的那一半：从当前时刻往前数 n 步的折扣奖励和。
+          实践中它被用来拼 TD 目标，<span class="math">γ<sup>n</sup>V(S<sub>t+n</sub>)</span> 那一项由调用方在外面补上。
+          它不碰价值函数也不依赖环境，输入就是一段奖励序列，输出一个可以直接拿去当目标的标量。
+          这里补一句 numpy 的基础：<code>rewards</code> 是一维数组，也就是一排数字的容器，
+          下标从 0 开始，<code>rewards[0]</code> 是当前时刻拿到的奖励，<code>rewards[1]</code> 是下一步的。</p>
+        <p>请实现 <code>n_step_return(rewards, gamma, n)</code>。</p>
+        <div class="eq">
+          <span class="eq-body">返回 R<sub>1</sub> + γ R<sub>2</sub> + … + γ<sup>n−1</sup> R<sub>n</sub></span>
+          <span class="eq-num">(11.5)</span>
+        </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：一维奖励序列，列表或 numpy 数组，<code>rewards[0]</code> 是当前时刻拿到的奖励。
+              <code>len(rewards)</code> 是序列的长度；</li>
+          <li><code>gamma</code>：折扣因子 γ，0 到 1 之间的标量；</li>
+          <li><code>n</code>：往前累计的步数，正整数。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 Python <code>float</code>，不是 numpy 标量：<code>rewards</code> 前 <code>n</code> 项的折扣累加，
+            下标 <code>k−1</code> 的那一项乘 <span class="math">γ<sup>k−1</sup></span>。
+            序列长度不足 <code>n</code> 时只累计实际存在的那些项；<code>rewards</code> 为空时返回 <code>0.0</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>n=1</code> 时只返回 <code>rewards[0]</code>；
+          <code>gamma=1</code>、<code>n=3</code>、三个 1 时返回 3.0，<code>gamma=0.5</code>、<code>n=3</code> 时返回 1.75；
+          <code>n</code> 超过序列长度不报错，只累计实际长度，三个 1 配 <code>n=10</code> 仍是 1.75；
+          奖励出现在第 3 步时被 <span class="math">γ<sup>2</sup></span> 衰减，<code>[0.0, 0.0, 10.0]</code> 配 γ=0.9、<code>n=3</code> 得 8.1；
+          返回值的类型是 Python <code>float</code>，能直接当 TD 目标用。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先设两个变量：<code>total = 0.0</code> 存累加结果，
+              <code>weight = 1.0</code> 存"这一项该乘的 γ 的幂"（第 0 项乘 γ<sup>0</sup>，正好是 1）。</li>
+          <li>循环写成 <code>for k in range(min(int(n), len(rewards)))</code>。
+              <code>min(...)</code> 取两者中较小的那个，序列不够长时自动截断，不会越界报错。</li>
+          <li>循环体里做两件事：先 <code>total += weight * rewards[k]</code>，
+              再 <code>weight *= gamma</code>（为下一项把折扣再乘一次）。</li>
+          <li>循环结束后 <code>return total</code>。不要每一项都写 <code>gamma ** k</code>，累乘更简单也更快。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def n_step_return(rewards, gamma, n):
+    # TODO: 返回 r_0 + gamma*r_1 + ... + gamma^(n-1)*r_{n-1}（不够 n 步就截断）
+    return 0.0
+</script>
+
+      <script type="text/x-python" data-role="tests">
+check(abs(n_step_return([1.0, 1.0, 1.0], 1.0, 1) - 1.0) < 1e-9,
+      "n=1 只取第一步：G=r_0=1.0")
+check(abs(n_step_return([1.0, 1.0, 1.0], 0.5, 3) - 1.75) < 1e-9,
+      "n=3, gamma=0.5 时应为 1 + 0.5 + 0.25 = 1.75")
+check(abs(n_step_return([1.0, 1.0, 1.0], 1.0, 3) - 3.0) < 1e-9,
+      "gamma=1, n=3 时三个 1 相加应当是 3.0")
+check(abs(n_step_return([1.0, 1.0, 1.0], 0.5, 10) - 1.75) < 1e-9,
+      "n 超过序列长度时必须截断，不能报错、也不能把缺的步当成 0 之外的数")
+check(abs(n_step_return([0.0, 0.0, 10.0], 0.9, 3) - 8.1) < 1e-9,
+      "奖励出现在第 3 步时被 gamma^2 衰减：10*0.81 = 8.1")
+check(abs(n_step_return([2.0], 0.9, 5) - 2.0) < 1e-9,
+      "只有一步时 n 再大也只有 r_0 这一项")
+check(abs(n_step_return([], 0.9, 3) - 0.0) < 1e-9, "空序列应当返回 0.0")
+check(isinstance(n_step_return([1.0, 1.0], 1.0, 2), float),
+      "返回值应当是 Python float，便于直接当 TD 目标使用")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def n_step_return(rewards, gamma, n):
+    total = 0.0
+    weight = 1.0
+    for k in range(min(int(n), len(rewards))):
+        total += weight * rewards[k]
+        weight *= gamma
+    return total
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0011-code-2">
+      <h3>代码题 2 · 写一步 SARSA(λ) 的累积式资格迹更新</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>λ-回报的前向视图要求站在 t 时刻看未来所有步，没法在线实现。后向视图给每个 <code>(s, a)</code> 配一个资格迹，
+          把当前这一步的 TD 误差按迹分摊回最近参与过决策的格子，于是每一步都能更新，内存也只要一张和 Q 一样大的表。
+          这个函数是训练循环里最内层的那一次调用，它同时维护 Q 表与形状相同的资格迹 <code>E</code>。
+          输入是上一步留下的 <code>Q</code>、<code>E</code> 与当前这一步的转移，输出更新后的二元组，调用方拿它们继续走下一个环境步。对应的公式是式 (11.3) 与 (11.4)。</p>
+        <p>请实现 <code>sarsa_lambda_step(Q, E, s, a, r, s_next, a_next, done, alpha, gamma, lam)</code>，返回新的 <code>(Q, E)</code> 二元组。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>Q</code>：形状 <code>(状态数, 动作数)</code> 的二维 numpy 数组，动作价值表。
+              二维数组就是排成几行几列的一堆数字，<code>Q[s, a]</code> 是第 <code>s</code> 行第 <code>a</code> 列那一格，
+              下标从 0 开始；</li>
+          <li><code>E</code>：与 <code>Q</code> 同形的二维 numpy 数组，资格迹，记录哪些 <code>(s, a)</code> 最近参与过决策；</li>
+          <li><code>s</code>、<code>a</code>：当前状态与动作的整数下标；</li>
+          <li><code>s_next</code>、<code>a_next</code>：下一状态与下一动作的整数下标，<code>a_next</code> 由行为策略给出；</li>
+          <li><code>r</code>：这一步拿到的即时奖励，float；</li>
+          <li><code>done</code>：布尔值，表示 <code>s_next</code> 是不是终止状态；</li>
+          <li><code>alpha</code>：学习率 α；<code>gamma</code>：折扣因子 γ；<code>lam</code>：迹衰减参数 λ，都是标量。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回二元组 <code>(Q_new, E_new)</code>，两个都是 <code>np.ndarray</code>，形状分别与传入的 <code>Q</code>、<code>E</code> 相同；</li>
+          <li><code>Q_new</code>：这一步之后的整张动作价值表。按迹分摊的结果是可能有多于一个格子被改动，不只是 <code>[s, a]</code>；</li>
+          <li><code>E_new</code>：这一步之后的资格迹，供下一次调用接着用。传入的 <code>Q</code> 与 <code>E</code> 都不被就地修改。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>λ=0 时返回的 <code>E</code> 全为 0，但当前 <code>(s, a)</code> 仍被更新；
+          重复访问同一个 <code>(s, a)</code> 后迹累加到 2，说明用的是累积式而不是替换式；
+          γλ=1 时先前访问过的 <code>(s, a)</code> 也会被更新，更新的是整张 <code>Q</code> 而不是单个格子；
+          <code>done=True</code> 时 <code>Q[s_next, a_next]</code> 不参与自举，即使它的值很大；
+          传入的 <code>Q</code> 与 <code>E</code> 在调用后保持原值。只许标准库加 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>第一步，复制两份可写的表：<code>Q = np.array(Q, dtype=float)</code>、
+              <code>E = np.array(E, dtype=float)</code>。<code>np.array(...)</code> 返回新数组，
+              改它不会动到调用方传进来的那个。</li>
+          <li>第二步，给当前格子记一笔欠账：<code>E[s, a] += 1.0</code>。
+              这就是"累积式"：同一格再被访问一次就再加 1。</li>
+          <li>第三步，先算 TD 误差 <code>delta</code>。<code>done</code> 为真时
+              <code>delta = r - Q[s, a]</code>；否则
+              <code>delta = r + gamma * Q[s_next, a_next] - Q[s, a]</code>。</li>
+          <li>第四步，按迹把误差分摊回去，整张表一起更新：<code>Q += alpha * delta * E</code>。
+              <code>E</code> 与 Q 同形状，numpy 会对每个格子各算各的。
+              λ=0 时 E 只有当前格子非零，效果退化成只更新 (s,a)。</li>
+          <li>第五步，让迹缩水：<code>E *= gamma * lam</code>。最后 <code>return Q, E</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def sarsa_lambda_step(Q, E, s, a, r, s_next, a_next, done, alpha, gamma, lam):
+    # TODO: 累积式资格迹 + SARSA(lambda) 的一步更新
+    return Q, E
+</script>
+
+      <script type="text/x-python" data-role="tests">
+Q = np.zeros((2, 2))
+E = np.zeros((2, 2))
+Q1, E1 = sarsa_lambda_step(Q, E, 0, 0, 1.0, 1, 1, False, 0.5, 1.0, 0.0)
+check(abs(Q1[0, 0] - 0.5) < 1e-9,
+      f"lambda=0 应当退化成 SARSA：delta=1，Q[0,0]=0.5，实际 {Q1[0,0]:.4f}")
+check(np.allclose(Q1[1, 1], 0.0), "lambda=0 时只有当前 (s,a) 被更新")
+check(np.allclose(E1, 0.0), "更新后 E <- gamma*lambda*E，lambda=0 时迹应当清零")
+check(np.allclose(Q, 0.0) and np.allclose(E, 0.0), "不应就地修改传入的 Q 和 E")
+
+Q = np.zeros((2, 2))
+E = np.zeros((2, 2))
+Q, E = sarsa_lambda_step(Q, E, 1, 1, 1.0, 1, 1, False, 0.5, 1.0, 1.0)
+check(abs(E[1, 1] - 1.0) < 1e-9, f"访问一次后累积式迹为 1，实际 {E[1,1]:.4f}")
+Q, E = sarsa_lambda_step(Q, E, 1, 1, 1.0, 1, 1, False, 0.5, 1.0, 1.0)
+check(abs(E[1, 1] - 2.0) < 1e-9,
+      f"累积式迹每次访问都加 1，重复访问后应为 2（替换式会停在 1），实际 {E[1,1]:.4f}")
+
+Q = np.zeros((2, 2))
+E = np.zeros((2, 2))
+Q, E = sarsa_lambda_step(Q, E, 0, 0, 1.0, 1, 1, False, 0.5, 1.0, 1.0)
+check(abs(E[0, 0] - 1.0) < 1e-9, "gamma*lambda=1 时迹不衰减")
+Q, E = sarsa_lambda_step(Q, E, 1, 1, 1.0, 1, 1, False, 0.5, 1.0, 1.0)
+check(abs(Q[0, 0] - 1.0) < 1e-9,
+      f"lambda=1 时上一步的 (s,a) 也按迹被更新：Q[0,0] 应从 0.5 变到 1.0，实际 {Q[0,0]:.4f}")
+check(abs(Q[1, 1] - 0.5) < 1e-9, f"当前 (s,a) 当然也要更新，实际 {Q[1,1]:.4f}")
+
+Q = np.zeros((2, 2))
+Q[1, 1] = 10.0
+E = np.zeros((2, 2))
+Q, E = sarsa_lambda_step(Q, E, 0, 0, 2.0, 1, 1, True, 1.0, 0.9, 0.0)
+check(abs(Q[0, 0] - 2.0) < 1e-9,
+      f"done=True 时目标只有 r=2，即使 Q(s',a')=10 也不能自举，实际 {Q[0,0]:.4f}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def sarsa_lambda_step(Q, E, s, a, r, s_next, a_next, done, alpha, gamma, lam):
+    Q = np.array(Q, dtype=float)
+    E = np.array(E, dtype=float)
+    E[s, a] += 1.0
+    if done:
+        target = r
+    else:
+        target = r + gamma * Q[s_next, a_next]
+    delta = target - Q[s, a]
+    Q += alpha * delta * E
+    E *= gamma * lam
+    return Q, E
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.)。
+        第 7 章 "n-step Bootstrapping" 给出式 (11.1) 与"中间 n 通常最好"的实验结论；
+        第 12 章 "Eligibility Traces" 讲 λ-回报、前向/后向视图的等价性，
+        其中第 12.6 节就是 Sarsa(λ)。
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a></p>
+      <p>想直接看这套思想在工程里的现代形态，读 OpenAI Spinning Up 的
+        <a class="cite" href="https://spinningup.openai.com/en/latest/algorithms/vpg.html">Vanilla Policy Gradient</a> 一节，
+        它对 λ 与偏差-方差的取舍讲得很工程化。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "我的回合长度大约是 30 步，n 和 λ 该怎么取？"
+      或者 "把式 (11.4) 用我自己的环境逐行推一遍。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

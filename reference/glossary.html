@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>术语表 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson">
+  <header class="lesson-head">
+    <p class="eyebrow">参考文档 · 随时查阅</p>
+    <h1>术语表</h1>
+    <p class="lede">课程里出现的每个术语，一两句话说清它「是什么」，以及你在建模、选算法、排查训练时怎么用它做判断。</p>
+    <p><a href="../index.html">← 回到课程</a> ·
+      另见 <a href="algorithms.html">算法速查表</a> · <a href="notation.html">符号表</a></p>
+    <p class="note">用法：先按分组定位，再看每条末尾的「见第 N 课」：那里会把它讲透。
+      数学记号与<a href="notation.html">符号表</a>完全一致；本页独立公式编号为 (G.n)，
+      <a href="algorithms.html">算法速查表</a>用 (A.n)。少数符号表里没有的角色（SAC 的温度、PER 的优先级指数等）
+      在该表开头统一约定。</p>
+  </header>
+
+  <section>
+    <h2>基础概念</h2>
+    <dl>
+      <dt><span class="term">智能体（agent）</span></dt>
+      <dd>做决策并从反馈里改进的那一方。判据很直接：凡是「拿到 <var>s</var>、输出 <var>a</var>、收到 <var>r</var>」的那部分代码就是智能体，策略和价值函数都属于它。
+        <a href="../lessons/0001-what-is-rl.html">见第 1 课</a></dd>
+
+      <dt><span class="term">环境（environment）</span></dt>
+      <dd>智能体之外的一切：接收动作 <var>a</var>，返回下一状态 <var>s</var>′ 与奖励 <var>r</var>。工程上它就是「仿真器」，或「真实业务系统 + 你的埋点与动作执行通道」。
+        <a href="../lessons/0001-what-is-rl.html">见第 1 课</a></dd>
+
+      <dt><span class="term">状态（state, <var>s</var> ∈ <var>S</var>）</span></dt>
+      <dd>决策时刻对「未来会怎样」有影响的全部信息的一次编码。判据是马尔可夫性，不是「数据库里有这一行」。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+
+      <dt><span class="term">动作（action, <var>a</var> ∈ <var>A</var>）</span></dt>
+      <dd>一步里能做的选择。是离散（从固定编号里选一个）还是连续（一个实数向量），直接决定你后面只能用哪一族算法。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+
+      <dt><span class="term">奖励（reward, <var>r</var>）</span></dt>
+      <dd>一步之后立刻拿到的标量反馈，也是优化目标的唯一来源。RL 精确优化的就是你写下的那个奖励；奖励写错，它照样把错的东西优化到位。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a> · 见<a href="../lessons/0006-modeling-your-problem.html">第 6 课</a></dd>
+
+      <dt><span class="term">回报（return, <var>G<sub>t</sub></var>）</span></dt>
+      <dd>从 <var>t</var> 时刻起的折扣奖励总和。奖励是每一步的手段，回报才是被最大化的量；同一条轨迹上越靠前的决策分到的回报越多。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+    </dl>
+    <div class="eq">
+      <span class="eq-body"><var>G<sub>t</sub></var> ≐ <var>r</var><sub><var>t</var>+1</sub> + <var>γr</var><sub><var>t</var>+2</sub> + <var>γ</var>²<var>r</var><sub><var>t</var>+3</sub> + ⋯ = Σ<sub><var>k</var>=0</sub><sup>∞</sup> <var>γ<sup>k</sup>r</var><sub><var>t</var>+<var>k</var>+1</sub></span>
+      <span class="eq-num">(G.1)</span>
+    </div>
+    <dl>
+      <dt><span class="term">折扣因子（discount factor, <var>γ</var>）</span></dt>
+      <dd>0 ≤ <var>γ</var> &lt; 1（持续任务）或 <var>γ</var> = 1（回合任务）。它决定智能体的耐心：γ=0.9 时 10 步之后的奖励只剩 0.35 的权重，γ=0.99 时还有 0.90；有效视野约为 1/(1−γ)。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+
+      <dt><span class="term">策略（policy, <var>π</var>）</span></dt>
+      <dd>状态到动作的规则：随机策略 <var>π</var>(<var>a</var>|<var>s</var>) 给概率，确定性策略 <var>π</var>(<var>s</var>) 直接给动作。策略才是最终要交付的东西，价值函数只是学它的中间产物。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+
+      <dt><span class="term">回合（episode；回合任务 episodic / 持续任务 continuing）</span></dt>
+      <dd>回合任务有终止状态，回报是有限和，蒙特卡洛方法要求它；持续任务不终止，必须靠 <var>γ</var> &lt; 1 让回报有限。你的业务问题属于哪一种，决定了很多公式能不能直接用。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+
+      <dt><span class="term">模型（model）</span></dt>
+      <dd>对环境动态的预测，最完整的形式是 <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>)。有模型就能「想象」转移、不必真实交互，这是模型基方法与规划的入口。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a> · 见<a href="../lessons/0024-model-based-planning.html">第 24 课</a></dd>
+
+      <dt><span class="term">马尔可夫决策过程（Markov decision process, MDP）</span></dt>
+      <dd>把序贯决策写成五元组 (<var>S</var>, <var>A</var>, <var>P</var>, <var>R</var>, <var>γ</var>)：状态、动作、转移概率、奖励、折扣。它是本课程所有算法的公共问题定义。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+
+      <dt><span class="term">马尔可夫性（Markov property）</span></dt>
+      <dd>给定当前状态和动作之后，未来与更早的历史条件独立。检验做法：固定状态表示，看「两个不同历史落进同一个状态时，下一步的分布是否相同」；不同就说明状态漏了信息。
+        <a href="../lessons/0003-mdp.html">见第 3 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>价值与方程</h2>
+    <dl>
+      <dt><span class="term">状态价值（state value, <var>v<sub>π</sub></var>(<var>s</var>)）</span></dt>
+      <dd>在策略 <var>π</var> 下从 <var>s</var> 出发的期望回报。它回答「这个局面值多少」，是比较策略的标尺；注意它是<em>策略的</em>属性，不是局面的固有属性。
+        <a href="../lessons/0004-value-bellman.html">见第 4 课</a></dd>
+
+      <dt><span class="term">动作价值（action value, <var>q<sub>π</sub></var>(<var>s</var>, <var>a</var>)）</span></dt>
+      <dd>在 <var>s</var> 先做 <var>a</var>、此后按 <var>π</var> 行动的期望回报。控制算法几乎都围绕它：因为只要 <var>π</var>′(<var>s</var>) = arg max<sub><var>a</var></sub> <var>q<sub>π</sub></var>(<var>s</var>, <var>a</var>)，就得到一个不差于 <var>π</var> 的策略。
+        <a href="../lessons/0004-value-bellman.html">见第 4 课</a></dd>
+
+      <dt><span class="term">最优价值函数（optimal value function, <var>v</var><sub>*</sub>, <var>q</var><sub>*</sub>）</span></dt>
+      <dd>对所有策略取最大得到的价值。<var>v</var><sub>*</sub> 唯一，但达到它的最优策略可能不止一个（有并列动作时）。
+        <a href="../lessons/0004-value-bellman.html">见第 4 课</a></dd>
+
+      <dt><span class="term">贝尔曼方程（Bellman equation）</span></dt>
+      <dd>把「期望回报」拆成「这一步的奖励 + 折扣后的下一步价值」的递归关系。它让价值可以靠反复迭代算出来，而不必解巨大的线性方程组。
+        <a href="../lessons/0004-value-bellman.html">见第 4 课</a></dd>
+    </dl>
+    <div class="eq">
+      <span class="eq-body"><var>v<sub>π</sub></var>(<var>s</var>) = Σ<sub><var>a</var></sub> <var>π</var>(<var>a</var>|<var>s</var>) Σ<sub><var>s</var>′,<var>r</var></sub> <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>) [ <var>r</var> + <var>γv<sub>π</sub></var>(<var>s</var>′) ]</span>
+      <span class="eq-num">(G.2)</span>
+    </div>
+    <dl>
+      <dt><span class="term">贝尔曼最优方程（Bellman optimality equation）</span></dt>
+      <dd>把期望换成 max：<var>v</var><sub>*</sub>(<var>s</var>) = max<sub><var>a</var></sub> Σ <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>)[<var>r</var> + <var>γv</var><sub>*</sub>(<var>s</var>′)]。这个 max 是价值迭代与 Q-learning 里那一步 max 的来源，也是过估计偏差的来源。
+        <a href="../lessons/0004-value-bellman.html">见第 4 课</a></dd>
+    </dl>
+    <div class="eq">
+      <span class="eq-body"><var>v</var><sub>*</sub>(<var>s</var>) = max<sub><var>a</var></sub> Σ<sub><var>s</var>′,<var>r</var></sub> <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>) [ <var>r</var> + <var>γv</var><sub>*</sub>(<var>s</var>′) ]</span>
+      <span class="eq-num">(G.3)</span>
+    </div>
+    <dl>
+      <dt><span class="term">备份（backup）</span></dt>
+      <dd>把一个 (<var>s</var>, <var>a</var>) 的价值信息沿着转移「回传」给前一个状态的操作；备份图就是把这个操作画出来。DP 用期望备份，蒙特卡洛用采样到的整条回报，TD 用采样 + 自举的混合备份。
+        <a href="../lessons/0004-value-bellman.html">见第 4 课</a></dd>
+
+      <dt><span class="term">动态规划（dynamic programming, DP）</span></dt>
+      <dd>在已知 <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>) 的前提下反复做贝尔曼备份求最优解。它是所有无模型方法的「理想版本」，也是读懂后面算法的参照物。
+        <a href="../lessons/0005-dynamic-programming.html">见第 5 课</a></dd>
+
+      <dt><span class="term">预测与控制（prediction and control）</span></dt>
+      <dd>预测 = 评估一个给定策略的价值；控制 = 找出更好的策略。两者交替就是策略迭代；分清你当前在做哪一个，能解释大多数算法的结构。
+        <a href="../lessons/0005-dynamic-programming.html">见第 5 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>无模型方法</h2>
+    <dl>
+      <dt><span class="term">蒙特卡洛（Monte Carlo, MC）</span></dt>
+      <dd>用完整回合里实际得到的 <var>G<sub>t</sub></var> 求平均来估计价值。它不需要模型、估计无偏，但必须等回合结束，而且只能更新被访问过的状态。
+        <a href="../lessons/0007-monte-carlo.html">见第 7 课</a></dd>
+
+      <dt><span class="term">时序差分（temporal difference, TD）</span></dt>
+      <dd>用 <var>r</var><sub><var>t</var>+1</sub> + <var>γV</var>(<var>S</var><sub><var>t</var>+1</sub>) 这个「一半真实、一半估计」的目标更新 <var>V</var>。它每一步都能更新、不需要等回合结束，也不需要环境模型。
+        <a href="../lessons/0008-td-learning.html">见第 8 课</a></dd>
+
+      <dt><span class="term">TD 误差（TD error, <var>δ<sub>t</sub></var>）</span></dt>
+      <dd><var>δ<sub>t</sub></var> ≐ <var>r</var><sub><var>t</var>+1</sub> + <var>γV</var>(<var>S</var><sub><var>t</var>+1</sub>) − <var>V</var>(<var>S<sub>t</sub></var>)：既是所有 TD 类算法的更新方向，也是「实际比预期好多少」的惊奇度。PER 用它排优先级，A2C 直接拿它当优势估计。
+        <a href="../lessons/0008-td-learning.html">见第 8 课</a></dd>
+
+      <dt><span class="term">自举（bootstrapping）</span></dt>
+      <dd>用当前的估计值本身去构造更新目标，而不是等真实回报。它让学习可以逐步推进、方差更低；代价是把估计误差也一并学进去，三种机制凑齐时，这一项最难压住。
+        <a href="../lessons/0008-td-learning.html">见第 8 课</a></dd>
+
+      <dt><span class="term">on-policy</span></dt>
+      <dd>评估和改进的是同一个正在执行的策略（含探索），因此学到的价值里包含探索的代价。判断方法：把部署时的策略换成贪心，看学到的价值还对不对；on-policy 方法会不对。
+        <a href="../lessons/0009-sarsa.html">见第 9 课</a></dd>
+
+      <dt><span class="term">off-policy</span></dt>
+      <dd>产生数据的策略（行为策略）与要学、要改善的策略（目标策略）可以不同，所以旧数据、别人甚至人类产生的数据都能用。代价是要用 max 目标或重要性采样纠偏，方差与稳定性问题更多。
+        <a href="../lessons/0010-q-learning.html">见第 10 课</a></dd>
+
+      <dt><span class="term">行为策略（behavior policy）</span></dt>
+      <dd>真正与环境交互、产生数据的那个策略，通常带 ε-greedy 之类的探索。它决定了你的数据覆盖哪些 (<var>s</var>, <var>a</var>)。
+        <a href="../lessons/0010-q-learning.html">见第 10 课</a></dd>
+
+      <dt><span class="term">目标策略（target policy）</span></dt>
+      <dd>你想学出来、最终部署的那个策略，在 Q-learning 里就是贪心策略。它与行为策略的差距既是 off-policy 的收益来源，也是不稳定性的来源。
+        <a href="../lessons/0010-q-learning.html">见第 10 课</a></dd>
+
+      <dt><span class="term">重要性采样（importance sampling, <var>ρ<sub>t</sub></var>）</span></dt>
+      <dd>用行为策略的数据估计目标策略下的量，靠乘概率比 <var>ρ<sub>t</sub></var> = <var>π</var>(<var>A<sub>t</sub></var>|<var>S<sub>t</sub></var>) / <var>b</var>(<var>A<sub>t</sub></var>|<var>S<sub>t</sub></var>) 来纠偏。它无偏，但 <var>ρ</var> 沿轨迹连乘会让方差随长度指数增长，实践里要截断或改用加权版本。
+        <a href="../lessons/0007-monte-carlo.html">见第 7 课</a> · 见<a href="../lessons/0015-prioritized-replay.html">第 15 课</a></dd>
+
+      <dt><span class="term">探索与利用（exploration and exploitation）</span></dt>
+      <dd>利用 = 选当前看起来最好的动作拿收益；探索 = 选还没试够的动作换取信息。只利用会锁死在次优解，只探索等于不学习；所有探索技巧都是在分配「探索预算」。
+        <a href="../lessons/0002-bandits.html">见第 2 课</a></dd>
+
+      <dt><span class="term">ε-greedy</span></dt>
+      <dd>以 1−<var>ε</var> 选当前最大 <var>Q</var> 的动作、以 <var>ε</var> 在全部动作上均匀随机。<var>ε</var> 是探索预算比例：ε=0.1 意味着约 10% 的动作纯粹为获取信息而做。<var>ε</var> 固定时不收敛到确定性最优策略，需要衰减。
+        <a href="../lessons/0002-bandits.html">见第 2 课</a></dd>
+
+      <dt><span class="term">UCB（upper confidence bound，置信上界）</span></dt>
+      <dd>用 <span class="math"><var>A<sub>t</sub></var> = arg max<sub><var>a</var></sub> [ <var>Q<sub>t</sub></var>(<var>a</var>) + <var>c</var>√(ln <var>t</var> / <var>N<sub>t</sub></var>(<var>a</var>)) ]</span> 选动作：某动作访问得越少，加分越多。它把不确定性显式当奖励，平稳老虎机上通常比 ε-greedy 遗憾更低。
+        <a href="../lessons/0002-bandits.html">见第 2 课</a></dd>
+
+      <dt><span class="term">遗憾（regret）</span></dt>
+      <dd>累积遗憾 = 最优臂的期望收益总和 − 实际拿到的期望收益总和，增长越慢越好。评价探索算法要看它，而不是看平均收益；平均收益高可能只是因为你抽到了好老虎机。
+        <a href="../lessons/0002-bandits.html">见第 2 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>函数逼近与深度 RL</h2>
+    <dl>
+      <dt><span class="term">函数逼近（function approximation）</span></dt>
+      <dd>用带参数的函数（线性特征或神经网络）代替价值表，例如 <var>V</var>(<var>s</var>; <var>w</var>)。状态连续或状态数远超内存时必须用它；代价是失去表格法的收敛保证。
+        <a href="../lessons/0012-function-approximation.html">见第 12 课</a></dd>
+
+      <dt><span class="term">半梯度（semi-gradient）</span></dt>
+      <dd>更新时只对 <var>V</var>(<var>S<sub>t</sub></var>; <var>w</var>) 求梯度，把目标 <var>r</var> + <var>γV</var>(<var>S</var><sub><var>t</var>+1</sub>; <var>w</var>) 里的 <var>w</var> 当常数。因此它不是任何目标函数的真实梯度；但正因为忽略了这一项，TD 才能在线、低成本地跑起来。
+        <a href="../lessons/0012-function-approximation.html">见第 12 课</a></dd>
+
+      <dt><span class="term">致命三元组（deadly triad）</span></dt>
+      <dd>函数逼近 + 自举 + off-policy 三者同时出现时，价值估计可能发散（S&amp;B 的 Baird 反例）。去掉任意一项就有收敛性结果；DQN 的经验回放与目标网络就是在这个约束下打的补丁。
+        <a href="../lessons/0012-function-approximation.html">见第 12 课</a></dd>
+
+      <dt><span class="term">经验回放（experience replay, <var>D</var>）</span></dt>
+      <dd>把转移 (<var>s</var>, <var>a</var>, <var>r</var>, <var>s</var>′) 存进缓冲区 <var>D</var>，训练时随机抽 mini-batch。它打断样本的时间相关性、让同一条数据被多次利用；代价是数据总是来自旧策略，而且缓冲区占内存。
+        <a href="../lessons/0013-dqn.html">见第 13 课</a></dd>
+
+      <dt><span class="term">目标网络（target network）</span></dt>
+      <dd>另存一份参数 <var>θ</var><sup>−</sup>、每隔若干步硬同步或按 <var>τ</var> 软更新才变动的 Q 网络，专门用来算自举目标。没有它，就是在追一个自己也在动的目标，容易发散。
+        <a href="../lessons/0013-dqn.html">见第 13 课</a></dd>
+
+      <dt><span class="term">过估计偏差（overestimation bias；表格法里叫最大化偏差 maximization bias）</span></dt>
+      <dd>max 作用在带噪声的估计上总会挑到偏高的那个（𝔼[max<sub><var>a</var></sub> <var>Q</var>] ≥ max<sub><var>a</var></sub> 𝔼[<var>Q</var>]），再经自举放大。Double DQN 用在线网络选动作、目标网络评估动作来缓解。
+        <a href="../lessons/0014-double-dueling-dqn.html">见第 14 课</a> · 见<a href="../lessons/0010-q-learning.html">第 10 课</a></dd>
+
+      <dt><span class="term">优先经验回放（prioritized experience replay, PER）</span></dt>
+      <dd>按 TD 误差大小给样本排优先级，误差大的被抽中的概率更高。它提升样本效率，但改变了采样分布，必须用重要性采样权重 <var>ρ</var> 修正偏差，并让退火指数逐步升到 1。
+        <a href="../lessons/0015-prioritized-replay.html">见第 15 课</a></dd>
+
+      <dt><span class="term">分布式 RL（distributional RL）</span></dt>
+      <dd>不只学回报的期望，而是学回报的整个分布 <var>Z</var>(<var>s</var>, <var>a</var>)。分布的宽度本身就是风险信息；C51 与 QR-DQN 是两种典型实现，Rainbow 的消融显示它是最有价值的组件之一。
+        <a href="../lessons/0016-rainbow-distributional.html">见第 16 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>策略梯度与 Actor-Critic</h2>
+    <dl>
+      <dt><span class="term">策略梯度（policy gradient）</span></dt>
+      <dd>直接对策略参数 <var>θ</var> 求期望回报的梯度，用似然比技巧写成 ∇<sub><var>θ</var></sub><var>J</var>(<var>θ</var>) = 𝔼<sub><var>π</var></sub>[ ∇<sub><var>θ</var></sub> log <var>π<sub>θ</sub></var>(<var>A</var>|<var>S</var>) · <var>G<sub>t</sub></var> ]。它天生支持连续动作与随机策略，代价是方差大、样本效率低。
+        <a href="../lessons/0017-policy-gradient.html">见第 17 课</a></dd>
+
+      <dt><span class="term">基线（baseline, <var>b</var>(<var>s</var>)）</span></dt>
+      <dd>从回报里减掉的一个只依赖状态、不依赖动作的量，常用 <var>V</var>(<var>s</var>)。它不改变梯度的期望（因为 Σ<sub><var>a</var></sub> ∇<var>π</var> = 0），却能大幅降低方差；但基线估计得不准会引入偏差。
+        <a href="../lessons/0017-policy-gradient.html">见第 17 课</a></dd>
+
+      <dt><span class="term">优势函数（advantage function, <var>A<sub>π</sub></var>(<var>s</var>, <var>a</var>)）</span></dt>
+      <dd>表示「在 <var>s</var> 做 <var>a</var> 比按 <var>π</var> 平均好多少」。策略梯度里用它替代原始回报 <var>G<sub>t</sub></var>，等于把「绝对收益」换成「相对好坏」，是最有效的降方差手段。
+        <a href="../lessons/0018-actor-critic.html">见第 18 课</a> · 见<a href="../lessons/0017-policy-gradient.html">第 17 课</a></dd>
+    </dl>
+    <div class="eq">
+      <span class="eq-body"><var>A<sub>π</sub></var>(<var>s</var>, <var>a</var>) ≐ <var>q<sub>π</sub></var>(<var>s</var>, <var>a</var>) − <var>v<sub>π</sub></var>(<var>s</var>)</span>
+      <span class="eq-num">(G.4)</span>
+    </div>
+    <dl>
+      <dt><span class="term">actor-critic</span></dt>
+      <dd>同时维护一个策略（actor）和一个价值函数（critic）：critic 用 TD 学习评估当前策略，actor 用 critic 给出的优势更新。它把蒙特卡洛的高方差换成自举的偏差，是 A2C、PPO、SAC 的共同骨架。
+        <a href="../lessons/0018-actor-critic.html">见第 18 课</a></dd>
+
+      <dt><span class="term">GAE（generalized advantage estimation，广义优势估计）</span></dt>
+      <dd>用衰减的 TD 误差之和估计优势：<var>A<sub>t</sub></var> = Σ<sub><var>l</var>≥0</sub> (<var>γλ</var>)<sup><var>l</var></sup> <var>δ</var><sub><var>t</var>+<var>l</var></sub>。<var>λ</var>=0 退化为单步 TD 误差（低方差、高偏差），<var>λ</var>=1 退化为蒙特卡洛优势（无偏、高方差）；λ≈0.95 是常用折中。
+        <a href="../lessons/0019-gae-trpo.html">见第 19 课</a></dd>
+
+      <dt><span class="term">信赖域（trust region）</span></dt>
+      <dd>每次更新时限制新旧策略的 KL 散度不超过阈值（𝔼[KL(<var>π</var><sub>old</sub> ‖ <var>π<sub>θ</sub></var>)] ≤ <var>δ</var><sub>KL</sub>），让「每次更新都不会变差」的单调改进结论近似成立。TRPO 用共轭梯度 + 线搜索实现，正确但昂贵。
+        <a href="../lessons/0019-gae-trpo.html">见第 19 课</a></dd>
+
+      <dt><span class="term">PPO 裁剪（PPO clipping）</span></dt>
+      <dd>用 min(<var>r<sub>t</sub></var>(<var>θ</var>)<var>A<sub>t</sub></var>, clip(<var>r<sub>t</sub></var>(<var>θ</var>), 1−<var>ε</var>, 1+<var>ε</var>)<var>A<sub>t</sub></var>) 把概率比限制在 [1−<var>ε</var>, 1+<var>ε</var>] 内，作为信赖域的廉价近似。它只在「目标还能变好」的方向上截断梯度，所以是启发式，而不是精确约束。
+        <a href="../lessons/0020-ppo.html">见第 20 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>连续控制与最大熵</h2>
+    <dl>
+      <dt><span class="term">DDPG（deep deterministic policy gradient，深度确定性策略梯度）</span></dt>
+      <dd>动作连续、无法对 <var>a</var> 做 max 时，改成学一个确定性策略 <var>μ<sub>θ</sub></var>(<var>s</var>)，并用 ∇<sub><var>a</var></sub><var>Q</var> 把「动作该往哪个方向调」经链式法则传回 <var>θ</var>：∇<sub><var>θ</var></sub><var>J</var> ≈ 𝔼[ ∇<sub><var>a</var></sub><var>Q</var>(<var>s</var>, <var>a</var>) ∇<sub><var>θ</var></sub><var>μ<sub>θ</sub></var>(<var>s</var>) ]。
+        <a href="../lessons/0021-ddpg.html">见第 21 课</a></dd>
+
+      <dt><span class="term">TD3（twin delayed DDPG）</span></dt>
+      <dd>针对 DDPG 过估计与脆弱的三处修正：截断双 Q（取两个 critic 的较小值）、策略延迟更新（critic 更新若干次才更新一次 actor）、目标动作平滑（给目标动作加截断噪声）。连续控制里比 DDPG 稳得多。
+        <a href="../lessons/0022-td3.html">见第 22 课</a></dd>
+
+      <dt><span class="term">SAC（soft actor-critic）</span></dt>
+      <dd>在最大化回报的同时最大化策略熵的 off-policy actor-critic。熵项鼓励策略保持随机，使它在多个近似最优动作间继续探索，因此样本效率高、对超参相对鲁棒，常被当作连续控制的首选。
+        <a href="../lessons/0023-sac.html">见第 23 课</a></dd>
+
+      <dt><span class="term">最大熵（maximum entropy）</span></dt>
+      <dd>目标里加上 <var>α</var><sub>ent</sub>·<var>H</var>(<var>π</var>(·|<var>s</var>))：除了回报高，还要求策略「尽量不确定」。它天然带来探索与抗扰动能力；当 <var>α</var><sub>ent</sub> → 0 时退回普通 RL。
+        <a href="../lessons/0023-sac.html">见第 23 课</a></dd>
+
+      <dt><span class="term">温度系数（temperature, <var>α</var><sub>ent</sub>）</span></dt>
+      <dd>熵项的权重，也就是「探索换收益」的汇率：太小则策略过早变确定、探索不足，太大则学到的策略过于随机。SAC 通常自动调它，让平均熵维持在目标熵附近。文献里记作 <var>α</var>（与学习率同名），本课程写作 <var>α</var><sub>ent</sub> 以示区别。
+        <a href="../lessons/0023-sac.html">见第 23 课</a></dd>
+
+      <dt><span class="term">重参数化技巧（reparameterization trick）</span></dt>
+      <dd>把采样写成 <var>a</var> = tanh(<var>μ<sub>θ</sub></var>(<var>s</var>) + <var>σ<sub>θ</sub></var>(<var>s</var>) ⊙ <var>ξ</var>)、<var>ξ</var> ~ <var>N</var>(0, <var>I</var>)，让随机性只来自外部噪声 <var>ξ</var>，采样结果便对 <var>θ</var> 可微。SAC 用它得到低方差的路径梯度。
+        <a href="../lessons/0023-sac.html">见第 23 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>模型基与离线</h2>
+    <dl>
+      <dt><span class="term">模型基（model-based）</span></dt>
+      <dd>先有或先学一个环境模型，再用它生成「想象」数据、或做前瞻搜索。样本效率通常远高于无模型方法；代价是模型误差会累积，学偏的模型会想象出错误的最优解。
+        <a href="../lessons/0024-model-based-planning.html">见第 24 课</a></dd>
+
+      <dt><span class="term">Dyna</span></dt>
+      <dd>把真实经验与想象经验放进同一个循环的架构：用真实转移更新价值、同时更新模型，再用模型采样若干步做额外的价值更新。它是理解模型基方法最省力的入口。
+        <a href="../lessons/0024-model-based-planning.html">见第 24 课</a></dd>
+
+      <dt><span class="term">MCTS（Monte Carlo tree search，蒙特卡洛树搜索）</span></dt>
+      <dd>反复执行选择 → 扩展 → 模拟 → 回传四步，把计算预算集中到有希望的分支上。它不依赖价值函数就能搜索，适合回合制、转移确定的规划问题。
+        <a href="../lessons/0024-model-based-planning.html">见第 24 课</a></dd>
+
+      <dt><span class="term">UCT（upper confidence bounds applied to trees）</span></dt>
+      <dd>MCTS 的选择规则，把 UCB 搬到树上：<span class="math"><var>a</var>* = arg max<sub><var>a</var></sub> [ <var>Q</var>(<var>s</var>, <var>a</var>) + <var>c</var>√(ln <var>N</var>(<var>s</var>) / <var>N</var>(<var>s</var>, <var>a</var>)) ]</span>，未访问过的动作优先级最高。它同时回答「往深处挖」与「要不要换分支」。
+        <a href="../lessons/0024-model-based-planning.html">见第 24 课</a></dd>
+
+      <dt><span class="term">AlphaZero</span></dt>
+      <dd>MCTS + 策略/价值网络 + 自对弈：网络给出先验概率与价值，MCTS 用它们指导搜索，搜索得到的访问分布再作为策略网络的目标。因为监督信号来自自对弈与胜负，它不需要人类棋谱。
+        <a href="../lessons/0024-model-based-planning.html">见第 24 课</a></dd>
+
+      <dt><span class="term">离线 RL（offline RL）</span></dt>
+      <dd>只给一份固定的数据集 <var>D</var>、不允许再与环境交互，要从中学出尽可能好的策略。真实业务里最常见（历史日志），也最难：没有探索，就无法纠正数据的盲区。
+        <a href="../lessons/0025-offline-imitation.html">见第 25 课</a></dd>
+
+      <dt><span class="term">行为克隆（behavior cloning, BC）</span></dt>
+      <dd>把日志里的 (<var>s</var>, <var>a</var>) 当监督学习样本，直接拟合 <var>π<sub>θ</sub></var>(<var>a</var>|<var>s</var>)。实现最简单、最稳，是必须最先跑的基线；但它只模仿、不会超过数据，且会遇到复合误差。
+        <a href="../lessons/0025-offline-imitation.html">见第 25 课</a></dd>
+
+      <dt><span class="term">复合误差（compounding error）</span></dt>
+      <dd>BC 在训练分布内的小误差会把策略推到数据没覆盖的状态，在那里犯更大的错，误差随步数累积（最坏可达 <var>O</var>(<var>εT</var>²)）。数据的状态覆盖比模型容量更重要。
+        <a href="../lessons/0025-offline-imitation.html">见第 25 课</a></dd>
+
+      <dt><span class="term">分布偏移（distribution shift）</span></dt>
+      <dd>离线数据由行为策略 <var>π<sub>β</sub></var> 产生，而学到的策略会去看 <var>π<sub>β</sub></var> 从未访问过的 (<var>s</var>, <var>a</var>)；这些区域的 Q 值没有数据约束，可被外推成任意大的值，再把策略拖向更没数据的地方。离线 RL 失败大多是它造成的。
+        <a href="../lessons/0025-offline-imitation.html">见第 25 课</a></dd>
+
+      <dt><span class="term">CQL（conservative Q-learning）</span></dt>
+      <dd>在标准 Bellman 误差之外加一项保守惩罚：压低「策略偏好但数据里没见过」的动作的 Q 值，同时保留数据里出现过的动作的 Q 值。它把不确定性变成保守，是实践中最常用的离线 RL 算法之一。
+        <a href="../lessons/0025-offline-imitation.html">见第 25 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>对齐</h2>
+    <dl>
+      <dt><span class="term">RLHF（reinforcement learning from human feedback）</span></dt>
+      <dd>把「让模型符合人类偏好」写成 RL 问题：策略是语言模型，奖励由人类偏好训练出的奖励模型给出，再用 PPO 优化。经典三步是 SFT → 训练奖励模型 → PPO + KL 惩罚。
+        <a href="../lessons/0026-rlhf-dpo.html">见第 26 课</a></dd>
+
+      <dt><span class="term">奖励模型（reward model, RM）</span></dt>
+      <dd>用人类偏好对训练的、给「提示 + 回复」打分的模型，常见形式是 Bradley-Terry：<var>P</var>(<var>y<sub>w</sub></var> ≻ <var>y<sub>l</sub></var> | <var>x</var>) = <var>σ</var>(<var>r</var>(<var>x</var>, <var>y<sub>w</sub></var>) − <var>r</var>(<var>x</var>, <var>y<sub>l</sub></var>))。它把写不出来的奖励函数变成一个可查询的打分器。
+        <a href="../lessons/0026-rlhf-dpo.html">见第 26 课</a></dd>
+
+      <dt><span class="term">KL 惩罚（KL penalty, <var>β</var>）</span></dt>
+      <dd>在奖励里减去 <var>β</var>·KL(<var>π<sub>θ</sub></var>(·|<var>x</var>) ‖ <var>π</var><sub>ref</sub>(·|<var>x</var>))，限制新策略不要偏离参考策略太远。没有它，策略会去钻奖励模型的空子（reward hacking），产出人类看来不自然的文本。<var>β</var> 越大越保守。
+        <a href="../lessons/0026-rlhf-dpo.html">见第 26 课</a></dd>
+
+      <dt><span class="term">参考策略（reference policy, <var>π</var><sub>ref</sub>）</span></dt>
+      <dd>通常取 SFT 之后的那个模型，作为 KL 惩罚的锚点。它定义了「不跑偏」的基准，也决定了这一轮微调最多能走多远。
+        <a href="../lessons/0026-rlhf-dpo.html">见第 26 课</a></dd>
+
+      <dt><span class="term">DPO（direct preference optimization）</span></dt>
+      <dd>把 RLHF 的带 KL 约束目标解析地重写成直接在偏好对上的分类损失，于是不再需要奖励模型和在线采样。代价是要有一份固定的偏好数据，且 <var>β</var> 与数据质量强相关。
+        <a href="../lessons/0026-rlhf-dpo.html">见第 26 课</a></dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>建模与工程实践</h2>
+    <dl>
+      <dt><span class="term">奖励黑客（reward hacking）</span></dt>
+      <dd>策略找到「拿到高奖励但不满足你真实意图」的捷径，例如把销量奖励刷成疯狂压货。根因是奖励函数只是意图的代理；发现它要靠护栏指标与人工抽查，而不是继续调学习率。
+        <a href="../lessons/0006-modeling-your-problem.html">见第 6 课</a></dd>
+
+      <dt><span class="term">奖励塑造（reward shaping）</span></dt>
+      <dd>在稀疏奖励里加入中间引导项以加速学习。要小心它改变最优策略：只有「势函数差分」形式的额外奖励（potential-based）理论上不改变最优策略，其余的塑形都可能被策略钻空子。
+        <a href="../lessons/0006-modeling-your-problem.html">见第 6 课</a></dd>
+
+      <dt><span class="term">样本效率（sample efficiency）</span></dt>
+      <dd>达到某个性能所需的环境交互步数。同样数据量下大体是 on-policy &lt; off-policy &lt; 模型基；当每次交互要花钱、要人等或不可回滚时，它是选型的第一约束。
+        <a href="../lessons/0012-function-approximation.html">见第 12 课</a> · 见<a href="../lessons/0023-sac.html">第 23 课</a></dd>
+
+      <dt><span class="term">离线评估（off-policy evaluation, OPE）</span></dt>
+      <dd>不真实上线、只用历史日志估计新策略的表现。它受分布偏移影响，估计值通常不可靠，所以上线要有 shadow 模式、A/B 实验与护栏指标兜底。
+        <a href="../lessons/0027-capstone.html">见第 27 课</a></dd>
+    </dl>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>定义与记号以 Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.) 为准
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a>；
+        深度 RL 部分的算法术语与工程约定取自
+        <a class="cite" href="https://spinningup.openai.com/en/latest/">Spinning Up in Deep RL</a>，
+        变体族与对齐部分可对照
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">Lilian Weng 的综述系列</a>。</p>
+    </div>
+    <p class="ask">某个术语在你的业务场景里对应什么，直接追问你的 AI 老师：它是你的私教，可以就这里任何一条展开，
+      也可以换成你行业里的例子再讲一遍。</p>
+  </footer>
+
+</article>
+</body>
+</html>

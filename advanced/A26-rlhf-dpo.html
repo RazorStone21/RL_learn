@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A26 · RLHF 与 DPO：大模型对齐 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="A26" data-slug="rlhf-dpo" data-part="进阶篇 · 第六部分 · 模型基、离线与对齐">
+
+  <header class="lesson-head">
+    <p class="eyebrow">进阶 · 第六部分 · 模型基、离线与对齐</p>
+    <h1>RLHF 与 DPO：大模型对齐</h1>
+        <p class="lede">把网上那些对话记录直接拿来训练，最难的一步是标注：
+      没人给得出"哪个回答更好"的分数，人只会说"这两个里我更喜欢这个"。
+            这一节把这件事写成一个标准 RL 问题，最后落到两样能动手的东西上：
+                                    DPO 损失，以及 KL（Kullback-Leibler divergence）惩罚项。
+            熵（衡量两套概率分布差多远）在这里就是这个 KL，也叫相对熵。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能说清 RLHF 的 MDP（Markov decision process，马尔可夫决策过程）里，状态、动作、奖励分别是什么</li>
+        <li>能从 Bradley-Terry 偏好模型写出 DPO 损失，并解释 <var>β</var>（KL 惩罚系数）的两个方向</li>
+        <li>能在「奖励被刷爆」时判断该调 <var>β</var>、换数据，还是回头改偏好数据</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>为什么对齐是一个 RL 问题</h2>
+    <p>「让模型好好回答」看起来像监督学习（拿"题目 + 标准答案"来学）任务：收集好答案，训练它模仿。
+            卡住的地方是标注：同一句提示下的两个回答可能都对，只是有用程度不同，
+      人给不出绝对分数，只能做比较。这种"只告诉你两个里我更喜欢哪个"的信息就叫偏好，
+      它成立的理由很实际：二选一比打分容易。</p>
+            <p>写成 MDP（Markov decision process）反而自然。它指的是满足
+      "下一步只看现在"的那类标准问题设定：下一个状态只取决于当前状态和动作，与更早的历史无关。</p>
+    <ul>
+      <li>策略（一套"看到什么状态就选什么动作"的规则）就是语言模型本身，参数 <var>θ</var>（策略参数）；</li>
+      <li>状态是提示 <var>x</var> 加上已经生成的词；</li>
+            <li>            动作是下一个词。这里的动作空间就是能选的动作合起来有多大，在语言模型里是整个词表，几万维的离散空间；</li>
+            <li>奖励只在整段回复结束时给一次，      属于稀疏奖励（绝大多数步骤都拿不到奖励，只有极少数关键时刻有分，像"只有通关才得分"），
+        这里就是只有整段回复生成完才有分。</li>
+    </ul>
+            <p>这里会反复用到对数概率（把概率取对数，概率很小的时候也不会变成 0，
+      方便计算和比较），把它读一遍更稳。
+      一整个句子的概率是每个词的概率相乘，相乘容易越来越小、最后在计算机里变成 0；
+      取了对数就变成长度相加，既不会变成 0，数值也稳定。</p>
+    <p>前面几课的内容在这里汇合：策略梯度（<a href="A17-policy-gradient.html">0017 课</a>，
+      直接用拿到多少分来调整选每个动作的概率）、
+      PPO（<a href="A20-ppo.html">0020 课</a>）、KL 约束与参考策略（<a href="A19-gae-trpo.html">0019 课</a>）。
+      这次它们训练的是你每天在用的语言模型，场景从游戏换成了对话。</p>
+  </section>
+
+  <section>
+    <h2>经典 RLHF 三步</h2>
+    <p><span class="term">RLHF（reinforcement learning from human feedback，基于人类反馈的强化学习）</span>的经典流程有三步：</p>
+        <ol>
+      <li>SFT（supervised fine-tuning，监督微调）：先用人工写好的示范数据做普通监督学习，
+                得到一个会听指令的起点模型。没有它，后面采样出来的全是乱码，
+                下一步的奖励模型（用一个学出来的模型给回答打分，代替人去打分）也学不到东西。
+        监督学习说白了就是做一本有答案的练习册。</li>
+      <li>训练一个奖励模型（RM，reward model）：用一个学出来的模型给回答打分，代替人去打分，
+        也就是训练一个自动评委。做法是对同一句提示采样两个回复，让人选更好的那个，
+        再用这些偏好对训练一个打分器 <var>r</var>(<var>x</var>, <var>y</var>)。
+        这里的 <var>x</var> 是提示，<var>y</var> 是一段回复。
+        偏好对的意思是一对一对地给数据：只记录"这两个里我更喜欢哪个"，不记绝对分数。</li>
+            <li>PPO 优化：把语言模型本身当策略，用 PPO 去最大化「奖励模型给的分」减去一个 KL 惩罚项。</li>
+    </ol>
+    <p>奖励模型这一步把「写不出来的奖励函数」变成可查询的打分器，
+      承担的是 <a href="A06-modeling-your-problem.html">0006 课</a>里「奖励必须可计算」那份职责，
+      区别在于它是一张神经网络，不是几行 if。</p>
+  </section>
+
+  <section>
+    <h2>奖励模型：从成对比较到分数</h2>
+    <p>偏好的 <var>y<sub>w</sub></var> 是被选中的（winner），<var>y<sub>l</sub></var> 是被拒的（loser）。
+      <span class="term">Bradley-Terry 模型</span>假设「赢」的概率只取决于两者分数的差：</p>
+    <div class="eq">
+      <span class="eq-body">P(y<sub>w</sub> ≻ y<sub>l</sub> | x) = σ( r(x, y<sub>w</sub>) − r(x, y<sub>l</sub>) )</span>
+      <span class="eq-num">(26.1)</span>
+    </div>
+        <p>式中 σ（读作 sigma，sigmoid 函数，把任意一个数压进 0 到 1 之间，所以结果可以当概率看）
+      把两个分数的差映射成"赢"的概率。训练就是最大化这个似然（当前这套参数，
+      产生出我们观测到的这些数据的可能性有多大）。直接后果是：给所有回复的分数同时加一个常数
+      <var>c</var>，偏好概率一点不变，因为式 (26.1) 里只有差值。
+      奖励的绝对大小没有意义，有意义的是谁排在前面。</p>
+  </section>
+
+  <section>
+    <h2>KL 惩罚：别让策略去钻空子</h2>
+    <p>只用奖励模型的分做目标，优化会很快找到漏洞：奖励模型只在它见过的文本分布上靠谱，
+      把回复推到分布之外，就能拿到极高分数，而人类读起来完全不自然。这就是
+      <a href="A06-modeling-your-problem.html">奖励黑客（reward hacking）</a>在大模型上的版本。</p>
+        <p>解法是给奖励加一个约束项，把 SFT 之后的模型当成一根锚，不让新模型跑太远。
+      这根锚叫参考策略（reference policy），指的就是那份"改之前"的模型，记作
+      <span class="math">π<sub>ref</sub></span>。做法是：新模型的回答分布离它越远，就在奖励里扣得越多。
+      具体扣法：</p>
+    <div class="eq">
+      <span class="eq-body">r<sub>total</sub>(x, y) = r<sub>θ</sub>(x, y) − β · KL( π<sub>θ</sub>(·|x) ‖ π<sub>ref</sub>(·|x) )</span>
+      <span class="eq-num">(26.2)</span>
+    </div>
+    <p><var>β</var> 是 KL 惩罚系数（见 <a href="../reference/notation.html">符号表</a>）。
+      实现上通常按词算逐位置的 KL：<span class="math">log π<sub>θ</sub>(a|s) − log π<sub>ref</sub>(a|s)</span>
+      乘 β 后从奖励里减掉。β 越大越保守，模型越像 SFT 的起点；
+      β 太小则奖励涨得很快，人工抽查的质量同时下滑。</p>
+  </section>
+
+  <section>
+    <h2>DPO：把 RLHF 折叠成一个分类损失</h2>
+    <p>PPO 这一套要维护四个模型，还要在线采样。<span class="term">DPO（direct preference
+      optimization，直接偏好优化）</span>的起点是一个观察：式 (26.2) 那个目标的最优策略有闭式解，
+      反解出来奖励可以写成</p>
+    <div class="eq">
+      <span class="eq-body">r(x, y) = β · log( π<sub>θ</sub>(y|x) / π<sub>ref</sub>(y|x) ) + β · log Z(x)</span>
+      <span class="eq-num">(26.3)</span>
+    </div>
+    <p>其中 <var>Z</var>(<var>x</var>) 是配分函数，只和提示 <var>x</var> 有关、与回复 <var>y</var> 无关。
+      把它代回式 (26.1)，<var>Z</var>(<var>x</var>) 在差值里两次相减就消失了，
+      奖励模型这个中间产物不再需要。剩下的损失是 <var>L</var><sub>DPO</sub>（DPO 损失）：</p>
+    <div class="eq">
+      <span class="eq-body">L<sub>DPO</sub> = − 𝔼<sub>(x, y<sub>w</sub>, y<sub>l</sub>)</sub>[ log σ( β·log(π<sub>θ</sub>(y<sub>w</sub>|x)/π<sub>ref</sub>(y<sub>w</sub>|x)) − β·log(π<sub>θ</sub>(y<sub>l</sub>|x)/π<sub>ref</sub>(y<sub>l</sub>|x)) ) ]</span>
+      <span class="eq-num">(26.4)</span>
+    </div>
+        <p>写法上就是一个二分类的 logistic 损失：要求被选中的回复在「策略相对参考的对数概率比」
+      上超过被拒的那个，超过了损失就小，反了就大。
+      这里说的离线（不能与环境在线交互，只能用已经攒下来的数据学）也适用于它：
+      不需要奖励模型，也不需要在线采样，它是
+      <a href="A25-offline-imitation.html">0025 课</a>「只有离线日志」思路的一个特例。</p>
+    <p>最后是一个记号陷阱：在 RLHF 里增大 β 会加强探索与偏移，
+            在 DPO 里增大 β 则收紧约束、让策略更贴近参考模型。两个 β 的方向相反，
+      读论文时先确认它在哪一套框架里。</p>
+  </section>
+
+  <section>
+    <h2>RLHF 与 DPO 的取舍</h2>
+    <table>
+      <thead><tr><th>维度</th><th>RLHF（PPO + 奖励模型）</th><th>DPO</th></tr></thead>
+      <tbody>
+        <tr><td>需要的部件</td><td>策略、参考、奖励、价值四个模型与在线采样管线</td><td>策略与参考两个模型，纯离线</td></tr>
+        <tr><td>数据</td><td>可在线采样，按需生成新的比较样本</td><td>固定的偏好数据集，用完即止</td></tr>
+        <tr><td>主要风险</td><td>奖励被刷爆、训练不稳；要盯散度与人工抽查</td><td>偏好数据一旦有偏，损失会照样把它拟合进去</td></tr>
+        <tr><td>何时选</td><td>要在线微调、能持续拿到新偏好反馈</td><td>只有偏好数据、不想维护奖励模型与采样管线</td></tr>
+      </tbody>
+    </table>
+    <p>预算极少时，第一选择往往是 SFT 加拒绝采样：用奖励模型给多个候选打分，挑最好的继续
+      做监督微调，而不是先上 RLHF 或 DPO。<a href="../reference/algorithms.html">算法速查表</a>的
+      「对齐 / 偏好」那一行给的就是这张等价清单。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 把对齐写成 MDP 时，奖励通常出现在什么位置？</p>
+      <ol class="mcq-options">
+        <li>每生成一个词就给一次分，奖励密集，学习信号充足</li>
+        <li>整段回复生成完毕之后给一次分，属于终局稀疏奖励</li>
+        <li>由环境在提示阶段给出，与模型生成的回复无关</li>
+        <li>由参考策略逐步给出，衡量新策略偏离了多少距离</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：奖励模型给「提示 + 完整回复」整体打分，一个回合走完才拿到一个标量，
+                     属于稀疏奖励（绝大多数步骤都拿不到奖励，只有极少数关键时刻有分），
+           这一族任务因此要靠优势（在某个状态下，选这个动作比"平均水平"好多少）
+           估计来摊薄方差。</p>
+        <p>A 需要另一个逐词打分器，经典 RLHF 里没有。C 让奖励与模型行为无关。
+          D 混淆了奖励与 KL 惩罚：参考策略只是约束的锚点。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">2. 奖励模型采用 Bradley-Terry 形式，会带来哪一个直接后果？</p>
+      <ol class="mcq-options">
+        <li>它要求标注者给每个回复打绝对分数，不做两两比较</li>
+        <li>它把奖励的取值范围限制在零到一之间，方便当作概率</li>
+        <li>它只用分数的差值，加同一常数不改变偏好</li>
+        <li>它必须与策略网络共享参数，否则偏好概率无法归一化</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (26.1) 里 σ 的输入是 r(x, y<sub>w</sub>) − r(x, y<sub>l</sub>)，
+          只与提示 <var>x</var> 有关的平移都会在差值里抵消，奖励的绝对水平不可辨识。</p>
+        <p>A 说反了：人做不好绝对打分，所以改做成对比较。B 混淆了概率与分数：
+          被压进零到一的是 σ 的输出。D 没有依据：奖励模型与策略参数无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">3. 训练中奖励模型的分数持续上升，人工抽查却发现回复越来越怪。首选什么？</p>
+      <ol class="mcq-options">
+                <li>把学习率（每次更新时往新信息的方向挪多远）调小，让奖励上升慢一些，等分数稳定后再观察</li>
+        <li>把折扣因子（越往后的奖励算进总分时权重越小）调小，让智能体（做决策的那一方，也就是模型）少关注长远的累积奖励</li>
+        <li>加大在线采样的批大小，让每次更新用到的偏好数据更充分</li>
+        <li>调大 KL 惩罚系数 β，并检查奖励模型在分布外的打分</li>
+      </ol>
+            <div class="mcq-explain">
+        <p>为什么：分数涨而质量降，是「奖励指标被刷」的典型信号：策略跑到奖励模型没见过的
+          地方，拿到了虚高分数。KL 惩罚就是为这个场景准备的刹车，同时要回头查奖励模型在新样本上的表现，
+          这个性质叫泛化（在没见过的样本上也能给出靠谱的估计）。</p>
+        <p>A 只让过程变慢，不改方向。B 在本课设定里折扣没有意义，
+          奖励只在回合结束时给一次。C 改善的是梯度噪声。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">4. 关于 DPO，下列哪一项说法是准确的？</p>
+      <ol class="mcq-options">
+        <li>它把带 KL 约束的目标重写成偏好对上的分类损失，不需要奖励模型</li>
+        <li>它省去了参考策略，只用一个语言模型就能完成全部训练</li>
+        <li>它换了优化目标，是另一套没有理论联系的经验性技巧</li>
+        <li>它必须先训好奖励模型，再用它给偏好对生成伪标签</li>
+      </ol>
+      <div class="mcq-explain">
+                <p>为什么：DPO 先写出带 KL 约束目标的最优策略闭式解，把奖励反解成
+          「策略与参考策略的对数概率比」，代回 Bradley-Terry 后配分函数在差值里抵消，
+          奖励模型与在线采样都不再需要。</p>
+        <p>式里的配分函数可以理解成一个只管归一的量，它只和提示有关，所以在两个回复相减时消掉了。</p>
+        <p>B 把参考策略删掉了：式 (26.4) 里 π<sub>ref</sub> 是分母。
+          C 说反了，两者优化的是同一个带约束目标，只是换了参数化。
+          D 是「用奖励模型蒸偏好标签」的两阶段做法。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. 关于 β 这个系数，下列哪一项说法是准确的？</p>
+      <ol class="mcq-options">
+        <li>两套框架里方向一致：β 越大都表示约束越松、策略能跑得越远</li>
+        <li>两套框架里方向一致：β 越大都表示约束越紧、策略要贴近参考</li>
+        <li>两套框架里方向相反：RLHF 中 β 越大约束越紧，DPO 中 β 越大越松</li>
+        <li>两套框架里方向相反：RLHF 中 β 越大偏移越强，DPO 中 β 越大越贴近参考</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：RLHF 里 β 乘在 KL 惩罚上，越大策略越不敢偏移；DPO 里 β 乘在隐式奖励的
+          对数比上，越大则「偏离参考」的代价越高。两边方向相反，读论文要先看清框架。</p>
+        <p>A 与 B 都说成同向，C 把两边对调了。四个选项只差几个字，
+          考的就是式 (26.2) 与式 (26.4) 里 β 各乘在什么位置。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0026-code-1">
+      <h3>代码题 1 · 实现 DPO 损失</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>RLHF 的经典流程是 SFT、奖励模型、PPO 三步。
+          偏好数据是成对比较：同一提示下的被选回复 <var>y<sub>w</sub></var> 与被拒回复
+          <var>y<sub>l</sub></var>。DPO 把带 KL 约束的目标重写成偏好对上的二分类损失，不再需要奖励模型。这个函数是 DPO 训练循环里的损失项，
+          每一步拿到四个算好的对数概率就被调用一次：返回值用来反传，<code>margin</code> 顺手打日志。</p>
+        <p>请实现 <code>dpo_loss(logp_w_policy, logp_l_policy, logp_w_ref, logp_l_ref, beta=0.1)</code>。</p>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>logp_w_policy</code>：形状 <code>(N,)</code>，当前策略 π<sub>θ</sub> 对被选回复的对数概率。</li>
+          <li><code>logp_l_policy</code>：形状 <code>(N,)</code>，当前策略对被拒回复的对数概率。</li>
+          <li><code>logp_w_ref</code>：形状 <code>(N,)</code>，参考策略 π<sub>ref</sub> 对被选回复的对数概率。</li>
+          <li><code>logp_l_ref</code>：形状 <code>(N,)</code>，参考策略对被拒回复的对数概率。</li>
+          <li><code>beta</code>：KL 惩罚系数，浮点标量，默认 <code>0.1</code>。这里越大策略越要贴近参考，方向与 RLHF 里的 β 相反。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>loss</code>：Python <code>float</code>，即 <code>mean(−log σ(margin))</code>，按式 (26.4) 在整个 batch 上取平均；margin 全为 0 时是 log 2。</li>
+          <li><code>margin</code>：形状 <code>(N,)</code> 的数组，第 <code>i</code> 个元素是被选回复的隐式奖励减被拒回复的隐式奖励，隐式奖励形如 <span class="math">β·(log π<sub>θ</sub>(y|x) − log π<sub>ref</sub>(y|x))</span>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span>策略与参考完全一致时 <code>margin</code> 全为 0，
+          而 <code>loss</code> 正好是 log 2（约 0.6931）；一组手算样本的 <code>margin</code> 与 <code>loss</code> 要对上；
+          策略把被拒回复抬得更高时 <code>margin</code> 为负、<code>loss</code> 大于 log 2；
+          <code>margin</code> 必须逐样本保留形状，不能被压成标量，并随策略越偏爱被选回复而单调变大。
+          实现要数值稳定，用 <code>np.logaddexp(0.0, −margin)</code> 算 <code>−log σ</code>，别直接写 <code>log(1 + exp(−margin))</code>。只用标准库与 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>先算 <code>rw = beta * (logp_w_policy - logp_w_ref)</code>，再从 <code>rw</code> 与 <code>rl</code> 得到 margin。</li>
+          <li>每样本损失是 <code>np.logaddexp(0.0, -margin)</code>，最后取 <code>float(...mean())</code>。</li>
+          <li>margin 为 0 时损失应当正好是 log 2 ≈ 0.6931，可以用它自查。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def dpo_loss(logp_w_policy, logp_l_policy, logp_w_ref, logp_l_ref, beta=0.1):
+    # TODO: 先算隐式奖励与 margin，再用 logaddexp 算 -log sigmoid
+    return 0.0, np.zeros_like(np.asarray(logp_w_policy, dtype=float))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+import numpy as np
+
+# 1) margin 恒为 0 时，损失必须正好是 log 2
+z = np.zeros(4)
+loss, margin = dpo_loss(z, z, z, z, beta=0.5)
+check(np.allclose(margin, 0.0), f"策略与参考完全一致时 margin 应为 0，实际 {margin}")
+check(abs(loss - float(np.log(2.0))) < 1e-9,
+      f"margin=0 时 -log sigmoid(0) = log 2 ≈ 0.6931，实际 {loss}")
+
+# 2) 手算一个具体样本：rw = 0.5*0.4 = 0.2，rl = 0.5*(-0.6) = -0.3，margin = 0.5
+loss, margin = dpo_loss(np.array([0.4]), np.array([-0.6]), np.array([0.0]), np.array([0.0]), beta=0.5)
+check(abs(float(margin[0]) - 0.5) < 1e-9, f"margin 应为 0.5，实际 {margin[0]}")
+expect = float(np.logaddexp(0.0, -0.5))
+check(abs(loss - expect) < 1e-9, f"loss 应为 {expect:.6f}，实际 {loss}")
+
+# 3) 策略把被拒回复抬得更高时，损失必须大于 log 2（sigmoid 输出小于一半）
+loss, margin = dpo_loss(np.array([-1.0]), np.array([0.5]), np.array([0.0]), np.array([0.0]), beta=1.0)
+check(margin[0] < 0, f"被拒回复的对数概率更高时 margin 应为负，实际 {margin[0]}")
+check(loss > float(np.log(2.0)), f"此时损失应大于 log 2，实际 {loss:.6f}")
+
+# 4) 形状必须逐个样本保留，而不是被压成一个标量
+loss, margin = dpo_loss(np.array([0.0, 0.5, 1.0]), np.zeros(3), np.zeros(3), np.zeros(3), beta=0.3)
+check(np.shape(margin) == (3,), f"margin 应当逐样本返回，形状应为 (3,)，实际 {np.shape(margin)}")
+check(np.all(np.diff(margin) > 0), "策略越偏爱被选回复，margin 应当单调变大")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def dpo_loss(logp_w_policy, logp_l_policy, logp_w_ref, logp_l_ref, beta=0.1):
+    rw = beta * (np.asarray(logp_w_policy, dtype=float) - np.asarray(logp_w_ref, dtype=float))
+    rl = beta * (np.asarray(logp_l_policy, dtype=float) - np.asarray(logp_l_ref, dtype=float))
+    margin = rw - rl
+    loss = float(np.mean(np.logaddexp(0.0, -margin)))
+    return loss, margin
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0026-code-2">
+      <h3>代码题 2 · 实现 KL 惩罚项并检验 β=0</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>只用奖励模型的分做目标，优化会很快找到漏洞：
+          把回复推到奖励模型没见过的地方就能刷出高分，读起来却不自然。KL 惩罚是这一步的刹车，
+          它锚住 SFT 之后的参考策略，让新策略不敢跑远。这个函数算的就是该项的大小，
+          RLHF 与 DPO 都会把它加进总奖励或损失里，训练循环每一步调用一次；
+          β 是漂移预算，日志里看它就能判断策略有没有跑飞。</p>
+        <p>请实现 <code>kl_penalty(policy_logits, ref_logits, beta=0.1)</code>。</p>
+                <div class="eq">
+                  <span class="eq-body">penalty(β) = β · mean<sub>batch</sub>[ Σ<sub>a</sub> π<sub>θ</sub>(a|s) · ( log π<sub>θ</sub>(a|s) − log π<sub>ref</sub>(a|s) ) ]</span>
+                  <span class="eq-num">(26.5)</span>
+                </div>
+
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>policy_logits</code>：形状 <code>(batch, num_actions)</code> 的数组，当前策略在同一状态下对每个动作给出的未归一化分数，也能接受可转成数组的嵌套列表。</li>
+          <li><code>ref_logits</code>：同上形状，参考策略的分数，与 <code>policy_logits</code> 逐位置对应。</li>
+          <li><code>beta</code>：KL 惩罚系数，浮点标量，默认 <code>0.1</code>。</li>
+        </ul>
+
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 Python <code>float</code>：按式 (26.5)，两组 logits 各自 softmax 成概率后算出逐样本 KL，在 batch 上取平均再乘 <code>beta</code>。策略与参考相同时是 <code>0.0</code>，<code>beta=0.0</code> 时也严格是 <code>0.0</code>。</li>
+        </ul>
+
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>beta</code> 为 0 时严格返回 <code>0.0</code>，
+          而这一组 logits 的 KL 本身大于 0.1，乘 <code>beta</code> 这一步不能省；策略与参考相同时返回 0；
+          两组 logits 同时平移一个常数时结果完全不变；参考为均匀分布时与逐项手算值一致；
+          <code>beta=2.0</code> 正好是 <code>beta=0.5</code> 的四倍。softmax 要先减去每行最大值再取指数，
+          否则大 logits 会溢出。只用标准库与 numpy。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>softmax：<code>e = np.exp(x - x.max(axis=-1, keepdims=True))</code>，再除以 <code>e.sum(axis=-1, keepdims=True)</code>。</li>
+          <li>KL 的期望是对策略自己的概率取的：<code>(p * (np.log(p) - np.log(q))).sum(axis=-1)</code>。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def kl_penalty(policy_logits, ref_logits, beta=0.1):
+    # TODO: 先各自 softmax，再算按策略概率加权的 KL，最后乘 beta
+    return 0.5
+</script>
+
+      <script type="text/x-python" data-role="tests">
+import numpy as np
+
+P = np.array([[2.0, 0.0, -2.0]])
+R = np.array([[0.0, 0.0, 0.0]])
+
+# 1) beta=0 必须完全没有惩罚
+check(kl_penalty(P, R, beta=0.0) == 0.0,
+      f"beta=0 时不应有任何惩罚，实际 {kl_penalty(P, R, beta=0.0)}")
+
+# 2) 手算：p = softmax([2,0,-2])，q = [1/3,1/3,1/3]
+p = np.exp(P[0] - P[0].max())
+p = p / p.sum()
+expect_kl = float((p * (np.log(p) - np.log(1.0 / 3.0))).sum())
+got = kl_penalty(P, R, beta=0.5)
+check(abs(got - 0.5 * expect_kl) < 1e-9,
+      f"beta=0.5 时应为 {0.5 * expect_kl:.6f}，实际 {got}")
+
+# 3) 与参考完全一致时，KL 必须为 0（无论 beta 多大）
+check(abs(kl_penalty(P, P, beta=3.0)) < 1e-12,
+      f"策略与参考相同时 KL 应为 0，实际 {kl_penalty(P, P, beta=3.0)}")
+
+# 4) reward 加常数不应影响惩罚（softmax 平移不变）
+check(abs(kl_penalty(P + 7.0, R - 3.0, beta=0.5) - got) < 1e-9,
+      "logits 同时平移不应改变惩罚值")
+
+# 5) 无惩罚（beta=0）时，KL 项本身仍然不是零，beta 这一项不能省
+check(expect_kl > 0.1,
+      f"本组 logits 的 KL 应当明显大于 0，实际 {expect_kl:.6f}")
+
+# 6) 惩罚随 beta 线性增长，beta 越大越保守
+small = kl_penalty(P, R, beta=0.05)
+big = kl_penalty(P, R, beta=2.0)
+check(big > small and small > 0.0,
+      f"惩罚应随 beta 增大而增大，实际 small={small}, big={big}")
+check(abs(big - 4.0 * got) < 1e-9, f"beta=2.0 应是 beta=0.5 的四倍，实际 {big} vs {got}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def kl_penalty(policy_logits, ref_logits, beta=0.1):
+    pl = np.asarray(policy_logits, dtype=float)
+    rl = np.asarray(ref_logits, dtype=float)
+
+    def softmax(x):
+        e = np.exp(x - np.max(x, axis=-1, keepdims=True))
+        return e / np.sum(e, axis=-1, keepdims=True)
+
+    p = softmax(pl)
+    q = softmax(rl)
+    kl = np.sum(p * (np.log(p) - np.log(q)), axis=-1)
+    return float(beta) * float(np.mean(kl))
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>Ouyang et al., <em>Training language models to follow instructions with human feedback</em>
+        (InstructGPT), 2022。RLHF 三步流程、奖励模型的偏好数据构造与 PPO 阶段的 KL 惩罚
+        都以这篇为准。<a class="cite" href="https://arxiv.org/abs/2203.02155">[arXiv 2203.02155]</a></p>
+      <p>Rafailov et al., <em>Direct Preference Optimization: Your Language Model is Secretly a Reward Model</em>,
+        2023。式 (26.3) 与式 (26.4) 的推导、β 的记号约定，以及 DPO 与 RLHF 目标的等价性都在这里。
+        <a class="cite" href="https://arxiv.org/abs/2305.18290">[arXiv 2305.18290]</a></p>
+            <p>顺带说两个前面用到的词：熵（衡量选择有多随机、多分散，这里用来衡量两套概率分布差多远），
+        经验回放（把走过的每一步都存进一个池子，训练时从池子里随机抽一批出来用，像个错题本）。
+        本课术语与 <a href="../reference/glossary.html">术语表</a>的「对齐」一节一致；
+        β 在 KL 惩罚与 PER（prioritized experience replay，优先经验回放）里的两种用法见 <a href="../reference/notation.html">符号表</a>。
+        要把这套流程转到自己业务上，请对照 <a href="../reference/algorithms.html">算法速查表</a>的「对齐 / 偏好」一行。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。可以问：
+      「把我业务里那份『人工挑选出来的历史决策日志』套成偏好对，
+      写成 DPO 的输入格式该长什么样？」或者把你实现的 DPO 损失贴给它，
+      让它专门检查 margin 的符号是否反了。</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

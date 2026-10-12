@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0016 · Rainbow 与分布式 RL — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson" data-number="0016" data-slug="rainbow-distributional" data-part="第三部分 · 深度价值方法">
+
+  <header class="lesson-head">
+    <p class="eyebrow">第 16 课 · 第三部分 · 深度价值方法</p>
+    <h1>Rainbow 与分布式 RL</h1>
+    <p class="lede">回报的期望只有一个数，丢掉的东西不少。这一节说明为什么要学整个分布，
+      写出 C51（Categorical DQN with 51 atoms，51 个原子的分类 DQN）的类别投影和 QR-DQN 的分位数损失，并判断 Rainbow 六个组件里
+      哪几个值得花时间。</p>
+    <div class="objectives">
+      <h2>你会得到</h2>
+      <ul>
+        <li>能写出分布式贝尔曼目标，并说清"动作仍然按期望选"的原因</li>
+        <li>能实现 C51 的投影算子，并解释它为什么能保住概率质量</li>
+        <li>能说出 Rainbow 消融的结论，知道该按什么顺序给自己的模型加组件</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>只学期望丢掉了什么</h2>
+    <p>前面所有算法学的都是回报的<strong>期望</strong>：<span class="math">Q(s,a)</span>
+      是一个数。同一个期望却对应完全不同的处境：一个动作稳定给 +1，另一个九成概率给 0、
+      一成概率给 +10，期望都在 1 附近，风险差一个量级。业务上若"一次大亏"比"平均收益"更重要，
+      只学期望就丢掉了决策信息。</p>
+    <p><span class="term">分布式 RL（distributional RL）</span>学的是回报这个随机变量，
+      记作 <span class="math">Z(s,a)</span>，它满足
+      <span class="term">分布式贝尔曼方程（distributional Bellman equation）</span>：</p>
+    <div class="eq">
+      <span class="eq-body">Z(s, a) ≐ r + γ Z(s′, a′)</span>
+      <span class="eq-num">(16.1)</span>
+    </div>
+    <p>式中 γ（折扣因子）给未来的随机回报打折，r 是即时奖励。</p>
+    <p>等号两边都是随机变量，后果容易被忽略：<strong>分布之间没有天然的"更大"</strong>，
+      所以贪心动作只能对期望取 arg max，不能对分布取 max：</p>
+    <div class="eq">
+      <span class="eq-body">a* = arg max<sub>a′</sub> 𝔼[ Z(s′, a′) ]，&nbsp;&nbsp; (TZ)(s, a) = r + γ Z(s′, a*)</span>
+      <span class="eq-num">(16.2)</span>
+    </div>
+    <p>它改的是"<em>学什么</em>"，没改"<em>怎么选动作</em>"：
+      想做风险敏感决策还得换目标（如条件风险价值 CVaR），学出分布不会自动变保守。</p>
+  </section>
+
+  <section>
+    <h2>C51：把分布钉在固定格点上</h2>
+    <p>分布是连续对象，网络输出不了。C51 最直接：在
+      <span class="math">[z<sub>min</sub>, z<sub>max</sub>]</span> 上放 51 个等距原子
+      <span class="math">z<sub>i</sub> = z<sub>min</sub> + i·Δz</span>（所以叫 C51），
+      网络输出每个动作在 51 个原子上的概率，
+      <span class="math">𝔼[Z] = Σ<sub>i</sub> p<sub>i</sub> z<sub>i</sub></span> 就是 Q 值。</p>
+    <p>难点在目标侧：<span class="math">r + γz<sub>j</sub></span> 常落在两个格点之间，
+      直接当 51 维标签会错位，所以先做
+      <span class="term">类别投影（categorical projection）</span>，把每个原子的概率按距离分给左右邻居。
+      设 <span class="math">b = ( clip(r + γz<sub>j</sub>) − z<sub>min</sub> ) / Δz</span>，
+      <span class="math">l = ⌊b⌋</span>、<span class="math">u = min(l+1, N−1)</span>，则</p>
+    <div class="eq">
+      <span class="eq-body">p̂<sub>l</sub> += p<sub>j</sub> (1 − (b − l))，&nbsp;&nbsp; p̂<sub>u</sub> += p<sub>j</sub> (b − l)</span>
+      <span class="eq-num">(16.3)</span>
+    </div>
+    <p>两个权重加起来恒为 1，<strong>概率质量守恒</strong>。损失把投影后的
+      <span class="math">p̂</span> 当固定标签，对网络输出做交叉熵（梯度不流过投影）。
+      出自 Bellemare 等人的
+      <a class="cite" href="https://arxiv.org/abs/1707.06887">A Distributional Perspective on RL（arXiv 1707.06887）</a>。</p>
+  </section>
+
+  <section>
+    <h2>QR-DQN：直接学分位数</h2>
+    <p>C51 要你先猜 <span class="math">z<sub>min</sub></span> 与
+      <span class="math">z<sub>max</sub></span>：窄了分布被截断，宽了 51 个原子大半浪费。
+      <span class="term">QR-DQN（quantile regression DQN）</span>换一种参数化：
+      固定 <var>N</var> 个分位点 <span class="math">τ<sub>i</sub> = (i + 0.5) / N</span>（τ 是分位点），
+      让网络输出这些分位数值 <span class="math">ẑ<sub>τ<sub>i</sub></sub></span>，
+      用 <span class="term">pinball 损失（pinball loss，分位数回归损失）</span>训练：</p>
+    <div class="eq">
+      <span class="eq-body">ρ<sub>τ</sub>(δ) = max( τδ, (τ − 1)δ )，&nbsp; δ = y − ẑ<sub>τ</sub>，&nbsp;&nbsp; L = (1/N) Σ<sub>i</sub> 𝔼[ ρ<sub>τ<sub>i</sub></sub>(δ<sub>i</sub>) ]</span>
+      <span class="eq-num">(16.4)</span>
+    </div>
+    <p>式中 δ（预测误差）是回报目标与分位数预测之差，ρ（分位数损失）是它的惩罚项。</p>
+    <p>它不对称：<span class="math">τ=0.9</span> 时低估的惩罚是高估的 9 倍，最优解就落在 0.9 分位数上，
+      这就是"回归分位数"的来历。相比 C51，它不必预先设定取值范围，也不用投影，
+      代价是要处理 <var>N</var> 个分位数之间的配对。论文见 <a class="cite" href="https://arxiv.org/abs/1710.05941">Distributional RL with Quantile Regression（arXiv 1710.05941）</a>。</p>
+  </section>
+
+  <section>
+    <h2>Rainbow：六个组件与消融结论</h2>
+    <p><span class="term">Rainbow</span> 把六个组件合进一个 DQN：
+      <a href="0014-double-dueling-dqn.html">Double DQN</a>、
+      <a href="0014-double-dueling-dqn.html">Dueling</a>、
+      <a href="0015-prioritized-replay.html">优先回放</a>、
+      多步（n-step）回报、C51 分布式价值、
+      <span class="term">Noisy Net</span>：网络权重上加可学习噪声取代 ε-greedy（ε 是探索率），
+      省掉手写的 ε 衰减计划。合起来后，Atari 上的中位数表现远超当时任何单项。</p>
+    <p>有工程价值的是它的消融结论：<strong>优先回放与多步回报贡献最大</strong>，
+      分布式价值稳定有用，Noisy Net 最不稳定（去掉它常常只掉一点）。
+      加组件的顺序就先 PER（prioritized experience replay，优先经验回放）与多步，再分布式价值，最后才是 Noisy Net。完整结果见 Hessel et al.,
+      <a class="cite" href="https://arxiv.org/abs/1710.02298">Rainbow（arXiv 1710.02298）</a>；
+      想扫一遍这族方法，读
+      <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">Lilian Weng 的综述</a>。</p>
+    <div class="note">
+      <p><strong>一次只加一个。</strong>组件会互相掩护错误：投影 bug 可能被 PER 的高方差掩盖，
+        Noisy Net 又让"策略一直随机"看起来像正常探索。没有逐个消融，
+        既不知道收益来自哪，也不知道该回退什么。</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>什么时候值得用它</h2>
+    <ul>
+      <li>值得：你要"离散动作 + 高维状态"的强基线，愿意用 2–3 倍计算量
+        换样本效率，或者除了平均回报还在意波动范围。</li>
+      <li>不值得：状态空间很小、有现成的表格解，或者目标本身风险敏感，
+        那得改目标函数，不是加组件。</li>
+      <li>常见坑：原子格点与投影边界写错；多步回报叠加时折扣与
+        <var>n</var> 处理出错；开了 Noisy Net 还以为策略该收敛成确定性。</li>
+    </ul>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">1. 分布式 RL 与普通 DQN 在"学什么"上的根本差别是？</p>
+      <ol class="mcq-options">
+        <li>它同时维护多个 Q 网络，最后取这些网络输出值的平均值</li>
+        <li>它把折扣因子当成随机变量，训练时不断对 γ 做采样平均</li>
+        <li>它用多个目标网络轮流更新，从而降低自举带来的偏差</li>
+        <li>它学的是回报的整个分布，而不只是回报的期望值</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：普通 DQN 的输出是 <span class="math">Q(s,a)</span> 一个数，
+          即 <span class="math">𝔼[Z(s,a)]</span>；分布式 RL 的输出是一个分布，
+          期望只是它的一阶矩。分布的宽度与形状本身就是风险信息。</p>
+        <p>A 描述的是集成（ensemble），与分布式价值无关。B 不对：<var>γ</var> 是给定的超参，
+          不是随机变量。C 描述的是多重目标网络，减少的是自举目标漂移，
+          和"学期望还是学分布"是两件事。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">2. 分布式贝尔曼方程 (16.1) 里，动作该怎么选？</p>
+      <ol class="mcq-options">
+        <li>仍然按期望回报选动作，因为分布之间没有天然的序关系</li>
+        <li>按分布的上分位数选动作，以追求尽可能高的潜在回报</li>
+        <li>对每个原子的价值分别取最大值，再拼回一个新的分布</li>
+        <li>随机挑一个动作，让所有动作的分布被同等地更新到</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：两个分布无法像实数那样直接比较大小，贪心所需的
+          <span class="math">arg max</span> 只能作用在期望上，也就是式 (16.2)。
+          分布式 RL 换掉的是学习目标，不是策略提取方式。</p>
+        <p>B 是在改目标函数（那才会得到风险偏好的策略），不是标准分布式 RL 的做法。
+          C 把原子当成独立动作，拼出来的量没有分布含义。
+          D 会让策略退化，与贪心策略提取矛盾。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">3. C51 里的类别投影（式 16.3）在做什么？</p>
+      <ol class="mcq-options">
+        <li>把奖励裁剪到固定区间，避免不同任务的奖励尺度互相干扰</li>
+        <li>把网络输出的原子概率重新归一化，防止数值下溢到零</li>
+        <li>把 r + γz 落在格点之间的概率按距离分给相邻的两个原子</li>
+        <li>把回报分布压缩成一个期望值，从而复用原来的 DQN 损失</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：目标 <span class="math">r + γz<sub>j</sub></span>
+          通常不在 <span class="math">[z<sub>min</sub>, z<sub>max</sub>]</span> 的格点上，
+          必须把它承载的概率质量搬到最近的格点上。式 (16.3) 用线性插值分配，
+          两个权重之和恒为 1，所以总质量守恒。</p>
+        <p>A 是奖励裁剪，属于预处理，与投影无关。B 是数值技巧，不是投影的目的。
+          D 与分布式 RL 的初衷相反：分布式方法要保住分布，不会压成期望。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">4. QR-DQN 的 pinball 损失 (16.4) 学的是什么？</p>
+      <ol class="mcq-options">
+        <li>它直接回归分布的均值，因此等价于普通的均方误差损失</li>
+        <li>它回归若干条指定分位数的值，不必预先设定取值上下界</li>
+        <li>它把回报离散成固定的原子格点，再用交叉熵逐格回归</li>
+        <li>它最小化预测分布与目标分布之间的 Kullback–Leibler 散度（KL）作为训练目标</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：pinball 损失不对称，<span class="math">τ=0.9</span>
+          时低估的代价是高估的 9 倍，其最小点正好是该分布的 0.9 分位数。
+          于是网络输出的是分位数本身，不需要 <span class="math">z<sub>min</sub></span> /
+          <span class="math">z<sub>max</sub></span> 这些先验设定，也不用做投影。</p>
+        <p>A 只在 <span class="math">τ=0.5</span> 时成立，那时它才等于绝对误差的一半，
+          与均方误差仍然不同。C 描述的是 C51 的做法。D 也不是 pinball 损失的性质。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">5. Rainbow 的消融实验给出的一条工程启示是？</p>
+      <ol class="mcq-options">
+        <li>六个组件必须同时打开，单独使用其中任何一个都完全没有效果</li>
+        <li>分布式价值的贡献最大，其次才是优先回放与多步回报这两项</li>
+        <li>Noisy Net 的贡献最大，所以最该优先替换 ε-greedy</li>
+        <li>各组件贡献不均：优先回放与多步回报最有用，所以要逐个消融</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：Rainbow 的消融显示 PER 与多步回报的贡献最大，
+          分布式价值稳定有用，Noisy Net 的收益最不稳定。因此合理的加组件顺序是
+          PER/多步 → 分布式 → Dueling → Noisy Net，而且每加一个都要单独验证。</p>
+        <p>A 与结论相反：单个组件本身大多有效，组合只是叠加。
+          B 把分布式价值排到了最前，与消融结果不符。
+          C 高估了 Noisy Net：它是最不稳定的一项。</p>
+      </div>
+    </div>
+
+    <div class="code-ex" data-code="0016-code-1">
+            <h3>代码题 1 · 实现 C51 的类别投影</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>C51 的网络输出是每个动作在 <code>n</code> 个固定原子上的概率，目标侧还要按分布式贝尔曼方程把 <span class="math">r + γz<sub>j</sub></span> 搬回同一组原子，这件事由类别投影完成（式 16.3）：每个原子的概率按距离分给左右邻居，总质量不变。投影结果被当成训练的固定标签，梯度不流过它。<code>c51_projection</code> 在目标网络对 <code>s′</code> 输出概率之后调用，输出直接与在线网络的输出做交叉熵。只许用 numpy，不修改输入。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>rewards</code>：形状 <code>(B,)</code> 的 float 数组，即时奖励。</li>
+          <li><code>dones</code>：形状 <code>(B,)</code> 的 bool 数组，<code>True</code> 表示该条在 <code>s′</code> 终止。</li>
+          <li><code>next_probs</code>：形状 <code>(B, n)</code> 的 float 数组，目标网络在 <code>n</code> 个原子上给出的概率，每行和为 1。</li>
+          <li><code>support</code>：形状 <code>(n,)</code> 的 float 数组，等距递增的原子格点 <span class="math">z<sub>0</sub> &lt; z<sub>1</sub> &lt; … &lt; z<sub>n−1</sub></span>，相邻间隔记作 Δz。</li>
+          <li><code>gamma</code>：float，折扣因子 γ。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li>返回 <code>np.ndarray</code>，形状 <code>(B, n)</code> 的 float：第 <code>i</code> 行是搬移之后的原子概率，第 <code>j</code> 个分量是落在原子 <code>z<sub>j</sub></code> 上的概率质量，每行和为 1 且元素非负。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span>输出形状为 <code>(B, n)</code>；每行概率和为 1 且非负（200 行 Dirichlet 随机输入下最大偏差不超过 1e-10）；终止样本的目标只剩 <code>r</code>（如 <span class="math">Tz = 0.3</span> 时原子 0、1 拿到 0.7 与 0.3）；<span class="math">Tz</span> 超过 <code>z_max</code> 或低于 <code>z_min</code> 时裁剪到两端且质量不丢；恰好落在格点上时质量全给该格点；多峰分布逐原子搬运后仍然守恒。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>形状对齐：把 <code>rewards[:, None]</code> 和 <code>support[None, :]</code>
+            一起广播成 <code>(B, n)</code>。</li>
+          <li>终止样本用 <code>(~dones)[:, None]</code> 乘在自举项上，目标就只剩 <var>r</var>。</li>
+          <li>把质量写回用 <code>np.add.at(proj, (rows, cols), mass)</code>，
+            同一个格点可能被多个原子命中，用 <code>+=</code> 花式索引会丢贡献。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def c51_projection(rewards, dones, next_probs, support, gamma):
+    # TODO: 计算 Tz、裁剪、按距离把概率分给相邻两个原子
+    return np.zeros_like(np.asarray(next_probs, dtype=float))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+support = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+onehot2 = np.array([[0.0, 0.0, 1.0, 0.0, 0.0]])
+
+p = np.asarray(c51_projection(np.array([0.3]), np.array([False]), onehot2, support, 0.9),
+               dtype=float)
+check(p.shape == (1, 5), f"输出形状应为 (1,5)，实际 {p.shape}")
+check(abs(p.sum() - 1.0) < 1e-12, f"概率质量必须守恒，实际总和 {p.sum():.6f}")
+check(abs(p[0, 2] - 0.9) < 1e-12 and abs(p[0, 3] - 0.1) < 1e-12,
+      f"Tz = 0.3 + 0.9*2 = 2.1，应把 0.9 给原子 2、0.1 给原子 3，实际 {p[0]}")
+
+pt = np.asarray(c51_projection(np.array([0.3]), np.array([True]), onehot2, support, 0.9),
+                dtype=float)
+check(abs(pt.sum() - 1.0) < 1e-12, f"终止样本也要守恒，实际总和 {pt.sum():.6f}")
+check(abs(pt[0, 0] - 0.7) < 1e-12 and abs(pt[0, 1] - 0.3) < 1e-12,
+      f"终止时 Tz = r = 0.3，应把 0.7 给原子 0、0.3 给原子 1，实际 {pt[0]}")
+
+hi = np.asarray(c51_projection(np.array([10.0]), np.array([False]), onehot2, support, 0.9),
+                dtype=float)
+check(abs(hi[0, 4] - 1.0) < 1e-12,
+      f"Tz 超过 z_max 时应裁剪到最后一个原子，实际 {hi[0]}")
+lo = np.asarray(c51_projection(np.array([-10.0]), np.array([False]), onehot2, support, 0.9),
+                dtype=float)
+check(abs(lo[0, 0] - 1.0) < 1e-12,
+      f"Tz 低于 z_min 时应裁剪到第一个原子，实际 {lo[0]}")
+
+multi = np.array([[0.5, 0.0, 0.0, 0.0, 0.5]])
+pm = np.asarray(c51_projection(np.array([0.0]), np.array([False]), multi, support, 0.5),
+                dtype=float)
+check(np.allclose(pm[0], np.array([0.5, 0.0, 0.5, 0.0, 0.0])),
+      f"多峰目标：原子 0 与 4 各带 0.5 的概率，乘 gamma 后应落在 0 与 2，实际 {pm[0]}")
+
+rng = np.random.default_rng(11)
+B = 200
+probs = rng.dirichlet(np.ones(5), size=B)
+rew = rng.normal(0.0, 1.5, size=B)
+done = rng.random(B) < 0.3
+pr = np.asarray(c51_projection(rew, done, probs, support, 0.95), dtype=float)
+check(np.allclose(pr.sum(axis=1), 1.0, atol=1e-10),
+      f"随机输入下每一行的概率和都应为 1，最大偏差 {np.abs(pr.sum(axis=1) - 1).max():.2e}")
+check(np.all(pr >= -1e-15), "投影后的概率不能为负")
+
+s = np.asarray(c51_projection(np.array([1.0]), np.array([False]),
+                              np.array([[0.0, 1.0, 0.0, 0.0, 0.0]]), support, 0.9), dtype=float)
+check(abs(s[0, 1] - 0.1) < 1e-12 and abs(s[0, 2] - 0.9) < 1e-12,
+      f"Tz = 1.0 + 0.9*1 = 1.9，应给原子 1 分 0.1、原子 2 分 0.9，实际 {s[0]}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def c51_projection(rewards, dones, next_probs, support, gamma):
+    rewards = np.asarray(rewards, dtype=float).reshape(-1, 1)
+    dones = np.asarray(dones, dtype=bool).reshape(-1, 1)
+    next_probs = np.asarray(next_probs, dtype=float)
+    support = np.asarray(support, dtype=float)
+    n = support.shape[0]
+    delta = support[1] - support[0]
+    z_min = support[0]
+    z_max = support[-1]
+
+    tz = rewards + gamma * (~dones) * support.reshape(1, -1)
+    tz = np.clip(tz, z_min, z_max)
+    b = (tz - z_min) / delta
+    l = np.floor(b).astype(np.int64)
+    u = np.minimum(l + 1, n - 1)
+    upper_weight = b - l
+    lower_weight = 1.0 - upper_weight
+
+    B = next_probs.shape[0]
+    rows = np.repeat(np.arange(B), n)
+    proj = np.zeros((B, n))
+    np.add.at(proj, (rows, l.reshape(-1)), (next_probs * lower_weight).reshape(-1))
+    np.add.at(proj, (rows, u.reshape(-1)), (next_probs * upper_weight).reshape(-1))
+    return proj
+</script>
+    </div>
+
+    <div class="code-ex" data-code="0016-code-2">
+            <h3>代码题 2 · 实现 pinball 损失与梯度</h3>
+      <div class="code-prompt">
+        <p><span class="cp-label">背景</span>QR-DQN 让网络输出若干个分位数值，用 pinball 损失训练。这个损失对偏差方向不对称：<code>tau = 0.9</code> 时低估的代价是高估的 9 倍，所以最小化它得到的常数就落在 0.9 分位数上。两个函数在训练步里配套使用：<code>pinball_loss</code> 算损失值，<code>pinball_grad</code> 给出它对网络输出 <code>predictions</code> 的梯度，手写的 numpy 反传要用后者。都不修改输入，只许用 numpy。</p>
+        <p class="cp-sub">输入</p>
+        <ul>
+          <li><code>predictions</code>：float 数组，网络输出的分位数值。</li>
+          <li><code>targets</code>：float 数组，回报目标 <code>y</code>，形状与 <code>predictions</code> 相同或可广播成同一形状。</li>
+          <li><code>taus</code>：形状 <code>(n,)</code> 的 float 数组，分位点 τ，与最后一维对齐，同一个 τ 作用到那一列。</li>
+        </ul>
+        <p class="cp-sub">输出</p>
+        <ul>
+          <li><code>pinball_loss</code> 返回 Python <code>float</code>：先按 <span class="math">δ = targets − predictions</span> 逐元素算 <span class="math">ρ<sub>τ</sub>(δ) = max(τδ, (τ−1)δ)</span>，再对所有元素取平均。</li>
+          <li><code>pinball_grad</code> 返回 <code>np.ndarray</code>，形状与广播后的结果相同：第 <code>(i, j)</code> 个元素是平均损失对 <code>predictions[i, j]</code> 的偏导，<span class="math">δ &gt; 0</span> 时为 <span class="math">−τ / 总元素数</span>，<span class="math">δ &lt; 0</span> 时为 <span class="math">(1 − τ) / 总元素数</span>，<span class="math">δ = 0</span> 处为 0。</li>
+        </ul>
+        <p class="cp-note"><span class="cp-label">会被检验</span><code>tau=0.5</code> 时 +2 与 −2 的偏差代价相同；<code>tau=0.9</code> 且偏差为 1 时低估罚 0.9、高估只罚 0.1；四个元素的手算值与逐元素取法一致；解析梯度与中心差分数值梯度在 1e-6 内一致；梯度形状与广播结果一致；在 1 到 10 的样本上扫常数，<code>tau=0.85</code> 时平均损失最小的常数落在 9 附近。</p>
+      </div>
+      <details class="hints">
+        <summary>卡住了？看提示</summary>
+        <ul>
+          <li>max 的两个分支用 <code>np.maximum(tau * d, (tau - 1.0) * d)</code> 一次写完。</li>
+          <li>求和不要求 Python 循环：<code>np.mean(...)</code> 就够，注意 <code>float(...)</code>
+            转成 Python 浮点。</li>
+          <li>梯度除以元素总数后才对应"平均损失"的导数。</li>
+        </ul>
+      </details>
+
+      <script type="text/x-python" data-role="starter">
+import numpy as np
+
+def pinball_loss(predictions, targets, taus):
+    # TODO: 逐元素 max(tau*d, (tau-1)*d)，再取平均
+    return 0.0
+
+
+def pinball_grad(predictions, targets, taus):
+    # TODO: 返回平均损失对 predictions 的梯度
+    return np.zeros_like(np.asarray(predictions, dtype=float))
+</script>
+
+      <script type="text/x-python" data-role="tests">
+check(abs(pinball_loss(np.array([0.0]), np.array([2.0]), np.array([0.5])) - 1.0) < 1e-12,
+      "tau=0.5、delta=2 时损失应为 0.5*2 = 1.0")
+check(abs(pinball_loss(np.array([0.0]), np.array([-2.0]), np.array([0.5])) - 1.0) < 1e-12,
+      "tau=0.5 时正负偏差的代价相同，delta=-2 也应得到 1.0")
+check(abs(pinball_loss(np.array([0.0]), np.array([1.0]), np.array([0.9])) - 0.9) < 1e-12,
+      "tau=0.9、delta=1 时低估的代价是 tau*delta = 0.9")
+check(abs(pinball_loss(np.array([1.0]), np.array([0.0]), np.array([0.9])) - 0.1) < 1e-12,
+      "同样的偏差方向相反时，只罚 1-tau = 0.1，这个不对称是分位数回归的核心")
+
+pred = np.array([[0.0, 0.0], [0.0, 0.0]])
+targ = np.array([[1.0, -1.0], [2.0, -2.0]])
+taus = np.array([0.25, 0.75])
+manual = (0.25 * 1.0 + (1 - 0.75) * 1.0 + 0.25 * 2.0 + (1 - 0.75) * 2.0) / 4.0
+check(abs(pinball_loss(pred, targ, taus) - manual) < 1e-12,
+      f"四个元素分别取 max(tau*d,(tau-1)*d) 后求平均，应为 {manual}")
+
+g = np.asarray(pinball_grad(pred, targ, taus), dtype=float)
+check(g.shape == (2, 2), f"梯度形状应与广播结果一致 (2,2)，实际 {g.shape}")
+check(abs(g[0, 0] - (-0.25) / 4.0) < 1e-12,
+      f"delta>0 时 d rho/d pred = -tau = -0.25，再除以元素数 4，实际 {g[0,0]:.6f}")
+check(abs(g[0, 1] - (1.0 - 0.75) / 4.0) < 1e-12,
+      f"delta<0 时 d rho/d pred = 1-tau = 0.25，再除以 4，实际 {g[0,1]:.6f}")
+
+eps = 1e-6
+p0 = np.array([[0.3, -0.4], [1.2, 0.0]])
+t0 = np.array([[0.5, 0.1], [-0.2, 0.9]])
+tt = np.array([0.3, 0.8])
+num = np.zeros_like(p0)
+for i in range(p0.shape[0]):
+    for j in range(p0.shape[1]):
+        up = p0.copy(); up[i, j] += eps
+        dn = p0.copy(); dn[i, j] -= eps
+        num[i, j] = (pinball_loss(up, t0, tt) - pinball_loss(dn, t0, tt)) / (2 * eps)
+ana = np.asarray(pinball_grad(p0, t0, tt), dtype=float)
+check(np.allclose(num, ana, atol=1e-6),
+      f"数值梯度应与解析梯度一致，实际解析 {ana} 对 数值 {num}")
+
+data = np.arange(1.0, 11.0).reshape(1, 10)
+tau_hi = np.full(10, 0.85)
+grid = np.arange(0.0, 11.0001, 0.01)
+losses = np.array([pinball_loss(np.full((1, 10), c), data, tau_hi) for c in grid])
+best = float(grid[int(np.argmin(losses))])
+check(abs(best - 9.0) < 0.25,
+      f"tau=0.85 时，使平均 pinball 损失最小的常数应落在 9 附近（第 9 大的样本），实际 {best}")
+</script>
+
+      <script type="text/x-python" data-role="solution">
+import numpy as np
+
+def _delta(predictions, targets):
+    predictions = np.asarray(predictions, dtype=float)
+    targets = np.broadcast_to(np.asarray(targets, dtype=float), predictions.shape)
+    return predictions, targets, targets - predictions
+
+
+def pinball_loss(predictions, targets, taus):
+    predictions, targets, d = _delta(predictions, targets)
+    taus = np.asarray(taus, dtype=float)
+    loss = np.maximum(taus * d, (taus - 1.0) * d)
+    return float(np.mean(loss))
+
+
+def pinball_grad(predictions, targets, taus):
+    predictions, targets, d = _delta(predictions, targets)
+    taus = np.asarray(taus, dtype=float)
+    n_elem = d.size
+    grad = np.where(d > 0.0, -taus, 0.0) + np.where(d < 0.0, 1.0 - taus, 0.0)
+    return grad / n_elem
+</script>
+    </div>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>C51 的分布式贝尔曼目标、原子格点与投影算子、交叉熵损失：Bellemare, Dabney &amp; Munos,
+        <em>A Distributional Perspective on Reinforcement Learning</em>（ICML 2017），
+        <a class="cite" href="https://arxiv.org/abs/1707.06887">arXiv 1707.06887</a>；
+        分位数版本 QR-DQN 与 pinball 损失：Dabney et al.,
+        <em>Distributional RL with Quantile Regression</em>，
+        <a class="cite" href="https://arxiv.org/abs/1710.05941">arXiv 1710.05941</a>。</p>
+      <p>六组件组合与完整消融表：Hessel et al.,
+        <em>Rainbow: Combining Improvements in Deep RL</em>，
+        <a class="cite" href="https://arxiv.org/abs/1710.02298">arXiv 1710.02298</a>（Figure 5 与 Table 1
+        就是"哪个组件最有用"的直接证据）。综述视角见
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">Lilian Weng 的 DQN 综述</a>；
+        速查表条目见 <a href="../reference/algorithms.html#alg-rainbow">算法速查表 · Rainbow</a>。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问：
+      "用我的奖励范围帮我估一下 z_min 与 z_max 该怎么设。"
+      或者 "把 C51 的投影和交叉熵损失接成一个完整的 numpy 训练步。"</p>
+  </footer>
+
+</article>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

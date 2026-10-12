@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>算法速查表 — 强化学习入门</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article class="lesson">
+  <header class="lesson-head">
+    <p class="eyebrow">参考文档 · 随时查阅</p>
+    <h1>算法速查表</h1>
+    <p class="lede">每个算法一张卡片：核心更新目标、on/off-policy、动作空间、要不要环境模型、什么时候选它、最容易踩的坑。
+      最后有一张按场景选型的决策表。</p>
+    <p><a href="../index.html">← 回到课程</a> ·
+      另见 <a href="glossary.html">术语表</a> · <a href="notation.html">符号表</a></p>
+    <p class="note">本表在<a href="notation.html">符号表</a>之外只新增四个记号，其余一律沿用：
+      <var>α</var><sub>ent</sub> 表示 SAC 的温度（原论文记作 α，与学习率同名，这里加下标区分）；
+      <var>α</var><sub>CQL</sub> 表示 CQL 保守项的权重（原论文同样记作 α）；
+      <var>η</var> 表示熵正则系数（实现里常叫 β / c₂ / ent_coef）；
+      <var>ω</var> 表示 PER 的优先级指数（原论文记作 α）。
+      价值网络的参数统一写 <var>φ</var>（目标网络写 <var>φ</var><sup>−</sup>），策略网络的参数统一写 <var>θ</var>；
+      <var>E<sub>t</sub></var> 指资格迹（eligibility trace）。独立公式编号 (A.n)，
+      <a href="glossary.html">术语表</a>的公式编号为 (G.n)。</p>
+  </header>
+
+  <section>
+    <h2>快速索引</h2>
+    <ul>
+      <li><a href="#alg-dp">动态规划：策略迭代 / 价值迭代</a>（第 5 课）</li>
+      <li><a href="#alg-mc">蒙特卡洛控制 MC</a>（第 7 课）</li>
+      <li><a href="#alg-sarsa">SARSA</a>（第 9 课）</li>
+      <li><a href="#alg-qlearning">Q-Learning</a>（第 10 课）</li>
+      <li><a href="#alg-nstep">n-step 回报 / SARSA(λ)</a>（第 11 课）</li>
+      <li><a href="#alg-dqn">DQN</a>（第 13 课）</li>
+      <li><a href="#alg-double">Double DQN</a>（第 14 课）</li>
+      <li><a href="#alg-dueling">Dueling DQN</a>（第 14 课）</li>
+      <li><a href="#alg-per">优先经验回放 PER</a>（第 15 课）</li>
+      <li><a href="#alg-rainbow">Rainbow / 分布式 RL</a>（第 16 课）</li>
+      <li><a href="#alg-reinforce">REINFORCE</a>（第 17 课）</li>
+      <li><a href="#alg-a2c">A2C / A3C</a>（第 18 课）</li>
+      <li><a href="#alg-gae-trpo">GAE + TRPO</a>（第 19 课）</li>
+      <li><a href="#alg-ppo">PPO</a>（第 20 课）</li>
+      <li><a href="#alg-ddpg">DDPG</a>（第 21 课）</li>
+      <li><a href="#alg-td3">TD3</a>（第 22 课）</li>
+      <li><a href="#alg-sac">SAC</a>（第 23 课）</li>
+      <li><a href="#alg-dyna">Dyna-Q</a>（第 24 课）</li>
+      <li><a href="#alg-mcts">MCTS / AlphaZero</a>（第 24 课）</li>
+      <li><a href="#alg-bc">行为克隆 BC</a>（第 25 课）</li>
+      <li><a href="#alg-cql">CQL</a>（第 25 课）</li>
+      <li><a href="#choosing">选型决策表</a></li>
+    </ul>
+  </section>
+
+  <section id="alg-dp">
+    <h2>动态规划：策略迭代 / 价值迭代（Dynamic Programming, DP）</h2>
+    <p>已知模型时的精确解法，也是理解后面所有算法的参照物。策略迭代 = 反复「评估 → 贪心改进」；价值迭代 = 直接迭代最优方程、最后再取一次贪心。</p>
+    <div class="eq">
+      <span class="eq-body"><var>V</var>(<var>s</var>) ← Σ<sub><var>a</var></sub> <var>π</var>(<var>a</var>|<var>s</var>) Σ<sub><var>s</var>′,<var>r</var></sub> <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>) [ <var>r</var> + <var>γV</var>(<var>s</var>′) ]</span>
+      <span class="eq-num">(A.1)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>π</var>′(<var>s</var>) ← arg max<sub><var>a</var></sub> Σ<sub><var>s</var>′,<var>r</var></sub> <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>) [ <var>r</var> + <var>γV</var>(<var>s</var>′) ]</span>
+      <span class="eq-num">(A.2)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>V</var>(<var>s</var>) ← max<sub><var>a</var></sub> Σ<sub><var>s</var>′,<var>r</var></sub> <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>) [ <var>r</var> + <var>γV</var>(<var>s</var>′) ]</span>
+      <span class="eq-num">(A.3)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>都不是「跑起来就能用」的在线算法：策略迭代交替做预测与控制，价值迭代先算 <var>v</var><sub>*</sub> 再取贪心。两者都属于广义策略迭代。</td></tr>
+        <tr><th>动作空间</th><td>离散（要对 <var>a</var> 求期望或 max）；连续动作需要积分近似或离散化。</td></tr>
+        <tr><th>环境模型</th><td><strong>必须完整已知</strong> <var>p</var>(<var>s</var>′, <var>r</var> | <var>s</var>, <var>a</var>)。这是它唯一但硬性的门槛。</td></tr>
+        <tr><th>何时选它</th><td>转移表和奖励都能显式写出来、状态数在几千到几百万以内、需要精确解或纯离线规划时；也用来验证其他算法的实现是否正确。</td></tr>
+        <tr><th>主要坑</th><td>一次备份要遍历全部动作与后继状态，状态一大就爆炸；已知模型却仍去用无模型方法硬试，是纯粹的样本浪费；价值迭代的 max 有轻微过估计倾向。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0005-dynamic-programming.html">见第 5 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-mc">
+    <h2>蒙特卡洛控制（MC control，ε-soft）</h2>
+    <p>用完整回合的实际回报做平均来估计 <var>Q</var>，再让策略朝贪心方向移动一点点。不需要模型，是最容易理解的控制算法。</p>
+    <div class="eq">
+      <span class="eq-body"><var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) ← <var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) + <var>α</var> [ <var>G<sub>t</sub></var> − <var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) ]，且 <var>π</var>(<var>a</var>|<var>s</var>) 保持 ε-soft</span>
+      <span class="eq-num">(A.4)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>on-policy（同一条轨迹既产生数据又更新自己）；off-policy 版本需要重要性采样 <var>ρ<sub>t</sub></var>，方差会爆炸。</td></tr>
+        <tr><th>动作空间</th><td>离散（表格）；需要每个 (<var>s</var>, <var>a</var>) 都被访问到（探索起点或 ε-soft）。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>回合很短、仿真便宜、想要无偏的价值估计，或需要给 TD 方法做对照基线。</td></tr>
+        <tr><th>主要坑</th><td>必须等回合结束才能更新，长回合与不终止任务不可用；方差大、收敛慢；ε-soft 的策略永远带随机性，不衰减 <var>ε</var> 就拿不到最优确定性策略。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0007-monte-carlo.html">见第 7 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-sarsa">
+    <h2>SARSA（on-policy 时序差分控制）</h2>
+    <p>把 TD 预测直接改成控制：目标里用「下一步实际会采取的动作」<var>A</var><sub><var>t</var>+1</sub>，因此学到的价值包含探索的代价。</p>
+    <div class="eq">
+      <span class="eq-body"><var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) ← <var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) + <var>α</var> [ <var>R</var><sub><var>t</var>+1</sub> + <var>γQ</var>(<var>S</var><sub><var>t</var>+1</sub>, <var>A</var><sub><var>t</var>+1</sub>) − <var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) ]</span>
+      <span class="eq-num">(A.5)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>on-policy。目标里的 <var>A</var><sub><var>t</var>+1</sub> 来自当前 ε-greedy 策略，所以「探索撞墙」的代价会被学进价值里。</td></tr>
+        <tr><th>动作空间</th><td>离散（表格；也可配函数逼近）。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>安全性优先、探索有真实代价的场景（悬崖行走里它学会绕开悬崖）；需要每步在线更新，并对当前实际执行的策略给出诚实的价值估计。</td></tr>
+        <tr><th>主要坑</th><td><var>ε</var> 不衰减就学不到最优贪心策略；比 Q-learning 收敛慢；若你的目标是「部署时用贪心策略」，on-policy 的价值估计会偏保守。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0009-sarsa.html">见第 9 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-qlearning">
+    <h2>Q-Learning（off-policy 时序差分控制）</h2>
+    <p>目标里用 max 而不是实际动作，于是行为策略可以随便（只要覆盖够用），学到的始终是最优贪心策略的价值。</p>
+    <div class="eq">
+      <span class="eq-body"><var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) ← <var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) + <var>α</var> [ <var>R</var><sub><var>t</var>+1</sub> + <var>γ</var> max<sub><var>a</var>′</sub> <var>Q</var>(<var>S</var><sub><var>t</var>+1</sub>, <var>a</var>′) − <var>Q</var>(<var>S<sub>t</sub></var>, <var>A<sub>t</sub></var>) ]</span>
+      <span class="eq-num">(A.6)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy：行为策略（如 ε-greedy）与目标策略（贪心）分离，因此可以复用旧数据。</td></tr>
+        <tr><th>动作空间</th><td>离散。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>离散动作、样本便宜、想要简单可靠的第一版；或想拿历史/他人产生的数据去学贪心策略。</td></tr>
+        <tr><th>主要坑</th><td>max 导致的过估计（最大化偏差），奖励噪声大时尤其明显；配函数逼近 + 回放会撞上致命三元组；行为策略覆盖不到的 (<var>s</var>, <var>a</var>) 永远学不到。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0010-q-learning.html">见第 10 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-nstep">
+    <h2>n-step 回报与 SARSA(λ)</h2>
+    <p>在「等得久但准」（蒙特卡洛）与「更新快但偏」（单步 TD）之间连续调档：n=1 是 TD，n=∞ 是 MC，λ-回报用资格迹一次在线实现所有 n 的加权平均。</p>
+    <div class="eq">
+      <span class="eq-body"><var>G</var><sub><var>t</var></sub><sup>(<var>n</var>)</sup> = <var>R</var><sub><var>t</var>+1</sub> + <var>γR</var><sub><var>t</var>+2</sub> + ⋯ + <var>γ</var><sup><var>n</var>−1</sup><var>R</var><sub><var>t</var>+<var>n</var></sub> + <var>γ<sup>n</sup>V</var>(<var>S</var><sub><var>t</var>+<var>n</var></sub>)</span>
+      <span class="eq-num">(A.7)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>E<sub>t</sub></var>(<var>s</var>, <var>a</var>) = <var>γλE</var><sub><var>t</var>−1</sub>(<var>s</var>, <var>a</var>) + 1(<var>S<sub>t</sub></var> = <var>s</var>, <var>A<sub>t</sub></var> = <var>a</var>)，<var>Q</var> ← <var>Q</var> + <var>αδ<sub>t</sub>E<sub>t</sub></var></span>
+      <span class="eq-num">(A.8)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>SARSA(λ) 是 on-policy；n-step 的 Q-learning 变体（用 max 目标）是 off-policy，但要额外处理重要性采样。</td></tr>
+        <tr><th>动作空间</th><td>离散（表格）；这套思想后来被搬进 DQN（多步回报）与 PPO（GAE）。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>你想手工权衡偏差与方差、或单步 TD 学得太慢而 MC 方差太大时。实践起点：<var>λ</var>≈0.9、n 取 3–5、<var>λ</var> 与 n 只需调一个。</td></tr>
+        <tr><th>主要坑</th><td>n 或 λ 太大则方差上升且要求更长回合；资格迹有累积式与替换式两种，行为不同、实现容易写错；off-policy 加资格迹加函数逼近，三者叠加就是致命三元组，最容易发散。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0011-nstep-td-lambda.html">见第 11 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-dqn">
+    <h2>DQN（Deep Q-Network）</h2>
+    <p>用神经网络替代表格 Q，靠经验回放和目标网络把「自举 + off-policy + 函数逼近」这套组合稳住。高维状态 + 离散动作的默认起点。</p>
+    <div class="eq">
+      <span class="eq-body"><var>L</var>(<var>φ</var>) = 𝔼<sub>(<var>s</var>,<var>a</var>,<var>r</var>,<var>s</var>′)~<var>D</var></sub> [ ( <var>r</var> + <var>γ</var> max<sub><var>a</var>′</sub> <var>Q</var>(<var>s</var>′, <var>a</var>′; <var>φ</var><sup>−</sup>) − <var>Q</var>(<var>s</var>, <var>a</var>; <var>φ</var>) )² ]</span>
+      <span class="eq-num">(A.9)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy（必须 off-policy 才能用回放缓冲区里的旧数据）。</td></tr>
+        <tr><th>动作空间</th><td>离散：网络输出维度 = 动作个数，取 arg max 即可。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>状态是图像或高维向量、动作离散且不多、能大量采样（有仿真器）时。</td></tr>
+        <tr><th>主要坑</th><td>损失只对「实际执行的那个动作」算 TD 误差，写成对全部动作做回归就错了；终止状态的 <var>s</var>′ 不能带自举项；奖励尺度不归一化会训不动；<var>ε</var> 衰减与目标网络同步频率都要调；回放让样本相关性问题缓解，但不解决分布偏移。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0013-dqn.html">见第 13 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-double">
+    <h2>Double DQN</h2>
+    <p>不改网络结构，只改目标：用在线网络<em>选</em>动作、用目标网络<em>评估</em>这个动作，把 max 的过估计拆开。</p>
+    <div class="eq">
+      <span class="eq-body"><var>y</var> = <var>r</var> + <var>γ</var> <var>Q</var>( <var>s</var>′, arg max<sub><var>a</var>′</sub> <var>Q</var>(<var>s</var>′, <var>a</var>′; <var>φ</var>) ; <var>φ</var><sup>−</sup> )</span>
+      <span class="eq-num">(A.10)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy（与 DQN 完全相同，只换目标）。</td></tr>
+        <tr><th>动作空间</th><td>离散。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>DQN 学出的 <var>Q</var> 明显偏大，或在随机环境、奖励有噪声时策略变差；这是几乎零成本的替换，值得默认打开。</td></tr>
+        <tr><th>主要坑</th><td>只缓解而不消除过估计；在线网络本身还没学好时收益有限；不要同时改三处组件，否则无法判断是哪一处起了作用。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0014-double-dueling-dqn.html">见第 14 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-dueling">
+    <h2>Dueling DQN</h2>
+    <p>改网络结构：拆成状态价值 <var>V</var>(<var>s</var>) 与优势 <var>A</var>(<var>s</var>, <var>a</var>) 两路，再合并回 <var>Q</var>。让「很多动作都差不多」的状态学得更快。</p>
+    <div class="eq">
+      <span class="eq-body"><var>Q</var>(<var>s</var>, <var>a</var>) = <var>V</var>(<var>s</var>) + <var>A</var>(<var>s</var>, <var>a</var>) − (1 / |<var>A</var>(<var>s</var>)|) Σ<sub><var>a</var>′</sub> <var>A</var>(<var>s</var>, <var>a</var>′)</span>
+      <span class="eq-num">(A.11)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy（网络结构改动，可与 DQN / Double / PER / 分布式任意组合）。</td></tr>
+        <tr><th>动作空间</th><td>离散。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>价值主要由状态决定、动作选择影响不大时（例如大多数状态下多个动作都安全）；也适合动作数较多、需要更快学到状态价值的场景。</td></tr>
+        <tr><th>主要坑</th><td>不做中心化（那一步减均值）会让 <var>V</var> 与 <var>A</var> 不可辨识、互相抵消；它不解决探索与过估计；小状态空间里收益有限。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0014-double-dueling-dqn.html">见第 14 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-per">
+    <h2>优先经验回放（Prioritized Experience Replay, PER）</h2>
+    <p>按 TD 误差大小给样本排优先级，误差大的更常被抽到；同时用重要性采样权重把被改变的采样分布修正回来。</p>
+    <div class="eq">
+      <span class="eq-body"><var>P</var>(<var>i</var>) ∝ <var>p<sub>i</sub></var><sup><var>ω</var></sup>，比例优先取 <var>p<sub>i</sub></var> = |<var>δ<sub>i</sub></var>| + 小的正常数</span>
+      <span class="eq-num">(A.12)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>ρ<sub>i</sub></var> = ( 1 / (<var>N</var> · <var>P</var>(<var>i</var>)) )<sup><var>β</var></sup>，<var>β</var> 从 0.4 退火到 1</span>
+      <span class="eq-num">(A.13)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy（必须能重复采样历史数据，否则谈不上优先级）。</td></tr>
+        <tr><th>动作空间</th><td>离散；同一套回放思想也用于连续控制的 critic 回放。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>奖励稀疏、少数关键转移（罕见成功/失败）很重要、缓冲区很大以致均匀采样浪费时。</td></tr>
+        <tr><th>主要坑</th><td>改了采样分布就有偏，不加 <var>ρ<sub>i</sub></var>、不调优先级指数 <var>ω</var> 或不退火 <var>β</var> 会不稳；只按 |<var>δ</var>| 排序会让噪声大的样本被反复抽（加常数或改 rank 优先）；sum-tree 的精度与索引极易出 bug。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0015-prioritized-replay.html">见第 15 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-rainbow">
+    <h2>Rainbow 与分布式 RL</h2>
+    <p>把 Double、Dueling、PER、n-step、分布式价值（C51）、Noisy Net 六个组件合到一个 DQN 上；其中分布式价值学的是回报的分布而不只是期望。</p>
+    <div class="eq">
+      <span class="eq-body"><var>Z</var>(<var>s</var>, <var>a</var>) ≐ <var>r</var> + <var>γZ</var>(<var>s</var>′, <var>a</var>′)（分布式贝尔曼目标，等式两边都是随机变量）</span>
+      <span class="eq-num">(A.14)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>L</var>(<var>φ</var>) = 𝔼 [ <var>d</var>( (<var>T</var><var>Z</var>)(<var>s</var>, <var>a</var>; <var>φ</var><sup>−</sup>), <var>Z</var>(<var>s</var>, <var>a</var>; <var>φ</var>) ) ]（<var>T</var> 是贝尔曼算子，<var>d</var> 是两个分布之间的距离），C51 用类别投影 + 交叉熵，QR-DQN 用分位数回归（pinball loss）</span>
+      <span class="eq-num">(A.15)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy。</td></tr>
+        <tr><th>动作空间</th><td>离散。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>你要一个「离散动作 + 高维状态」的强基线，愿意用 2–3 倍计算量换样本效率与稳定性；也常作为论文复现的默认对照。</td></tr>
+        <tr><th>主要坑</th><td>组件多、互相掩盖错误，必须逐个做消融（Rainbow 的经验：PER 与多步回报贡献最大，分布式价值稳定有用，Noisy Net 收益最不稳定）；C51 的原子格点、QR-DQN 的分位数回归都极易写错；分布式目标的方差信息只有在真正关心风险时才有用。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0016-rainbow-distributional.html">见第 16 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-reinforce">
+    <h2>REINFORCE（带基线的策略梯度）</h2>
+    <p>直接参数化策略，用「实际回报 × 动作的对数概率梯度」把好动作的概率调大。最纯粹的策略梯度，也是方差最大的那个。</p>
+    <div class="eq">
+      <span class="eq-body">∇<sub><var>θ</var></sub><var>J</var>(<var>θ</var>) ≈ ( <var>G<sub>t</sub></var> − <var>b</var>(<var>S<sub>t</sub></var>) ) ∇<sub><var>θ</var></sub> log <var>π<sub>θ</sub></var>(<var>A<sub>t</sub></var>|<var>S<sub>t</sub></var>)</span>
+      <span class="eq-num">(A.16)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>on-policy：必须用当前策略采样出来的完整回合，数据用一次就丢。</td></tr>
+        <tr><th>动作空间</th><td>离散或连续，只要能算出 log <var>π<sub>θ</sub></var>(<var>a</var>|<var>s</var>)，这是它相对 Q-learning 的最大优势。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>教学与原型（Spinning Up 里叫 VPG，即 vanilla policy gradient）；策略参数少（线性 softmax / 小网络）、回合短、想要最小实现依赖、或动作连续无法做 max 时。</td></tr>
+        <tr><th>主要坑</th><td>方差极大、样本效率极低；必须等回合结束；不加基线几乎学不动，基线用 <var>V</var>(<var>s</var>) 时要注意它不能依赖动作；学习率稍大就把策略推崩，一步坏更新也无法回滚。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0017-policy-gradient.html">见第 17 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-a2c">
+    <h2>A2C / A3C（Actor-Critic）</h2>
+    <p>用 critic 的 TD 误差替代整条回报，把 REINFORCE 的高方差换成自举的偏差：actor 每步都能更新。</p>
+    <div class="eq">
+      <span class="eq-body">∇<sub><var>θ</var></sub><var>J</var>(<var>θ</var>) ≈ <var>δ<sub>t</sub></var> ∇<sub><var>θ</var></sub> log <var>π<sub>θ</sub></var>(<var>A<sub>t</sub></var>|<var>S<sub>t</sub></var>) + <var>η</var> ∇<sub><var>θ</var></sub><var>H</var>(<var>π<sub>θ</sub></var>(·|<var>S<sub>t</sub></var>))，<var>δ<sub>t</sub></var> = <var>R</var><sub><var>t</var>+1</sub> + <var>γV<sub>φ</sub></var>(<var>S</var><sub><var>t</var>+1</sub>) − <var>V<sub>φ</sub></var>(<var>S<sub>t</sub></var>)</span>
+      <span class="eq-num">(A.17)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>on-policy。A3C 是异步多线程，A2C 是同步批量化版本。</td></tr>
+        <tr><th>动作空间</th><td>离散或连续（连续输出高斯分布的 μ、σ）。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>能开很多并行环境、想快速迭代一个策略梯度基线；教学与中小任务优先用 A2C（易复现、好调试）。</td></tr>
+        <tr><th>主要坑</th><td>on-policy 意味着数据只用一次，样本效率低；critic（价值网络 <var>φ</var>）与 actor 的学习率、损失权重不平衡会让优势估计失真；异步 A3C 结果不稳定、难复现，且不能用过期梯度；熵系数 <var>η</var> 太大会让策略一直很随机。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0018-actor-critic.html">见第 18 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-gae-trpo">
+    <h2>GAE + TRPO（优势估计 + 信赖域策略优化）</h2>
+    <p>GAE 解决「优势怎么估得又准又稳」，TRPO 解决「一步更新多大才安全」。两者合起来是 PPO 的直接前身。</p>
+    <div class="eq">
+      <span class="eq-body"><var>A<sub>t</sub></var><sup>GAE(<var>γ</var>,<var>λ</var>)</sup> = Σ<sub><var>l</var>=0</sub><sup>∞</sup> (<var>γλ</var>)<sup><var>l</var></sup> <var>δ</var><sub><var>t</var>+<var>l</var></sub>，反向递推：<var>A<sub>t</sub></var> = <var>δ<sub>t</sub></var> + <var>γλA</var><sub><var>t</var>+1</sub></span>
+      <span class="eq-num">(A.18)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body">max<sub><var>θ</var></sub> 𝔼 [ ( <var>π<sub>θ</sub></var>(<var>a</var>|<var>s</var>) / <var>π</var><sub>old</sub>(<var>a</var>|<var>s</var>) ) <var>A<sub>t</sub></var> ] &nbsp; s.t. &nbsp; 𝔼 [ KL( <var>π</var><sub>old</sub> ‖ <var>π<sub>θ</sub></var> ) ] ≤ <var>δ</var><sub>KL</sub></span>
+      <span class="eq-num">(A.19)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>on-policy：surrogate 目标只在旧策略附近有效，数据不能反复用太多轮。</td></tr>
+        <tr><th>动作空间</th><td>离散或连续。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>你需要「每次更新都不会把策略搞崩」的强保证、且不在意实现复杂度（Fisher 向量积 + 共轭梯度 + 线搜索）时；<strong>GAE 本身几乎总值得单独拿来用</strong>，即使你最后用 PPO。</td></tr>
+        <tr><th>主要坑</th><td>TRPO 工程成本高、每批数据要够大、与 dropout/参数共享等实现细节冲突；<var>δ</var><sub>KL</sub> 设太小过度保守、太大失去约束；<var>A</var><sub><var>t</var></sub><sup>GAE</sup> 里 <var>λ</var> 与 <var>γ</var> 共同决定偏差-方差，只调一个容易白调。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0019-gae-trpo.html">见第 19 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-ppo">
+    <h2>PPO（Proximal Policy Optimization，裁剪目标）</h2>
+    <p>用「概率比 + clip + min」代替 TRPO 的二阶约束，把信赖域换成一个几乎不用调的损失函数。通用性最好、实现最短，也是 RLHF 的默认优化器。</p>
+    <div class="eq">
+      <span class="eq-body"><var>L</var><sup>CLIP</sup>(<var>θ</var>) = 𝔼 [ min( <var>r<sub>t</sub></var>(<var>θ</var>)<var>A<sub>t</sub></var>, clip(<var>r<sub>t</sub></var>(<var>θ</var>), 1−<var>ε</var>, 1+<var>ε</var>) <var>A<sub>t</sub></var> ) ]，<var>r<sub>t</sub></var>(<var>θ</var>) = <var>π<sub>θ</sub></var>(<var>a</var>|<var>s</var>) / <var>π</var><sub>old</sub>(<var>a</var>|<var>s</var>)</span>
+      <span class="eq-num">(A.20)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>L</var><sup>total</sup> = <var>L</var><sup>CLIP</sup> − <var>c<sub>v</sub></var> ( <var>V<sub>φ</sub></var>(<var>s</var>) − <var>V</var><sup>target</sup> )² + <var>η</var> <var>H</var>(<var>π<sub>θ</sub></var>(·|<var>s</var>))</span>
+      <span class="eq-num">(A.21)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>on-policy：同一批数据可以跑多个 epoch（多跑几个 epoch 是裁剪目标 <var>L</var><sup>CLIP</sup> 带来的好处），但之后必须重新采样。</td></tr>
+        <tr><th>动作空间</th><td>离散或连续（连续输出高斯分布的 μ 与 σ）。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>通用首选：能开并行仿真、动作空间大或连续、需要策略直接输出动作（含大模型 RLHF 微调）；对奖励尺度比 DQN 一族宽容，公开实现最多。</td></tr>
+        <tr><th>主要坑</th><td>超参敏感：<var>ε</var>、学习率、epoch 数、batch 大小、优势是否归一化都要动；多 epoch 训练时必须用 KL 或裁剪比例做早停；优势不标准化最容易崩；样本效率不高，样本极贵时别硬用。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0020-ppo.html">见第 20 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-ddpg">
+    <h2>DDPG（Deep Deterministic Policy Gradient）</h2>
+    <p>连续动作无法做 max，于是学一个确定性策略 μ<var>θ</var>(s)，用 critic 的 ∇<var>a</var>Q 当「裁判」告诉 actor 该往哪调动作。是连续控制 DQN 化的第一代方案。</p>
+    <div class="eq">
+      <span class="eq-body">∇<sub><var>θ</var></sub><var>J</var> ≈ 𝔼 [ ∇<sub><var>a</var></sub><var>Q</var>(<var>s</var>, <var>a</var>; <var>φ</var>) |<sub><var>a</var> = <var>μ<sub>θ</sub></var>(<var>s</var>)</sub> · ∇<sub><var>θ</var></sub><var>μ<sub>θ</sub></var>(<var>s</var>) ]</span>
+      <span class="eq-num">(A.22)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>L</var>(<var>φ</var>) = 𝔼 [ ( <var>r</var> + <var>γQ</var>(<var>s</var>′, <var>μ</var><sub><var>θ</var><sup>−</sup></sub>(<var>s</var>′); <var>φ</var><sup>−</sup>) − <var>Q</var>(<var>s</var>, <var>a</var>; <var>φ</var>) )² ]，软更新 <var>φ</var><sup>−</sup> ← <var>τφ</var> + (1−<var>τ</var>)<var>φ</var><sup>−</sup></span>
+      <span class="eq-num">(A.23)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy（配经验回放，样本可复用）。</td></tr>
+        <tr><th>动作空间</th><td>连续（输出一个实数向量）；离散动作请用 DQN 一族。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>历史与教学用途，或你确实需要确定性策略（推理时无采样开销）并愿意精细调参。新项目建议直接用 TD3 或 SAC。</td></tr>
+        <tr><th>主要坑</th><td>对学习率、批量大小、探索噪声尺度、软更新系数 <var>τ</var> 极其敏感；Q 的过估计会被 actor 直接利用（往 Q 的误差方向调动作）；探索完全靠外部噪声（高斯/OU），噪声尺度没有原则性做法；早期很容易收敛到坏解。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0021-ddpg.html">见第 21 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-td3">
+    <h2>TD3（Twin Delayed DDPG）</h2>
+    <p>对 DDPG 的三处外科手术式修正：截断双 Q、延迟策略更新、目标动作平滑。连续控制里比 DDPG 稳得多。</p>
+    <div class="eq">
+      <span class="eq-body"><var>y</var> = <var>r</var> + <var>γ</var> min<sub><var>i</var>=1,2</sub> <var>Q</var><sub><var>φ</var><sup>−</sup><sub><var>i</var></sub></sub>( <var>s</var>′, clip( <var>μ</var><sub><var>θ</var><sup>−</sup></sub>(<var>s</var>′) + <var>ξ</var>, −<var>c</var>, <var>c</var> ) )，<var>ξ</var> ~ <var>N</var>(0, <var>σ</var>)</span>
+      <span class="eq-num">(A.24)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body">actor：∇<sub><var>θ</var></sub><var>J</var> ≈ 𝔼 [ ∇<sub><var>a</var></sub><var>Q</var><sub><var>φ</var><sub>1</sub></sub>(<var>s</var>, <var>a</var>) |<sub><var>a</var>=<var>μ<sub>θ</sub></var>(<var>s</var>)</sub> ∇<sub><var>θ</var></sub><var>μ<sub>θ</sub></var>(<var>s</var>) ]，每 <var>d</var> 次 critic 更新才做一次</span>
+      <span class="eq-num">(A.25)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy。</td></tr>
+        <tr><th>动作空间</th><td>连续。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>连续控制、接受确定性策略（推理便宜、部署友好）、又不想付出 SAC 的随机策略与温度调参成本时；也是 DDPG 调不动时的直接替代。</td></tr>
+        <tr><th>主要坑</th><td>双 Q 与延迟更新都不能省，省掉就退回 DDPG；目标平滑噪声 <var>ξ</var>（标准差 <var>σ</var>）与截断 <var>c</var> 需要调；探索仍靠外部噪声，不像 SAC 把随机性写进目标，容易探索不足。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0022-td3.html">见第 22 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-sac">
+    <h2>SAC（Soft Actor-Critic，最大熵）</h2>
+    <p>最大化「回报 + 熵」的 off-policy actor-critic：策略保持随机即是探索，因此样本效率高、对超参相对鲁棒。连续控制的首选。</p>
+    <div class="eq">
+      <span class="eq-body"><var>y</var> = <var>r</var> + <var>γ</var> ( min<sub><var>i</var>=1,2</sub> <var>Q</var><sub><var>φ</var><sup>−</sup><sub><var>i</var></sub></sub>(<var>s</var>′, <var>a</var>′) − <var>α</var><sub>ent</sub> log <var>π<sub>θ</sub></var>(<var>a</var>′|<var>s</var>′) )，<var>a</var>′ ~ <var>π<sub>θ</sub></var>(·|<var>s</var>′)</span>
+      <span class="eq-num">(A.26)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body">∇<sub><var>θ</var></sub><var>J</var> = 𝔼 [ ∇<sub><var>θ</var></sub> ( <var>α</var><sub>ent</sub> log <var>π<sub>θ</sub></var>(<var>a</var>|<var>s</var>) − <var>Q<sub>φ</sub></var>(<var>s</var>, <var>a</var>) ) ]，<var>a</var> = tanh( <var>μ<sub>θ</sub></var>(<var>s</var>) + <var>σ<sub>θ</sub></var>(<var>s</var>) ⊙ <var>ξ</var> )</span>
+      <span class="eq-num">(A.27)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body"><var>J</var>(<var>α</var><sub>ent</sub>) = 𝔼 [ −<var>α</var><sub>ent</sub> ( log <var>π<sub>θ</sub></var>(<var>a</var>|<var>s</var>) + <var>Ĥ</var> ) ]，目标熵 <var>Ĥ</var> 常取 −dim(<var>A</var>)</span>
+      <span class="eq-num">(A.28)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy（配经验回放）。</td></tr>
+        <tr><th>动作空间</th><td>连续（也有离散动作版本）。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>连续控制第一选择：样本效率高、对学习率与奖励尺度相对鲁棒、探索自动；真机实验或仿真昂贵时尤其合适。</td></tr>
+        <tr><th>主要坑</th><td>目标熵设错会让策略过随机或过早确定；tanh 变换后的对数概率必须加雅可比修正，写错会静默学坏；仍是自举 + off-policy，别因此放松对致命三元组的警惕（大网络 + 大学习率照样发散）；对稀疏奖励并不比别的算法更神奇。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0023-sac.html">见第 23 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-dyna">
+    <h2>Dyna-Q（基于模型 + 规划）</h2>
+    <p>每走一步真实交互，就用同一份经验做两件事：更新价值、更新模型；然后再从模型里「回放」若干次做额外的价值更新。样本贵时的第一选择。</p>
+    <div class="eq">
+      <span class="eq-body"><var>Q</var>(<var>S</var>, <var>A</var>) ← <var>Q</var>(<var>S</var>, <var>A</var>) + <var>α</var> [ <var>R</var> + <var>γ</var> max<sub><var>a</var>′</sub> <var>Q</var>(<var>S</var>′, <var>a</var>′) − <var>Q</var>(<var>S</var>, <var>A</var>) ]，( <var>R</var>, <var>S</var>′ ) 来自真实一步或模型预测；每步真实交互后再做 n 次模型回放</span>
+      <span class="eq-num">(A.29)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy（Q-learning 内核 + 学到的模型），真实数据与想象数据共用一个 <var>Q</var>。</td></tr>
+        <tr><th>动作空间</th><td>离散（表格型模型最直接；连续动作需要模型与规划都用另一套方法）。</td></tr>
+        <tr><th>环境模型</th><td>需要：可以已知，也可以在线学（确定性一步模型最简单）。</td></tr>
+        <tr><th>何时选它</th><td>每次真实交互都很贵、状态动作空间不大、环境近似确定性时；也是理解「规划 = 用模型做备份」的最短路径。</td></tr>
+        <tr><th>主要坑</th><td>模型学偏了会累积出误差，策略就在「想象里最优」；探索不足时模型只覆盖走过的区域（可用 Dyna-Q+ 给久未访问的动作加奖励）；n 越大越省真实样本，但越容易被模型误差带偏。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0024-model-based-planning.html">见第 24 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-mcts">
+    <h2>MCTS / AlphaZero（蒙特卡洛树搜索与规划）</h2>
+    <p>不学价值函数，而是用仿真器把决策时的计算预算集中到有希望的分支上：选择 → 扩展 → 模拟 → 回传。AlphaZero 再把策略/价值网络塞进这个循环。</p>
+    <div class="eq">
+      <span class="eq-body">UCT 选择：<var>a</var>* = arg max<sub><var>a</var></sub> [ <var>Q</var>(<var>s</var>, <var>a</var>) + <var>c</var> √( ln <var>N</var>(<var>s</var>) / <var>N</var>(<var>s</var>, <var>a</var>) ) ]</span>
+      <span class="eq-num">(A.30)</span>
+    </div>
+    <div class="eq">
+      <span class="eq-body">AlphaZero 选择：<var>a</var>* = arg max<sub><var>a</var></sub> [ <var>Q</var>(<var>s</var>, <var>a</var>) + <var>c</var> <var>P</var>(<var>s</var>, <var>a</var>) √<var>N</var>(<var>s</var>) / (1 + <var>N</var>(<var>s</var>, <var>a</var>)) ]，<var>P</var> 来自策略网络</span>
+      <span class="eq-num">(A.31)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>MCTS 是纯规划器，本身不学策略，选择阶段用 UCT（树上的置信上界）；AlphaZero 用自对弈生成数据、用搜索的访问分布监督策略网络，是「on-policy 采样 + 监督式训练」的混合体。</td></tr>
+        <tr><th>动作空间</th><td>离散且分支可控；连续动作要么离散化，要么改用连续版本的规划方法。</td></tr>
+        <tr><th>环境模型</th><td>需要：仿真器或规则（棋类直接用规则，不必学模型）。</td></tr>
+        <tr><th>何时选它</th><td>有可靠仿真器、回合制、分支多但可剪枝、决策质量比训练速度更重要时（棋类、调度、组合优化）。</td></tr>
+        <tr><th>主要坑</th><td>每次决策要成百上千次模拟，推理成本高；仿真器不真实则全部白搭；模拟次数不足时搜索结果可能还不如直接策略；自对弈需要大量算力与稳定的评估流程，且很难判断是网络还是搜索在起作用。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0024-model-based-planning.html">见第 24 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-bc">
+    <h2>行为克隆（Behavior Cloning, BC）</h2>
+    <p>把日志里的 (状态, 动作) 当监督学习样本直接拟合策略。没有价值函数、没有自举、没有探索。这也是它稳的原因。</p>
+    <div class="eq">
+      <span class="eq-body">min<sub><var>θ</var></sub> −𝔼<sub>(<var>s</var>,<var>a</var>)~<var>D</var></sub> [ log <var>π<sub>θ</sub></var>(<var>a</var>|<var>s</var>) ]（连续动作退化为均方误差）</span>
+      <span class="eq-num">(A.32)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>与 on/off-policy 无关：它不做价值估计、不做自举，只是监督学习。</td></tr>
+        <tr><th>动作空间</th><td>离散（softmax + 交叉熵）或连续（高斯 / 直接回归）。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>第一件该跑的事：有专家演示或历史日志、能拿到 (<var>s</var>, <var>a</var>) 对、只想复现既有水平。训练稳、便宜、易解释，也是所有离线 RL 的对照基线。</td></tr>
+        <tr><th>主要坑</th><td>复合误差：一旦偏离数据分布就会持续犯错（最坏 <var>O</var>(<var>εT</var>²)），所以数据的状态覆盖比模型容量更重要；只会模仿、无法超过数据；日志里看不到「如果当时选别的动作会怎样」，因此很难评估；类别不均衡时会只学会最常见动作。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0025-offline-imitation.html">见第 25 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="alg-cql">
+    <h2>CQL（Conservative Q-Learning，保守离线 RL）</h2>
+    <p>在 Bellman 误差之外加一项惩罚：压低「策略偏好但数据里没见过」的动作的 Q 值，让策略不敢离开数据分布。</p>
+    <div class="eq">
+      <span class="eq-body"><var>L</var>(<var>φ</var>) = <var>α</var><sub>CQL</sub> 𝔼<sub><var>s</var>~<var>D</var></sub> [ log Σ<sub><var>a</var></sub> exp <var>Q<sub>φ</sub></var>(<var>s</var>, <var>a</var>) − 𝔼<sub><var>a</var>~<var>π<sub>β</sub></var>(·|<var>s</var>)</sub> <var>Q<sub>φ</sub></var>(<var>s</var>, <var>a</var>) ] + ½ 𝔼<sub>(<var>s</var>,<var>a</var>,<var>r</var>,<var>s</var>′)~<var>D</var></sub> [ ( <var>Q<sub>φ</sub></var>(<var>s</var>, <var>a</var>) − ( <var>r</var> + <var>γ</var> max<sub><var>a</var>′</sub> <var>Q</var><sub><var>φ</var><sup>−</sup></sub>(<var>s</var>′, <var>a</var>′) ) )² ]</span>
+      <span class="eq-num">(A.33)</span>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>策略类型</th><td>off-policy，但只在固定数据集 <var>D</var> 上更新，不与环境交互（<var>π<sub>β</sub></var> 是产生日志的行为策略）。</td></tr>
+        <tr><th>动作空间</th><td>离散或连续。</td></tr>
+        <tr><th>环境模型</th><td>不需要。</td></tr>
+        <tr><th>何时选它</th><td>只有固定日志、完全不能探索，且 BC 明显不够（数据里混有次优行为、或需要把已有行为组合得更好）时。实践顺序是：先 BC 基线 → 再 CQL；预算少时可以看更简单的 IQL 或 TD3+BC。</td></tr>
+        <tr><th>主要坑</th><td><var>α</var><sub>CQL</sub> 太小学不到保守、太大把 Q 压平导致策略退化成「数据平均」；只靠日志评估不可靠（分布偏移），上线必须有 shadow 模式、A/B 与护栏指标；数据覆盖差时任何离线算法都救不回来。</td></tr>
+        <tr><th>详见</th><td><a href="../lessons/0025-offline-imitation.html">见第 25 课</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="choosing">
+    <h2>选型决策表</h2>
+    <p>先确认「问题适不适合 RL」（状态是否马尔可夫、奖励是否可度量、有没有评估手段），再按下面这张表定位。
+      每格给的是<strong>起点</strong>，不是结论：先用最简单的那个跑通基线，再按诊断结果换。</p>
+    <table>
+      <thead>
+        <tr><th>场景</th><th>首选</th><th>备选</th><th>关键提醒</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>离散动作 · 能仿真 · 样本便宜</td>
+          <td>DQN（默认就加 Double DQN）</td>
+          <td>Rainbow（要样本效率）；PPO（要并行与稳定实现）</td>
+          <td>先跑通最朴素的 DQN 基线，组件一次只加一个并做消融；奖励尺度要归一化。</td>
+        </tr>
+        <tr>
+          <td>离散动作 · 组合空间巨大（棋盘 / 调度）</td>
+          <td>MCTS + 策略/价值网络（AlphaZero 式）</td>
+          <td>PPO / A2C + 动作掩码与启发式剪枝</td>
+          <td>必须有可靠仿真器；先把非法动作掩掉，通常比换算法有效得多。</td>
+        </tr>
+        <tr>
+          <td>连续动作</td>
+          <td>SAC</td>
+          <td>TD3（要确定性策略、推理便宜）；PPO（并行仿真便宜、公开实现多）</td>
+          <td>先把动作归一化到 [−1, 1] 并固定奖励尺度；否则任何算法都会被调参噪声淹没。</td>
+        </tr>
+        <tr>
+          <td>只有离线日志（不能探索）</td>
+          <td>CQL</td>
+          <td>IQL（实现更简单）、TD3+BC（把 BC 当正则项）</td>
+          <td>先认真跑 BC 基线并调好；评估只能用离线评估（OPE）+ shadow 模式，不要只信离线指标。</td>
+        </tr>
+        <tr>
+          <td>样本极贵（交互要花钱 / 要人等 / 不可回滚）</td>
+          <td>模型基：Dyna 或 MCTS 规划（有可靠仿真/规则时）</td>
+          <td>离线 RL 预热 + SAC 微调；先用演示数据做 BC 再引入 RL</td>
+          <td>降低「每次交互的成本」（缩短决策周期、加先验、提高复用）通常比换算法收益更大。</td>
+        </tr>
+        <tr>
+          <td>需要在线微调大模型（对齐 / 偏好）</td>
+          <td>PPO + 奖励模型 + KL 惩罚（β）</td>
+          <td>DPO（只有偏好数据、不想维护奖励模型与采样管线）；预算极少可先做 SFT / 拒绝采样</td>
+          <td>成败主要取决于奖励模型的泛化能力与 β；必须持续盯 reward hacking（看散度与人工抽查）。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>表格型算法（DP、MC、TD、SARSA、Q-learning、n-step、Dyna）的更新式取自
+        Sutton &amp; Barto, <em>Reinforcement Learning: An Introduction</em> (2nd ed.)
+        <a class="cite" href="http://incompleteideas.net/book/RLbook2020.pdf">[免费 PDF]</a>；
+        深度 RL 部分（VPG/REINFORCE、TRPO、PPO、DDPG、TD3、SAC）的目标函数与实现约定取自
+        <a class="cite" href="https://spinningup.openai.com/en/latest/">Spinning Up in Deep RL</a>，
+        变体族与原始论文出处可对照
+        <a class="cite" href="https://lilianweng.github.io/posts/2018-02-19-rl-overview/">Lilian Weng 的综述系列</a>；
+        工程默认超参可对照
+        <a class="cite" href="https://stable-baselines3.readthedocs.io/en/master/">Stable-Baselines3 文档</a>。</p>
+    </div>
+    <p class="ask">拿不准该用哪一个，把你的状态/动作/奖励/数据量与评估方式写给 AI 老师：它是你的私教，
+      可以按你的业务约束把这张表收窄到一两个候选，并给出第一步的实现清单。</p>
+  </footer>
+
+</article>
+</body>
+</html>

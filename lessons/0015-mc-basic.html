@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0015 · 蒙特卡洛基础：均值估计与 MC Basic — 强化学习的数学原理</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/katex/katex.min.css">
+</head>
+<body>
+<article class="lesson" data-number="0015" data-slug="mc-basic" data-part="第一部分 · 基础工具" data-kind="math">
+
+  <header class="lesson-head">
+    <p class="eyebrow">基础工具 15</p>
+    <h1>蒙特卡洛基础：均值估计与 MC Basic</h1>
+    <p class="lede">把策略（一套"看到什么状态就选什么动作"的规则）完整跑成回合，用真实拿到的回报（从现在起一直到结束，把每一步奖励加起来的总分）求平均，来估计动作价值（在某个状态下先选某个具体动作，之后再好好走，能拿多少总分）：这条路叫蒙特卡洛（把一整局走完，用真实拿到的总分来估计价值）。其中给策略打分的那一步叫策略评估（给定一套策略，算出它到底值多少分），本课把它从解方程换成采样平均，第一个算法叫 MC（Monte Carlo，蒙特卡洛）Basic。</p>
+    <div class="objectives">
+      <h2>学完本课你会</h2>
+      <ul>
+        <li>能说清用样本平均估计期望为什么合理，以及误差随回合数怎么缩小</li>
+        <li>能解释为什么策略改进改用动作价值之后就不再需要模型</li>
+        <li>能写出 MC Basic 的算法，并说出它和策略迭代差在哪一步</li>
+        <li>能在 2×2 网格世界上算出一条回合给哪些状态动作对提供了样本</li>
+        <li>能说出 MC Basic 在数据效率上的两点改进</li>
+      </ul>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 用平均代替期望</h2>
+    <p>本课要估的量几乎都是期望：某个状态动作对的价值，就是从它出发能拿到的回报（从现在起一直到结束，把每一步奖励加起来的总分）的平均值。期望的定义要求知道概率分布，可现实里分布常常不知道，手头只有一个个具体样本。</p>
+    <p>均值估计就是替代方案：把同一件事重复 $N$ 次，得到样本 $x_1,\dots,x_N$，用它们的平均当作估计：</p>
+    <div class="eq">
+      <span class="eq-body">$$\bar x_N=\frac{1}{N}\sum_{i=1}^{N}x_i.$$</span>
+      <span class="eq-num">(15.1)</span>
+    </div>
+    <p>式中 $N$ 是样本个数，$\bar x_N$ 读作"$x$ 拔"。</p>
+    <div class="thm">
+      <span class="label">命题 15.1（样本均值的期望与方差）</span>
+      <p>设 $X_1,\dots,X_N$ 独立同分布，$E[X_i]=\mu$，$\var(X_i)=\sigma^2$。那么样本均值 $\bar X_N$ 满足 $E[\bar X_N]=\mu$，$\var(\bar X_N)=\sigma^2/N$。</p>
+    </div>
+    <div class="proof">
+      <span class="label">证明</span>
+      <p>第一段（期望）。由期望的线性性（0001 课定理 5.2），</p>
+      <p>$$E[\bar X_N]=\frac{1}{N}\sum_{i=1}^{N}E[X_i]=\frac{1}{N}\cdot N\mu=\mu.$$</p>
+      <p>这说明样本均值是无偏的：它不会整体偏高或偏低。</p>
+      <p>第二段（方差）。由独立时方差可加（0001 课定理 8.4）与 $\var(aX)=a^2\var(X)$，</p>
+      <p>$$\var(\bar X_N)=\frac{1}{N^2}\var\Big(\sum_{i=1}^{N}X_i\Big)=\frac{1}{N^2}\cdot N\sigma^2=\frac{\sigma^2}{N}.$$</p>
+      <p>开平方得到标准差 $\sigma/\sqrt N$。样本数翻四倍，误差才减半。</p>
+      <span class="qed">∎</span>
+    </div>
+    <p>0001 课的弱大数定律再加一层保证：$N\to\infty$ 时样本均值落在真实期望附近的概率趋于 1。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="样本均值随样本数增大收敛到真实期望">
+        <line x1="70" y1="34" x2="70" y2="166" class="axis-b"/>
+        <line x1="70" y1="166" x2="510" y2="166" class="axis-b"/>
+        <text x="24" y="24" class="lbl">样本均值</text>
+        <text x="466" y="186" class="lbl">样本数 N</text>
+        <line x1="70" y1="100" x2="510" y2="100" class="mark"/>
+        <text x="514" y="105" class="val-b">μ</text>
+        <path d="M74 40 L94 150 L112 66 L130 138 L150 82 L172 130 L196 90 L222 124 L250 96 L280 118 L312 100 L346 112 L382 102 L420 108 L460 104 L500 102" class="curve"/>
+        <text x="86" y="34" class="lbl">允许偏差 ±ε 的窗口</text>
+        <text x="120" y="200" class="lbl">N 变大，抖动收窄；落在窗口外的概率趋于 0</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 15.1</span>
+        横轴是样本数，纵轴是样本均值。样本少时抖动剧烈，样本多了以后贴着真实期望走。
+        这是后面所有采样方法的共同依据。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>2. 为什么改用动作价值就不需要模型</h2>
+    <p>先分清有模型与无模型。有模型指知道环境的转移概率（跳到哪里并不确定，每个可能的目标各带一个概率）和奖励函数；无模型指这两样都不知道，手头只有一次次真实经历。</p>
+    <p>策略改进（根据算出的分数，把策略里明显吃亏的选择换掉）要的是动作价值：$\pi_{k+1}(s)=\argmax_a q_{\pi_k}(s,a)$，也就是 0014 课的式 (14.3)。这个式子只比较同一个状态下各个动作的动作值，不需要知道环境怎么跳。麻烦在于动作价值本身有两种算法：</p>
+    <div class="eq">
+      <span class="eq-body">$$\begin{aligned}q_\pi(s,a)&=\sum_{s'}p(s'\mid s,a)\big[r(s,a)+\gamma v_\pi(s')\big]\\ &=\E\big[G_t\mid S_t=s,A_t=a\big]\end{aligned}$$</span>
+      <span class="eq-num">(15.2)</span>
+    </div>
+    <p>式中 $p(s'\mid s,a)$ 是转移概率，$r(s,a)$ 是奖励的期望，$\gamma$ 是折扣因子（越往后的奖励，算进总分时权重越小），$v_\pi$ 是状态价值（只看状态、不管具体选哪个动作的那个价值），$G_t$ 是从第 $t$ 步起的回报，$\E$ 表示对随机性求平均，$S_t$ 与 $A_t$ 是第 $t$ 步的状态与动作。第一行要用转移概率把"下一步去哪"加权，第二行只用回报，没有出现 $p(s'\mid s,a)$。第二行说的是：动作价值就是"从这一对出发、之后按策略走"能拿到的回报的平均值，而平均值可以用回合里真实拿到的回报去估。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 200" role="img" aria-label="算动作值有两条路，一条用模型，一条用数据">
+        <rect x="20" y="60" width="120" height="46" rx="5" class="box"/>
+        <text x="44" y="88" class="val-b">状态价值 v</text>
+        <rect x="190" y="60" width="130" height="46" rx="5" class="box"/>
+        <text x="206" y="88" class="lbl">乘转移概率与奖励</text>
+        <rect x="370" y="60" width="140" height="46" rx="5" class="box"/>
+        <text x="400" y="88" class="val-b">动作价值 q</text>
+        <path d="M140 83 H178" class="arrow"/>
+        <path d="M171 78 l9 5 l-9 5" class="arrow"/>
+        <path d="M320 83 H358" class="arrow"/>
+        <path d="M351 78 l9 5 l-9 5" class="arrow"/>
+        <text x="46" y="132" class="lbl">这条路要知道模型</text>
+        <rect x="20" y="150" width="120" height="40" rx="5" class="box-a"/>
+        <text x="42" y="175" class="lbl">跑完整回合</text>
+        <rect x="190" y="150" width="130" height="40" rx="5" class="box-a"/>
+        <text x="214" y="175" class="lbl">记录回报</text>
+        <rect x="370" y="150" width="140" height="40" rx="5" class="box-a"/>
+        <text x="404" y="175" class="lbl">求平均</text>
+        <path d="M140 170 H178" class="arrow-a"/>
+        <path d="M171 165 l9 5 l-9 5" class="arrow-a"/>
+        <path d="M320 170 H358" class="arrow-a"/>
+        <path d="M351 165 l9 5 l-9 5" class="arrow-a"/>
+        <text x="176" y="132" class="lbl">这条路只用数据</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 15.2</span>
+        上面一条路从状态价值出发，要按转移概率加权，因此需要模型。下面一条路直接跑回合、记录回报、求平均，
+        全程不需要知道自己走的是哪条转移。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>3. 用回合数据估计动作价值</h2>
+    <p>设当前策略是 $\pi_k$。从状态动作对 $(s,a)$ 出发，先执行 $a$，之后一直按 $\pi_k$ 选动作，直到回合结束，得到一个完整回报 $g(s,a)$。它是回报这个随机变量的一次采样。跑 $N$ 个这样的回合，用平均去估：</p>
+    <div class="eq">
+      <span class="eq-body">$$\hat q_{\pi_k}(s,a)=\frac{1}{N}\sum_{i=1}^{N}g^{(i)}(s,a).$$</span>
+      <span class="eq-num">(15.3)</span>
+    </div>
+    <p>式中 $g^{(i)}(s,a)$ 是第 $i$ 个回合拿到的回报，$\hat q$ 表示估计值。由命题 15.1，只要各回合相互独立，这个估计是无偏的，标准差按 $\sigma/\sqrt N$ 缩小，$\sigma$ 是单回合回报的标准差。式 (15.3) 不需要 $p(s'\mid s,a)$，也不需要 $r(s,a)$。</p>
+  </section>
+
+  <section>
+    <h2>4. MC Basic 算法</h2>
+    <p>MC Basic 就是把策略迭代（反复"打分 → 改招"，直到改不动为止）里的评估换成式 (15.3)，其余照旧。</p>
+    <div class="def">
+      <span class="label">算法 15.2（MC Basic）</span>
+      <p>输入：初始策略 $\pi_0$，每个状态动作对的回合数 $N$。第 $k$ 轮：（i）对每个 $(s,a)$，从它出发按 $\pi_k$ 跑 $N$ 个完整回合，用式 (15.3) 算出 $\hat q_{\pi_k}(s,a)$；（ii）对每个状态 $s$ 做改进 $\pi_{k+1}(s)=\argmax_a\hat q_{\pi_k}(s,a)$。策略不再改变就停。</p>
+    </div>
+    <p>和策略迭代比，差别只在评估这一步：策略迭代解方程拿到准确的 $v_{\pi_k}$，MC Basic 用回合平均值拿到近似的 $\hat q_{\pi_k}$。因为改进那一步吃的是动作值，两处都不需要模型。</p>
+    <p>算法对每个 $(s,a)$ 都要求"从它出发"跑回合，这条要求叫探索起点假设（每个状态动作对都有机会当回合的起点）。很多真实系统做不到，0016 课专门处理这件事。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 210" role="img" aria-label="MC Basic 一轮的流程">
+        <rect x="20" y="30" width="120" height="52" rx="5" class="box"/>
+        <text x="46" y="52" class="val-b">从每对出发</text>
+        <text x="46" y="70" class="lbl">跑 N 个回合</text>
+        <rect x="200" y="30" width="130" height="52" rx="5" class="box"/>
+        <text x="220" y="52" class="val-b">算回报的平均</text>
+        <text x="220" y="70" class="lbl">得到估计的动作值</text>
+        <rect x="390" y="30" width="130" height="52" rx="5" class="box-a"/>
+        <text x="418" y="52" class="val-b">取最大改进</text>
+        <text x="410" y="70" class="lbl">策略变好一点</text>
+        <path d="M140 56 H188" class="arrow"/>
+        <path d="M181 51 l9 5 l-9 5" class="arrow"/>
+        <path d="M330 56 H378" class="arrow-a"/>
+        <path d="M371 51 l9 5 l-9 5" class="arrow-a"/>
+        <path d="M455 82 V140 H80 V82" class="arrow"/>
+        <path d="M75 90 l5 -10 l5 10" class="arrow"/>
+        <text x="150" y="162" class="lbl">新策略再跑回合，直到策略不再变</text>
+        <text x="20" y="196" class="lbl">代价：每个状态动作对都要单独准备起点与回合</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 15.3</span>
+        MC Basic 一轮做三件事：为每一对跑回合、把回报平均成动作值、按动作值改策略。
+        评估用的是数据，改进只看估计出来的动作值。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>5. 在网格世界上跑 MC Basic</h2>
+    <p>用 0014 课定义的小网格世界：s1、s2、s3、s4 排成两行两列，s4 是目标，进入它得奖励 +1 并且回合结束，撞墙留在原地奖励 0，折扣因子 0.9，s4 的价值固定为 0。并列时按上、下、左、右的顺序取靠前的动作。三个非终止状态乘四个动作，一共 12 个状态动作对。</p>
+    <p>取策略 $\pi_0$：s1 选下，s2 选左，s3 选右。先算它的真实价值：s3 向右一步进目标，$v_{\pi_0}(s_3)=1$；s1 向下到 s3，$v_{\pi_0}(s_1)=0.9\times1=0.9$；s2 向左到 s1，$v_{\pi_0}(s_2)=0.9\times0.9=0.81$。再算真实动作值，留给后面核对：s1 的四个动作值依次是 0.81、0.9、0.81、0.729，s2 是 0.729、1、0.81、0.729，s3 是 0.81、0.9、0.9、1。</p>
+    <p>现在只看回合数据。从 s2 选左这一对出发，回合是 s2 向左到 s1（奖励 0），再向下到 s3（奖励 0），再向右进 s4（奖励 +1），回报是 $0.9^2\times1=0.81$；从 s3 选右出发，回报是 1；从 s1 选右出发，回合是 s1 到 s2、s2 回到 s1、s1 到 s3、s3 到 s4，回报是 $0.9^3=0.729$。</p>
+    <p>这个世界的转移是确定的，所以从同一对出发的每个回合都完全一样，一个回合就等于精确值。真实问题的转移和奖励都带随机性，同一个对的回报每次不同，必须按式 (15.3) 跑很多回合取平均。</p>
+    <p>拿这些估计做一次改进：s1 处最大的是下，s2 处最大的是下，s3 处最大的是右。得到的 $\pi_1$ 是下、下、右，它的真实价值是 $(0.9,1,1,0)$，比 $\pi_0$ 的 $(0.9,0.81,1,0)$ 在 s2 上严格变好。改进之所以能发生，全靠 s2 处选左的动作值只有 0.81，而选下的动作值是 1。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 250" role="img" aria-label="网格世界与一条回合轨迹，以及它给四个状态动作对提供的样本">
+        <rect x="30" y="40" width="70" height="64" class="box"/>
+        <rect x="100" y="40" width="70" height="64" class="box"/>
+        <rect x="30" y="104" width="70" height="64" class="box"/>
+        <rect x="100" y="104" width="70" height="64" class="box-a"/>
+        <text x="56" y="78" class="val-b">s1</text>
+        <text x="126" y="78" class="val-b">s2</text>
+        <text x="56" y="142" class="val-b">s3</text>
+        <text x="126" y="142" class="val-b">s4</text>
+        <text x="60" y="30" class="lbl">轨迹起点</text>
+        <path d="M100 72 H66" class="arrow-a"/>
+        <path d="M75 67 l-9 5 l9 5" class="arrow-a"/>
+        <text x="200" y="56" class="lbl">回合：s1 选右，s2 选左，s1 选下，s3 选右</text>
+        <text x="200" y="82" class="val">(s1, 右) 回报 0.729</text>
+        <text x="200" y="108" class="val">(s2, 左) 回报 0.81</text>
+        <text x="200" y="134" class="val">(s1, 下) 回报 0.9</text>
+        <text x="200" y="160" class="val">(s3, 右) 回报 1</text>
+        <text x="200" y="192" class="lbl">一条回合同时给四对提供了样本</text>
+        <text x="30" y="216" class="lbl">回报从后往前算：每一步都是"这一步的奖励 + 0.9 乘下一步的回报"</text>
+        <text x="30" y="238" class="lbl">按首次访问型统计，这一局里每一对只算一次</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 15.4</span>
+        从 s1 选右出发的回合，轨迹是 s1、s2、s1、s3、s4。它在一步之内给出了四对的回报，
+        所以一条回合不必只服务一个状态动作对。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>6. 数据效率上的两点改进</h2>
+    <p>MC Basic 的成本很高：每个状态动作对都要跑 $N$ 个回合，一共是 $N|\mathcal S||\mathcal A|$ 个完整回合，本课例子里就是 $12N$ 个。</p>
+    <p>改进一，一条回合里经过的每一对都能贡献样本。以图 15.4 的那条回合为例，它同时给出了四对的回报。回报可以从后往前一次算完：</p>
+    <div class="eq">
+      <span class="eq-body">$$g_t=R_{t+1}+\gamma g_{t+1},\qquad g_T=0.$$</span>
+      <span class="eq-num">(15.4)</span>
+    </div>
+    <p>式中 $g_t$ 是第 $t$ 步的回报，$T$ 是回合结束的那一步。这条递推只用到奖励序列，从最后一对开始往前推，一条轨迹上所有对的回报一次就能算出来。</p>
+    <p>统计口径有两种：每次访问型（同一对在一局里出现几次就记几个样本）与首次访问型（同一对只记第一次出现）。两者都收敛（一轮轮算下去，数值不再明显变化，稳定下来了），首次访问型的样本之间相互独立，写证明更省事。</p>
+    <p>改进二，不必等所有对都估完再改进。每跑完一个回合就更新轨迹上那几对的估计，然后立刻做一次策略改进，让后面的回合用上更好的策略。这样把评估与改进压进了每一局，样本效率（拿到同样多的经验能学多好，效率高就是更省数据）明显提高。</p>
+    <p>量级上还是要心里有数。取单回合回报的标准差 $\sigma=0.25$，想把标准误压到 0.05，需要 $N=(0.25/0.05)^2=25$ 个回合；12 个对就是 300 个完整回合。复用样本能把常数倍降下来，降不了一整个量级。</p>
+    <figure class="fig">
+      <svg viewBox="0 0 540 230" role="img" aria-label="改进前后每条回合服务多少个状态动作对">
+        <text x="30" y="28" class="val-b">改进前</text>
+        <rect x="30" y="42" width="90" height="34" rx="4" class="box"/>
+        <text x="42" y="64" class="lbl">一局一对</text>
+        <text x="140" y="64" class="lbl">要 12N 个回合，还要为每一对单独准备起点</text>
+        <text x="30" y="118" class="val-b">改进一</text>
+        <rect x="30" y="132" width="90" height="34" rx="4" class="box-a"/>
+        <text x="42" y="154" class="lbl">一局多对</text>
+        <text x="140" y="154" class="lbl">一条轨迹上的每一对都拿到一个样本</text>
+        <text x="30" y="196" class="val-b">改进二</text>
+        <rect x="30" y="176" width="90" height="34" rx="4" class="box-a"/>
+        <text x="42" y="198" class="lbl">走完就改</text>
+        <text x="140" y="198" class="lbl">不必等全部估计做完，改进立刻发生</text>
+      </svg>
+      <figcaption class="fig-cap"><span class="fig-num">图 15.5</span>
+        两点改进把每个回合榨得更干：一局里的所有对都用上，而且跑完一局就更新一次策略。
+        下一课在这两点上继续往前走。</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>小结</h2>
+    <ul>
+      <li>期望不知道分布时用样本平均去估，样本均值无偏，方差按 $1/N$ 缩小。</li>
+      <li>动作价值有两种算法：从状态价值出发要转移概率，直接从回报出发不用模型。</li>
+      <li>MC Basic 把策略迭代的评估换成回合回报的平均，其余步骤照旧。</li>
+      <li>它要求每个状态动作对都能当起点，而且成本是 $N|\mathcal S||\mathcal A|$ 个回合。</li>
+      <li>数据效率有两点改进：一条回合服务多对，跑完一局就改策略。</li>
+    </ul>
+    <p>下一课先把"每个对都要能当起点"这条要求讲清楚，再把它换成一条不需要起点也能持续探索的规则：让策略按探索率（每次决策时，有多大比例的概率去做"随便试一个"）$\varepsilon$ 随机选一个动作，这条规则在 0016 课叫 $\varepsilon$-greedy 策略。</p>
+  </section>
+
+  <section class="exercises">
+    <h2>课后练习</h2>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">1. 本课说的"无模型"是什么意思？</p>
+      <ol class="mcq-options">
+        <li>不需要任何数据，直接用公式算出价值</li>
+        <li>不知道转移概率与奖励函数，只有样本</li>
+        <li>不需要策略，直接学出最优的那个动作</li>
+        <li>不需要折扣因子，奖励按原值相加</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：无模型指转移概率 $p(s'\mid s,a)$ 与奖励函数 $r(s,a)$ 都不知道，只能靠一次次真实经历。</p>
+        <p>A 说反了，数据是无模型方法唯一的信息来源。C 混淆了"无模型"与"无策略"，策略一直存在。D 与模型无关，折扣因子照旧要用。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">2. MC Basic 每一轮估计的是哪一个量？</p>
+      <ol class="mcq-options">
+        <li>最优价值 $v^*$，与当前策略无关</li>
+        <li>转移概率 $p(s'\mid s,a)$</li>
+        <li>每个状态的状态价值 $v_{\pi_k}(s)$</li>
+        <li>每个状态动作对的动作价值 $q_{\pi_k}(s,a)$</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：评估用式 (15.3) 估的是 $q_{\pi_k}(s,a)$，改进再用它去挑动作，两步都只需要动作值。</p>
+        <p>A 只会在策略迭代收敛之后才等于 $v^*$，中途估计的是当前策略。B 属于模型，无模型方法学不到它。C 只在第一行那种需要模型的算法里才够用。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">3. 式 (15.2) 的第一行要用到 $p(s'\mid s,a)$，这说明什么？</p>
+      <ol class="mcq-options">
+        <li>从状态价值反推动作值需要模型，从回报算不需要</li>
+        <li>动作价值本身离不开转移概率</li>
+        <li>状态价值一定比动作价值更难估计</li>
+        <li>只要策略是确定性的，就用不到转移概率</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：第二行把动作价值写成回报的期望，回报是从真实回合里量出来的，所以不需要模型。这才是无模型路线的入口。</p>
+        <p>B 被第二行直接否定。C 与难易无关，两行算的是同一个量。D 错在把"策略是否随机"与"要不要模型"绑在一起，就算策略不随机，也照样要用转移概率。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">4. 式 (15.3) 里的 $g^{(i)}(s,a)$ 指的是什么？</p>
+      <ol class="mcq-options">
+        <li>第 $i$ 个回合里状态 $s$ 被访问了几次</li>
+        <li>第 $i$ 个回合里一共走了多少步</li>
+        <li>第 $i$ 个从 $(s,a)$ 出发的回合拿到的回报</li>
+        <li>第 $i$ 次改进后动作值变化了多少</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：每个从 $(s,a)$ 出发的回合给出一整个回报，它是回报这个随机变量的一次采样，$N$ 次采样取平均就是估计。</p>
+        <p>A 记的是访问次数，那是"每次访问型"统计口径里的计数，不是回报。B 记的是步数，步数本身不带奖励。D 是相邻两轮估计之差，与式 (15.3) 无关。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="1">
+      <p class="mcq-q">5. 把每个状态动作对的回合数从 $N$ 增加到 $4N$，估计的标准误大约怎么变？</p>
+      <ol class="mcq-options">
+        <li>缩小到原来的四分之一</li>
+        <li>缩小到原来的一半</li>
+        <li>缩小到原来的十六分之一</li>
+        <li>保持不变，只把系统性偏差抹掉</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：由命题 15.1，$\bar X_N$ 的标准差是 $\sigma/\sqrt N$。样本数翻四倍，$\sqrt N$ 翻两倍，标准误减半。</p>
+        <p>A 把标准误当成了方差。C 是样本数翻十六倍的效果。D 说反了：样本均值本来就是无偏的，多采样减小的是波动，不是偏差。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="3">
+      <p class="mcq-q">6. 某一个状态动作对在 MC Basic 里从来没有被访问过，会怎样？</p>
+      <ol class="mcq-options">
+        <li>它的动作值记为 0，不影响后续改进</li>
+        <li>算法会自动跳过该状态，照样收敛</li>
+        <li>它的动作值由相邻状态插值补上</li>
+        <li>它没有估计值，改进可能挑错动作</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：式 (15.3) 需要样本，没有样本就没有求平均的对象，这一对的动作值只能空着；改进在缺估计的状态上就没有可靠依据。</p>
+        <p>A 用 0 顶替会引入错误，0 不代表"没数据"。B 跳过不等于学到。C 是凭空插值，MC Basic 不做这件事。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">7. 某个策略让回合永远不结束，MC Basic 会遇到什么问题？</p>
+      <ol class="mcq-options">
+        <li>从这些对出发的回报无法定义，样本拿不到</li>
+        <li>回合只是变长，平均之后仍然准确</li>
+        <li>折扣因子会自动退化成 0</li>
+        <li>算法会退化成值迭代</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：回报要把奖励一路加起来，回合不结束就永远加不完，回报没有定义，也就没有可以平均的样本。</p>
+        <p>B 忽略了"加不完"这件事。C 没有自动机制，折扣因子是人设定的。D 把两种算法混在一起，值迭代要模型，本课讨论的就是没有模型的情形。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">8. 网格世界里 $\pi_0$ 在 s1、s2、s3 上分别选下、左、右。从 s2 选左出发的那个回合，回报是多少？</p>
+      <ol class="mcq-options">
+        <li>0.9，把两步的折扣算成了一次</li>
+        <li>0.729，把路上的三步都算了折扣</li>
+        <li>0.81，因为两步之后才进目标</li>
+        <li>1，因为最终进入了目标</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：路径是 s2 到 s1、s1 到 s3、s3 到 s4，奖励依次是 0、0、1，所以回报是 $0.9^2\times1=0.81$。</p>
+        <p>A 少乘了一个 0.9。B 多乘了一个 0.9，奖励只在最后一步出现。D 忘了折扣，把即时奖励当成回报。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="2">
+      <p class="mcq-q">9. 3 个非终止状态、每个状态 4 个动作，每个状态动作对跑 25 个回合，MC Basic 一共要跑多少个回合？</p>
+      <ol class="mcq-options">
+        <li>25 个</li>
+        <li>75 个</li>
+        <li>300 个</li>
+        <li>12 个</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：状态动作对有 $3\times4=12$ 个，每个跑 25 个回合，一共 $12\times25=300$ 个完整回合。</p>
+        <p>A 只算了单个对的回合数。B 把状态数当成了对数。D 只算了状态动作对的个数，漏掉了每个对要跑的回合数。</p>
+      </div>
+    </div>
+
+    <div class="mcq" data-answer="0">
+      <p class="mcq-q">10. 为什么要把每次访问型与首次访问型分开说？</p>
+      <ol class="mcq-options">
+        <li>因为同一对在一局里可能出现多次，两种口径的样本集不同</li>
+        <li>因为只有首次访问型的估计才收敛</li>
+        <li>因为每次访问型必须知道转移概率</li>
+        <li>因为首次访问型不能用折扣因子</li>
+      </ol>
+      <div class="mcq-explain">
+        <p>为什么：轨迹可能绕回同一个状态并再次选同一个动作，这时同一对在一局里出现了两次。两种口径决定这两次算一个样本还是两个。</p>
+        <p>B 不成立，两者都会收敛，只是首次访问型的样本更独立。C 错在无模型方法两种口径都用不到模型。D 与折扣无关，两种口径都用同一套折扣规则下的回报。</p>
+      </div>
+    </div>
+
+  </section>
+
+  <footer class="lesson-foot">
+    <div class="primary-source">
+      <h2>一手来源</h2>
+      <p>S. Zhao, <em>Mathematical Foundations of Reinforcement Learning</em>, Springer, 2025, 第 5 章第 5.1–5.2 节。</p>
+      <p>蒙特卡洛预测与控制的经典表述见 R. S. Sutton 与 A. G. Barto, <em>Reinforcement Learning: An Introduction</em>, 第 2 版第 5.1 节与第 5.3 节。</p>
+    </div>
+    <p class="ask">有不清楚的地方，直接追问你的 AI 老师，它是你的私教。比如可以问："把式 (15.3) 的无偏性用掷骰子再讲一遍"，或者 "为什么确定性网格世界里一个回合就够了？"。</p>
+  </footer>
+
+</article>
+<script src="../assets/katex/katex.min.js"></script>
+<script src="../assets/katex/contrib/auto-render.min.js"></script>
+<script src="../assets/lesson.js"></script>
+<script src="../assets/math.js"></script>
+</body>
+</html>
