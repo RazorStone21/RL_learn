@@ -1,0 +1,45 @@
+name: Deploy to GitHub Pages
+
+# 用 Actions 发布而不是「Deploy from a branch」：
+#   ① configure-pages 带 enablement: true，会自己把 Pages 打开，不用手动点设置；
+#   ② 以后每次 push 自动重新发布；
+#   ③ 按 Actions 方式发布时 artifact 是原样提供的，不经过 Jekyll，
+#      因此不需要 .nojekyll（那个文件是给分支发布方式用的）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 取出仓库
+        uses: actions/checkout@v4
+
+      - name: 配置 Pages（若未开启则自动开启）
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: 打包站点
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # 整个仓库就是站点。该 action 会自动排除 .git。
+          path: .
+
+      - name: 发布
+        id: deployment
+        uses: actions/deploy-pages@v4
