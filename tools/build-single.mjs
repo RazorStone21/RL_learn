@@ -14,6 +14,7 @@
 
    用法:
        node tools/build-single.mjs
+       node tools/build-single.mjs --check    # 只校验 dist/ 里的版本是否最新（CI 用）
    ========================================================================== */
 
 import fs from 'node:fs';
@@ -215,8 +216,18 @@ window.RL_DOC = (function () {
 }
 
 const { html, fonts } = build();
-fs.mkdirSync(OUT_DIR, { recursive: true });
-fs.writeFileSync(OUT, html, 'utf8');
+const checkOnly = process.argv.includes('--check');
 
-const mb = (fs.statSync(OUT).size / 1024 / 1024).toFixed(2);
-console.log(`已生成 dist/rl-learn.html（${mb} MB，${docs.length} 篇文档，内联 KaTeX 字体 ${fonts} 个）`);
+if (checkOnly) {
+  const old = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : '';
+  if (old !== html) {
+    console.error('dist/rl-learn.html 已过期，请运行：node tools/build-single.mjs');
+    process.exit(1);
+  }
+  console.log('dist/rl-learn.html 是最新的');
+} else {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  fs.writeFileSync(OUT, html, 'utf8');
+  const mb = (fs.statSync(OUT).size / 1024 / 1024).toFixed(2);
+  console.log(`已生成 dist/rl-learn.html（${mb} MB，${docs.length} 篇文档，内联 KaTeX 字体 ${fonts} 个）`);
+}

@@ -4,3 +4,6 @@
 # （这个坑在 Windows 上真的踩到了，见 README「几个踩过的坑」。）
 *.sh text eol=lf
 .gitattributes text eol=lf
+# 单文件版的产物是「字节级」比较出来的：CI 用 --check 比对哈希，
+# 换行被转成 CRLF 会直接判过期。体积上也没必要在仓库里存一份 CRLF。
+dist/*.html -text

@@ -60,7 +60,10 @@ ttf/woff 是给 IE 时代兜底的，全带上会把文件从 2.7 MB 撑到 4.5 
 构建脚本会检查素材里有没有 `</script>` / `</template>` —— 这种串会截断内联块，
 必须在构建期就报错，而不是生成一个语法坏掉的文件。
 
-`dist/` 在 `.gitignore` 里：产物随时可重建，不跟着仓库走。
+`dist/rl-learn.html` **在仓库里**，所以线上也能直接下载：
+<https://razorstone21.github.io/RL_learn/dist/rl-learn.html>。
+构建是确定性的（同样的输入输出同样的字节），CI 用 `--check` 比对，
+**改了课程却忘了重打包会被拦下**，不会把旧版本发出去。
 
 ## 学习进度（记住读到哪儿）
 
@@ -137,6 +140,7 @@ docs/plain-terms.md         白话术语表（含业务与技术外来词）
 ./tools/validate-all.sh     # 11 道闸门，全绿才算通过
 python3 tools/style-report.py --check   # 文风闸门
 node tools/build-manifests.mjs --check  # 课表是不是最新的（改过 manifest 就要重跑）
+node tools/build-single.mjs --check     # 单文件版是不是最新的（改过任何课程/样式/脚本都要重跑）
 ```
 
 11 道闸门依次是：课程结构、HTML 标签平衡、真实 Pyodide 端到端判题、

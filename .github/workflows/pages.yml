@@ -39,6 +39,11 @@ jobs:
       - name: 校验课表没有过期
         run: node tools/build-manifests.mjs --check
 
+      # 单文件版是提交进仓库的产物（站点上要能直接下载），构建是确定性的，
+      # 这里比对一次：课程改了却忘了重打包，线上那份就会是旧的。
+      - name: 校验单文件版没有过期
+        run: node tools/build-single.mjs --check
+
       - name: 打包站点
         uses: actions/upload-pages-artifact@v3
         with:
