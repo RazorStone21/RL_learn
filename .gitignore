@@ -10,3 +10,7 @@ __pycache__/
 .snapshots/
 # 注：闸门 6（红线不变量）的基线是 tools/lesson-invariants.json，不依赖任何 HTML 快照。
 # 早先的 .baseline/ 已删除——那 4 个文件的编号还是重构前的，与现在的课程对不上。
+
+# 单文件版的构建产物（2.7MB），用 `node tools/build-single.mjs` 随时重生成，
+# 不放进仓库，免得 Pages 每次部署都多传一份 2.7MB 的重复内容。
+dist/

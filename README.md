@@ -44,6 +44,24 @@ Python 运行时（Pyodide 的 wasm 和 numpy 轮子都是 `fetch` 来的，被�
 | 阅读、公式、插图、选择题、进度 | ✅ | ✅ |
 | 进阶篇 Python 代码题 | ❌ 降级为「自评完成」 | ✅ 浏览器内真跑 |
 
+### 方式三：单文件版（整门课装进一个 HTML）
+
+```bash
+node tools/build-single.mjs     # 生成 dist/rl-learn.html，约 2.7 MB
+```
+
+双击这个文件就能读，**旁边不需要 `assets/`、也不需要 `pyodide/`** —— 适合发给别人、
+放 U 盘、当附件。功能与「双击 index.html」完全一致（同样的阅读、公式、进度），
+代码题同样降级为「看答案 + 自评完成」，因为单文件里没有 Pyodide。
+
+做法：58 讲课 + 3 篇参考文档的正文在构建期各存成一个 `<template>`，打开某课时由外壳
+拼成完整文档塞进 iframe 的 `srcdoc`；KaTeX 的 20 个字体以 base64 内联（只保留 woff2，
+ttf/woff 是给 IE 时代兜底的，全带上会把文件从 2.7 MB 撑到 4.5 MB）。
+构建脚本会检查素材里有没有 `</script>` / `</template>` —— 这种串会截断内联块，
+必须在构建期就报错，而不是生成一个语法坏掉的文件。
+
+`dist/` 在 `.gitignore` 里：产物随时可重建，不跟着仓库走。
+
 ## 学习进度（记住读到哪儿）
 
 进度全部存在浏览器本地，不上传：
@@ -92,6 +110,7 @@ pyodide/                    内置 Python 运行时 + numpy（离线，约 25 MB
 tools/
   serve.py                  本地服务器（多线程 + 禁用缓存）
   build-manifests.mjs       把两份 manifest.json 打平成 assets/manifests.js（改课表后必跑）
+  build-single.mjs          打包单文件版 → dist/rl-learn.html
   validate-all.sh           一键跑完 11 道验收闸门
   check-lesson.py           课程结构 + 习题完整性 + 真的执行判题
   check-html.py             HTML 标签平衡 + 块级元素嵌套

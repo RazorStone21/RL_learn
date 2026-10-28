@@ -262,6 +262,24 @@
     return (L ? L.dir : 'lessons/') + file;
   }
 
+  /* 多文件版：iframe 去加载那个 HTML。
+     单文件版（window.RL_DOC 由构建脚本注入）：把内联好的整篇文档塞进 srcdoc。
+     注意 srcdoc 的键是带目录的路径（lessons/0003-….html），和 iframe 的 src 同源同形。 */
+  function setView(file) {
+    var key = resolveSrc(file);
+    if (typeof window.RL_DOC === 'function') {
+      var doc = window.RL_DOC(key);
+      if (doc) { view.srcdoc = doc; return; }
+      // 单文件里找不到这篇：别退回 src（会撞 404），给一句能看懂的说明
+      view.srcdoc = '<!doctype html><meta charset="utf-8">' +
+        '<p style="font-family:sans-serif;padding:3rem;line-height:1.8">' +
+        '这篇内容没有打包进单文件：<code>' + key + '</code><br>' +
+        '重新运行 <code>node tools/build-single.mjs</code> 生成一份新的。</p>';
+      return;
+    }
+    view.src = key;
+  }
+
   function navigate(file) {
     if (!file) return;
     var L = byFile[file];
@@ -271,7 +289,7 @@
       if (/^(reference\/|https?:)/.test(file)) {
         // 参考文档照常打开，只是不进「上次学习」
         current = file;
-        view.src = file;
+        setView(file);
         crumb.textContent = '参考文档';
         document.title = '参考文档 — 强化学习的数学原理';
         return;
@@ -281,7 +299,7 @@
     }
 
     current = file;
-    view.src = resolveSrc(file);
+    setView(file);
     crumb.textContent = L ? (L.number + ' · ' + L.title) : file;
     document.title = (L ? L.number + ' · ' + L.title + ' — ' : '') + '强化学习的数学原理';
 
@@ -402,7 +420,7 @@
     if (!a) return;
     e.preventDefault();
     current = a.getAttribute('href');
-    view.src = current;
+    setView(current);
     crumb.textContent = a.textContent;
     Array.prototype.forEach.call(toc.querySelectorAll('.toc-item'), function (x) {
       x.classList.remove('is-active');
@@ -504,10 +522,10 @@
       toast('当前浏览器不允许本地存储，进度只在本次打开期间有效。建议用 Chrome 或 Edge。');
     }
 
-    if (location.protocol === 'file:') {
+    if (window.RL_SINGLE || location.protocol === 'file:') {
       pyStatus.textContent = '离线模式：代码题不可运行（阅读与进度正常）';
       pyStatus.classList.add('is-offline');
-    } else {
+    } else if (window.RLRunner && window.RLRunner.onStatus) {
       window.RLRunner.onStatus(function (state, detail) {
         pyStatus.className = 'pystatus' + (state === 'ready' ? ' is-ready' : state === 'error' ? ' is-error' : '');
         pyStatus.textContent = 'Python 运行时：' + (detail || state);

@@ -28,8 +28,8 @@
   })();
 
   // 双击打开（file://）时浏览器禁止加载 Python 运行时：fetch 读本地 wasm 会被拒。
-  // 这跟课程内容无关，代码题要降级成「可读、可看答案、不可运行」。
-  var CAN_RUN_PY = location.protocol !== 'file:';
+  // 单文件版（window.RL_SINGLE）里干脆没有运行时，同样按「不可运行」处理。
+  var CAN_RUN_PY = !window.RL_SINGLE && location.protocol !== 'file:';
 
   function loadOne(src) {
     return new Promise(function (resolve, reject) {
@@ -484,11 +484,13 @@
 
   /* 串行装载（quiz.js 在求值时就引用 window.RLStore，顺序不能乱），然后启动 */
   (async function () {
+    // 单文件版：store/quiz/sim/课表 已经内联在本页，不必也不能再去 load
+    if (window.RL_SINGLE) return;
     for (var i = 0; i < DEPS.length; i++) {
       await loadOne(BASE + DEPS[i]);
     }
   })().then(function () {
-    if (window.RLRunner && window.RLRunner.setIndexURL) {
+    if (!window.RL_SINGLE && window.RLRunner && window.RLRunner.setIndexURL) {
       window.RLRunner.setIndexURL(PYODIDE_URL);
     }
     boot();
