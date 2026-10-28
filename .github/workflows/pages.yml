@@ -34,6 +34,11 @@ jobs:
         with:
           enablement: true
 
+      # 课表是构建期从两份 manifest.json 打平的（file:// 下不能 fetch），
+      # 改完课表忘了重跑脚本的话，线上目录会缺课。这里拦住。
+      - name: 校验课表没有过期
+        run: node tools/build-manifests.mjs --check
+
       - name: 打包站点
         uses: actions/upload-pages-artifact@v3
         with:

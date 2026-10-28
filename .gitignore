@@ -8,5 +8,5 @@ __pycache__/
 
 # 课程重构前的备份，只在开发时用，不该进仓库（16MB）
 .snapshots/
-# .baseline/ 是闸门 6（红线不变量）的对照基线，只有 1.1MB，
-# 保留它，别人 clone 之后才能直接跑 tools/check-invariants.py
+# 注：闸门 6（红线不变量）的基线是 tools/lesson-invariants.json，不依赖任何 HTML 快照。
+# 早先的 .baseline/ 已删除——那 4 个文件的编号还是重构前的，与现在的课程对不上。

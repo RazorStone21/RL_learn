@@ -16,10 +16,20 @@
   var BASE = scriptSrc ? scriptSrc.replace(/lesson\.js(\?.*)?$/, '') : '../assets/';
   var PYODIDE_URL = scriptSrc ? BASE.replace(/assets\/$/, '') + 'pyodide/' : '../pyodide/';
 
-  var DEPS = ['store.js', 'quiz.js', 'runner.js', 'sim.js'];
+  var DEPS = ['store.js', 'quiz.js', 'runner.js', 'sim.js', 'manifests.js'];
 
   // 页面骨架节点：boot() 与 injectRefLinks() 都要用，所以放在 IIFE 作用域
   var article = document.querySelector('.lesson');
+
+  // 进度按「文件名」存：课号在主线/进阶篇里各自编号，文件名全局唯一。
+  var FILE = (function () {
+    var m = (location.pathname || '').match(/([^/]+\.html)$/i);
+    return m ? m[1] : '';
+  })();
+
+  // 双击打开（file://）时浏览器禁止加载 Python 运行时：fetch 读本地 wasm 会被拒。
+  // 这跟课程内容无关，代码题要降级成「可读、可看答案、不可运行」。
+  var CAN_RUN_PY = location.protocol !== 'file:';
 
   function loadOne(src) {
     return new Promise(function (resolve, reject) {
@@ -37,6 +47,12 @@
   var LESSON = article.dataset.number || '';
   var SLUG = article.dataset.slug || '';
   var inFrame = (function () { try { return window.parent && window.parent !== window; } catch (e) { return false; } })();
+
+  // 题目状态变了才通知外壳重绘目录（滚动位置由 initReadingPosition 单独发 'pos'）
+  function tellParent() {
+    if (!inFrame) return;
+    try { window.parent.postMessage({ rl: 'progress' }, '*'); } catch (e) {}
+  }
 
   /* ---------- 代码题 ---------- */
 
@@ -149,6 +165,7 @@
           out.appendChild(okP);
           setStatus('pass', '✓ 通过');
           if (window.RLStore) window.RLStore.recordCode(cid, true);
+          tellParent();
         } else {
           lines.push('✗ 未通过\n' + (res.error || '（没有给出错误信息）'));
           out.innerHTML = '';
@@ -158,6 +175,7 @@
           out.appendChild(errP);
           setStatus('fail', '✗ 未通过');
           if (window.RLStore) window.RLStore.recordCode(cid, false);
+          tellParent();
         }
       } catch (e) {
         out.innerHTML = '';
@@ -171,6 +189,37 @@
         busy = false;
         runBtn.disabled = false;
       }
+    }
+
+    /* file:// 打开：不假装能跑，给出可操作的说明（用户可能只是没起服务） */
+    if (!CAN_RUN_PY) {
+      runBtn.disabled = true;
+      runBtn.title = '直接打开 HTML 时浏览器不允许加载 Python 运行时';
+
+      var note = document.createElement('p');
+      note.className = 'code-offline';
+      note.innerHTML = '这道题需要浏览器内的 Python 运行时。你现在是直接打开这个 HTML，' +
+        '浏览器不允许它加载本地运行时——不是课程坏了。' +
+        '要看运行结果，请用 <code>./start.sh</code> 起本地服务，或访问 GitHub Pages 上的版本；' +
+        '也可以点「显示参考答案」，把代码复制到本机跑。';
+      ex.appendChild(note);
+
+      var mark = document.createElement('button');
+      mark.type = 'button';
+      mark.className = 'btn btn-ghost';
+      mark.textContent = '我在本机跑通了';
+      if (window.RLStore && window.RLStore.isCodePassed(cid)) {
+        mark.disabled = true;
+        mark.textContent = '✓ 已标记完成';
+      }
+      mark.addEventListener('click', function () {
+        if (window.RLStore) window.RLStore.recordCode(cid, true);
+        mark.disabled = true;
+        mark.textContent = '✓ 已标记完成';
+        setStatus('pass', '✓ 已标记');
+        tellParent();
+      });
+      actions.insertBefore(mark, status);
     }
 
     runBtn.addEventListener('click', run);
@@ -219,27 +268,46 @@
 
   /* ---------- 上下课导航（独立打开时） ---------- */
 
+  // 课表来自 assets/manifests.js。以前这里 fetch('../lessons/manifest.json')，
+  // 双击打开（file://）读本地 JSON 会被浏览器拒绝，导航就永远不出现。
+  function pickManifest() {
+    var all = window.RL_MANIFESTS || {};
+    var keys = Object.keys(all);
+    for (var k = 0; k < keys.length; k++) {
+      var m = all[keys[k]];
+      if (!m || !m.lessons) continue;
+      for (var i = 0; i < m.lessons.length; i++) {
+        if (m.lessons[i].number === LESSON) return m;
+      }
+    }
+    return null;
+  }
+
   function injectNav() {
     if (inFrame) return;
-    fetch('../lessons/manifest.json')
-      .then(function (r) { return r.json(); })
-      .then(function (m) {
-        var i = m.lessons.findIndex(function (l) { return l.number === LESSON; });
-        if (i < 0) return;
-        var prev = m.lessons[i - 1], next = m.lessons[i + 1];
-        var nav = document.createElement('nav');
-        nav.className = 'lesson-nav';
-        var a = document.createElement('a');
-        a.href = '../index.html#/' + (prev ? prev.file : '');
-        a.textContent = prev ? '← ' + prev.number + ' ' + prev.title : '← 课程目录';
-        var b = document.createElement('a');
-        b.href = '../index.html#/' + (next ? next.file : '');
-        b.textContent = next ? next.number + ' ' + next.title + ' →' : '课程目录 →';
-        nav.appendChild(a);
-        nav.appendChild(b);
-        document.body.insertBefore(nav, article);
-      })
-      .catch(function () { /* 独立打开且没有服务器时静默 */ });
+    var m = pickManifest();
+    if (!m) return;
+
+    var i = -1;
+    for (var k = 0; k < m.lessons.length; k++) {
+      if (m.lessons[k].number === LESSON) { i = k; break; }
+    }
+    if (i < 0) return;
+
+    var prev = m.lessons[i - 1];
+    var next = m.lessons[i + 1];
+
+    var nav = document.createElement('nav');
+    nav.className = 'lesson-nav';
+    var a = document.createElement('a');
+    a.href = '../index.html#/' + (prev ? prev.file : '');
+    a.textContent = prev ? '← ' + prev.number + ' ' + prev.title : '← 课程目录';
+    var b = document.createElement('a');
+    b.href = '../index.html#/' + (next ? next.file : '');
+    b.textContent = next ? next.number + ' ' + next.title + ' →' : '课程目录 →';
+    nav.appendChild(a);
+    nav.appendChild(b);
+    document.body.insertBefore(nav, article);
   }
 
   /* ---------- 在外壳里点击站内链接 → 让外壳导航 ---------- */
@@ -262,6 +330,7 @@
   if (window.RLQuiz) {
     window.RLQuiz.init(article, LESSON, function (qid, correct) {
       if (window.RLStore) window.RLStore.recordMcq(qid, correct);
+      tellParent();
     });
   }
 
@@ -269,6 +338,7 @@
   wireRunnerStatus(document);
   injectRefLinks();
   injectNav();
+  initReadingPosition();
 
   // 让外壳知道这一课已经装配完成（用于统计题数）
   if (inFrame) {
@@ -277,11 +347,120 @@
         rl: 'lesson-ready',
         number: LESSON,
         slug: SLUG,
+        file: FILE,
         mcq: article.querySelectorAll('.mcq').length,
         code: article.querySelectorAll('.code-ex').length,
       }, '*');
     } catch (e) {}
   }
+  }
+
+  /* ---------- 阅读位置：记住本课停在哪、停了多久 ---------- */
+
+  function initReadingPosition() {
+    var store = window.RLStore;
+    if (!store || !FILE) return;
+
+    var framed = (function () {
+      try { return window.parent && window.parent !== window; } catch (e) { return false; }
+    })();
+
+    var restored = false;
+    var settled = false;
+    var userMoved = false;
+    var lastSave = 0;
+    // 外壳里等它把位置发过来；单独打开时直接读本机存的
+    var wantRatio = framed ? null : store.positionOf(FILE);
+
+    function ratio() {
+      var h = document.documentElement.scrollHeight - window.innerHeight;
+      if (h <= 0) return 0;
+      return Math.min(1, Math.max(0, window.scrollY / h));
+    }
+
+    /* KaTeX 渲染会改变文档高度。渲染完再滚，否则位置会偏。
+       进阶篇（advanced/）没有引入 KaTeX，这时不必等，直接开始。 */
+    function whenSettled(fn) {
+      function go() {
+        requestAnimationFrame(function () { requestAnimationFrame(fn); });
+      }
+      if (typeof window.renderMathInElement !== 'function') { go(); return; }
+
+      var tries = 0;
+      (function tick() {
+        var m = document.documentElement.getAttribute('data-math');
+        if (m === 'ready' || m === 'failed' || tries++ > 80) { go(); return; }
+        setTimeout(tick, 25);
+      })();
+    }
+
+    function maybeRestore() {
+      if (restored || !settled) return;
+      restored = true;
+      if (userMoved) return;                       // 用户已经自己滚了，别把他拽回去
+      var r = wantRatio;
+      if (typeof r !== 'number' || r < 0.02) return;
+      var h = document.documentElement.scrollHeight - window.innerHeight;
+      if (h > 0) window.scrollTo(0, Math.round(r * h));
+    }
+
+    ['wheel', 'touchmove', 'keydown'].forEach(function (ev) {
+      window.addEventListener(ev, function () {
+        if (!restored) userMoved = true;
+      }, { passive: true });
+    });
+
+    window.addEventListener('scroll', function () {
+      if (!restored) return;
+      var t = Date.now();
+      if (t - lastSave < 700) return;
+      lastSave = t;
+      var r = ratio();
+      store.savePos(FILE, r);
+      if (framed) {
+        try { window.parent.postMessage({ rl: 'pos', file: FILE, ratio: r }, '*'); } catch (e) {}
+      }
+    }, { passive: true });
+
+    window.addEventListener('message', function (e) {
+      var d = e.data;
+      if (!d || d.rl !== 'restore') return;
+      if (d.file && d.file !== FILE) return;
+      if (typeof d.ratio === 'number') wantRatio = d.ratio;
+      maybeRestore();
+    });
+
+    /* 停留时长：只在页面可见时累加，后台标签页开着不算学习 */
+    var lastTick = Date.now();
+    setInterval(function () {
+      var t = Date.now();
+      var delta = (t - lastTick) / 1000;
+      lastTick = t;
+      if (document.hidden) return;
+      store.addSeconds(FILE, delta);
+    }, 5000);
+
+    function flush() {
+      if (restored) store.savePos(FILE, ratio());
+    }
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) flush();
+      else lastTick = Date.now();
+    });
+
+    whenSettled(function () {
+      settled = true;
+      var h = document.documentElement.scrollHeight - window.innerHeight;
+      // 一屏就能读完的短页面：滚不动，按「读完」处理，否则永远停在 0%
+      if (h <= 40) { store.markRead(FILE); restored = true; return; }
+      maybeRestore();
+    });
+
+    // 告诉外壳「我准备好了，把上次的位置发给我」
+    if (framed) {
+      try { window.parent.postMessage({ rl: 'hello', file: FILE }, '*'); } catch (e) {}
+    }
   }
 
   /* ---------- 统一的参考文档入口（每课都要能一键查符号/术语） ---------- */

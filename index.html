@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>强化学习入门 · 应用向</title>
+<title>强化学习的数学原理</title>
 <link rel="stylesheet" href="assets/course.css">
 <style>
   html, body { height: 100%; }
@@ -33,12 +33,17 @@
     font-family: var(--sans); font-size: .74rem; color: var(--muted);
     margin: .4rem 0 0; display: flex; justify-content: space-between;
   }
+  .overall .overall-time { margin-top: .15rem; display: block; font-size: .72rem; }
   .resume {
     margin-top: .8rem; width: 100%; font-family: var(--sans); font-size: .82rem;
     padding: .45rem; border-radius: 5px; cursor: pointer;
     border: 1px solid var(--accent); background: var(--accent); color: #fff;
   }
   .resume:hover { background: color-mix(in srgb, var(--accent) 85%, #000); }
+  .resume-hint {
+    font-family: var(--sans); font-size: .72rem; color: var(--muted);
+    margin: .38rem 0 0; line-height: 1.45; min-height: 1em;
+  }
 
   .toc { flex: 1; overflow-y: auto; padding: .6rem 0 1.5rem; }
   .toc-part {
@@ -55,13 +60,19 @@
   .toc-item:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--ink); }
   .toc-item.is-active { background: color-mix(in srgb, var(--accent) 12%, transparent);
     border-left-color: var(--accent); color: var(--ink); font-weight: 600; }
-  .toc-num { font-family: var(--mono); font-size: .74rem; color: var(--muted); flex: 0 0 2.1rem; }
-  .toc-item.is-done .toc-num::after { content: " ✓"; color: var(--good); }
+  .toc-num {
+    font-family: var(--mono); font-size: .74rem; color: var(--muted);
+    flex: 0 0 2.9rem; white-space: nowrap;
+  }
+  .toc-item.is-read .toc-num::after { content: " ✓"; color: var(--good); font-size: .85em; }
   .toc-dot {
     flex: 0 0 auto; margin-left: auto; font-size: .7rem; color: var(--muted);
     font-family: var(--mono);
   }
   .toc-item.is-done .toc-dot { color: var(--good); }
+  .toc-item.is-last:not(.is-active) .toc-title::before {
+    content: "▸ "; color: var(--accent); font-size: .85em;
+  }
 
   .side-foot {
     border-top: 1px solid var(--rule); padding: .7rem 1.25rem;
@@ -69,6 +80,15 @@
   }
   .side-foot a { color: var(--muted); border: 0; }
   .side-foot a:hover { color: var(--accent); }
+  .side-data {
+    display: flex; gap: .4rem; padding: 0 1.25rem .85rem;
+  }
+  .mini {
+    flex: 1; font-family: var(--sans); font-size: .72rem; padding: .32rem .2rem;
+    cursor: pointer; border: 1px solid var(--rule); border-radius: 5px;
+    background: var(--paper); color: var(--muted);
+  }
+  .mini:hover { border-color: var(--accent); color: var(--accent); }
 
   /* ---------- 主区 ---------- */
   .stage { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -81,6 +101,7 @@
   .pystatus { margin-left: auto; font-family: var(--mono); font-size: .74rem; }
   .pystatus.is-ready { color: var(--good); }
   .pystatus.is-error { color: var(--bad); }
+  .pystatus.is-offline { color: var(--muted); }
   .view { flex: 1; border: 0; width: 100%; background: var(--paper); }
 
   .boot-error {
@@ -90,6 +111,14 @@
   }
   .boot-error code { font-size: .85em; }
   .boot-error h2 { font-family: var(--sans); border: 0; margin-top: 0; font-size: 1.05rem; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 1.4rem; transform: translateX(-50%);
+    background: var(--ink); color: var(--paper);
+    font-family: var(--sans); font-size: .82rem; line-height: 1.5;
+    padding: .55rem .95rem; border-radius: 6px; z-index: 60;
+    box-shadow: var(--shadow); max-width: 80vw;
+  }
 
   /* 目录开关按钮：宽屏隐藏 */
   .nav-toggle {
@@ -137,13 +166,15 @@
 
   <aside class="sidebar">
     <div class="side-head">
-      <h1 id="course-title">强化学习入门</h1>
+      <h1 id="course-title">强化学习的数学原理</h1>
       <p class="sub" id="course-sub">正在载入课程…</p>
       <div class="overall">
         <div class="bar"><span id="overall-bar"></span></div>
-        <p><span id="overall-text">0 / 0 课完成</span><span id="overall-pct">0%</span></p>
+        <p><span id="overall-text">0 / 0 课已读</span><span id="overall-pct">0%</span></p>
+        <p class="overall-time" id="overall-time"></p>
       </div>
       <button class="resume" id="resume" type="button">开始学习 →</button>
+      <p class="resume-hint" id="resume-hint"></p>
     </div>
     <nav class="toc" id="toc" aria-label="课程目录"></nav>
     <div class="side-foot">
@@ -151,6 +182,12 @@
       <a href="reference/algorithms.html" data-ref>算法速查</a>
       <a href="reference/notation.html" data-ref>符号表</a>
       <a href="MISSION.md" data-ref>Mission</a>
+    </div>
+    <div class="side-data">
+      <button class="mini" id="exportBtn" type="button" title="把进度存成 JSON 文件">导出进度</button>
+      <button class="mini" id="importBtn" type="button" title="从 JSON 文件恢复进度">导入</button>
+      <button class="mini" id="clearBtn" type="button" title="清空本机进度">清除</button>
+      <input id="importFile" type="file" accept="application/json,.json" hidden>
     </div>
   </aside>
 
@@ -168,378 +205,13 @@
 
 </div>
 
+<div class="toast" id="toast" hidden></div>
+
+<!-- 课表由 tools/build-manifests.mjs 从 lessons/manifest.json 生成。
+     用 <script> 而不是 fetch，才能在 file:// 下正常启动。 -->
+<script src="assets/manifests.js"></script>
 <script src="assets/store.js"></script>
 <script src="assets/runner.js"></script>
-<script>
-(function () {
-  'use strict';
-
-  var view = document.getElementById('view');
-  var toc = document.getElementById('toc');
-  var crumb = document.getElementById('crumb');
-  var pyStatus = document.getElementById('pystatus');
-  var manifest = null;
-  var current = null;
-  // 还没写出来的课（files 尚未生成）。界面要给出友好提示，而不是 404 错误页。
-  var notWritten = {};
-
-  /* ---------- 工具 ---------- */
-
-  function counts(n) { return window.RLStore.get('counts.' + n) || null; }
-
-  // 注意：进度对象在第一题被作答之前没有 mcq / code 这两个子对象，
-  // 直接下标访问会抛 TypeError 并中断整个目录渲染。这里统一做安全访问。
-  function mcqDone(p, qid) { return !!(p.mcq && p.mcq[qid] === true); }
-  function codeDone(p, cid) { return !!(p.code && p.code[cid] === true); }
-
-  function lessonDone(num) {
-    var c = counts(num);
-    if (!c || !c.mcq || !c.code) return false;
-    var p = window.RLStore.read();
-    for (var i = 1; i <= c.mcq; i++) if (!mcqDone(p, num + '-mcq-' + i)) return false;
-    for (var k = 1; k <= c.code; k++) if (!codeDone(p, num + '-code-' + k)) return false;
-    return true;
-  }
-
-  function lessonProgress(num) {
-    var c = counts(num);
-    if (!c || !c.mcq || !c.code) return '';
-    var p = window.RLStore.read();
-    var done = 0, total = c.mcq + c.code;
-    for (var i = 1; i <= c.mcq; i++) if (mcqDone(p, num + '-mcq-' + i)) done++;
-    for (var k = 1; k <= c.code; k++) if (codeDone(p, num + '-code-' + k)) done++;
-    return total ? done + '/' + total : '';
-  }
-
-  /* ---------- 目录 ---------- */
-
-  function renderToc() {
-    toc.innerHTML = '';
-    var lastSection = null;
-    manifest.parts.forEach(function (part) {
-      // 换到另一个分区时插一条分区标题
-      if (part.section && part.section !== lastSection) {
-        var sec = document.createElement('p');
-        sec.className = 'toc-section';
-        sec.textContent = part.section;
-        toc.appendChild(sec);
-        lastSection = part.section;
-      }
-      var h = document.createElement('p');
-      h.className = 'toc-part';
-      h.textContent = part.name;
-      toc.appendChild(h);
-
-      part.lessons.forEach(function (num) {
-        var L = manifest.lessons.filter(function (x) { return x.number === num; })[0];
-        if (!L) return;
-        var a = document.createElement('a');
-        a.className = 'toc-item';
-        a.href = '#/' + L.file;
-        a.dataset.number = num;
-        if (lessonDone(num)) a.classList.add('is-done');
-        if (current === L.file) a.classList.add('is-active');
-
-        var n = document.createElement('span');
-        n.className = 'toc-num';
-        n.textContent = num;
-
-        var t = document.createElement('span');
-        t.className = 'toc-title';
-        t.textContent = L.title;
-
-        var d = document.createElement('span');
-        d.className = 'toc-dot';
-        d.textContent = lessonProgress(num);
-
-        a.appendChild(n); a.appendChild(t); a.appendChild(d);
-        // 徽章要在子元素之后加，否则会排到编号前面去
-        if (notWritten[L.dir + L.file]) paintTodo(a);
-        toc.appendChild(a);
-      });
-    });
-  }
-
-  function renderOverall() {
-    var done = manifest.lessons.filter(function (L) { return lessonDone(L.number); }).length;
-    var total = manifest.lessons.length;
-    var pct = total ? Math.round(done / total * 100) : 0;
-    document.getElementById('overall-bar').style.width = pct + '%';
-    document.getElementById('overall-text').textContent = done + ' / ' + total + ' 课完成';
-    document.getElementById('overall-pct').textContent = pct + '%';
-  }
-
-  function renderAll() { renderToc(); renderOverall(); }
-
-  /* ---------- 「还没写」的课 ---------- */
-
-  // 逐个串行探测，不要并发。
-  // 曾经写成 forEach + 并发 fetch：58 个 HEAD 同时打向 Python 的单线程
-  // http.server，连接被冲垮，catch 分支就把 27 个进阶篇课程全部误标成
-  // 「写作中」。串行 + 失败重试即可避免，代价是本地几毫秒。
-  function probeLessons() {
-    var queue = manifest.lessons.slice();
-    (function next() {
-      if (!queue.length) return;
-      var L = queue.shift();
-      var url = L.dir + L.file;
-      probeOne(url, 0).then(function (ok) {
-        if (!ok) markMissing(L, url);
-        next();
-      });
-    })();
-  }
-
-  function probeOne(url, attempt) {
-    return fetch(url, { method: 'HEAD', cache: 'no-store' })
-      .then(function (r) { return r.ok; })
-      .catch(function () {
-        if (attempt >= 2) return false;
-        return new Promise(function (res) { setTimeout(res, 120); })
-          .then(function () { return probeOne(url, attempt + 1); });
-      });
-  }
-
-  // 把「写作中」标记刷到一个目录项上。renderToc 初次渲染和后续探测都调它，
-  // 两处都做同一件事，重绘时才不会把徽章弄丢（之前就丢过一次）。
-  function paintTodo(a) {
-    if (!a || a.querySelector('.toc-todo')) return;
-    a.classList.add('is-todo');
-    var t = document.createElement('span');
-    t.className = 'toc-todo';
-    t.textContent = '写作中';
-    a.appendChild(t);
-  }
-
-  function markMissing(L, url) {
-    notWritten[url] = true;
-    paintTodo(toc.querySelector('a[data-number="' + L.number + '"]'));
-    if (current === url) { showPlaceholder(L); }
-  }
-
-  function showPlaceholder(L) {
-    var doc = view.contentDocument || (view.contentWindow && view.contentWindow.document);
-    if (!doc) return;
-    doc.open();
-    doc.write('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">' +
-      '<style>body{font-family:-apple-system,"PingFang SC",sans-serif;color:#3d3d47;' +
-      'background:#fdfcf9;margin:0;padding:3.5rem 2rem;line-height:1.85}' +
-      'h1{font-size:1.35rem;color:#16161d;margin:0 0 1rem}' +
-      'p{margin:.6rem 0;max-width:34rem}code{background:#f7f6f2;padding:.12em .38em;border-radius:3px;' +
-      'font-size:.9em}</style></head><body>' +
-      '<h1>这一课还在写</h1>' +
-      '<p><strong>' + L.number + ' · ' + L.title + '</strong> 正在编写中，还没有完成。</p>' +
-      '<p>课程按赵世钰《Mathematical Foundations of Reinforcement Learning》的 10 章组织，' +
-      '每一课都包含完整的定义、定理、证明与插图，因此需要一些时间。</p>' +
-      '<p>可以先读<b>进阶篇</b>里的课程，或者回到已完成的课继续。</p>' +
-      '</body></html>');
-    doc.close();
-  }
-
-  /* ---------- 路由 ---------- */
-
-  // manifest 里的 file 是 lessons/ 下的文件名，而 iframe 位于站点根目录：
-  // 直接赋给 src 会被解析成 /0001-xxx.html（404）。这里统一补齐前缀。
-  // 两套 manifest：数学原理主线 lessons/，进阶篇存档 advanced/
-  var SOURCES = [
-    { name: '数学原理主线', dir: 'lessons/', url: 'lessons/manifest.json' },
-    { name: '进阶篇 · 原课程存档', dir: 'advanced/', url: 'advanced/manifest.json' }
-  ];
-
-  function lessonDir(file) {
-    var L = manifest && manifest.lessons.filter(function (x) { return x.file === file; })[0];
-    return (L && L.dir) || 'lessons/';
-  }
-
-  function resolveSrc(file) {
-    if (/^(lessons\/|reference\/|https?:|\/)/.test(file)) return file;
-    return lessonDir(file) + file;
-  }
-
-  function navigate(file) {
-    if (!file) return;
-    var L = manifest && manifest.lessons.filter(function (x) { return x.file === file; })[0];
-    // 地址栏里的课号不在课表里（旧书签、课程改名后留下的旧 URL）：
-    // 不要拿它去加载，回落到第一课。否则刷新后会看到 iframe 的 404 错误页。
-    if (!L) {
-      var first = manifest.lessons[0];
-      if (first) {
-        location.replace('#/' + first.file);
-        return;
-      }
-    }
-    current = file;
-    var resolved = resolveSrc(file);
-    // 还没写出来的课：显示占位说明，而不是让 iframe 撞上 404 错误页
-    if (notWritten[resolved]) { showPlaceholder(L); }
-    else { view.src = resolved; }
-    crumb.textContent = L ? (L.number + ' · ' + L.title) : file;
-    Array.prototype.forEach.call(toc.querySelectorAll('.toc-item'), function (a) {
-      a.classList.toggle('is-active', a.dataset.number === (L && L.number));
-    });
-    document.title = (L ? L.number + ' · ' + L.title + ' — ' : '') + '强化学习入门';
-  }
-
-  function route() {
-    var h = location.hash.replace(/^#\/?/, '');
-    if (!h) {
-      var first = firstIncomplete();
-      h = (first || manifest.lessons[0]).file;
-      location.replace('#/' + h);
-      return;
-    }
-    navigate(h);
-  }
-
-  function firstIncomplete() {
-    if (!manifest) return null;
-    for (var i = 0; i < manifest.lessons.length; i++) {
-      if (!lessonDone(manifest.lessons[i].number)) return manifest.lessons[i];
-    }
-    return null;
-  }
-
-  /* ---------- 窄屏抽屉：目录的打开与收起 ---------- */
-  (function () {
-    var app = document.querySelector('.app');
-    var btn = document.getElementById('navToggle');
-    var scrim = document.getElementById('scrim');
-    if (!app || !btn || !scrim) return;
-
-    function setOpen(open) {
-      app.classList.toggle('nav-open', open);
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      scrim.hidden = !open;
-    }
-    btn.addEventListener('click', function () {
-      setOpen(!app.classList.contains('nav-open'));
-    });
-    scrim.addEventListener('click', function () { setOpen(false); });
-    // 点中某一课就收起抽屉，直接开始读
-    toc.addEventListener('click', function (e) {
-      if (e.target.closest && e.target.closest('a.toc-item')) setOpen(false);
-    });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') setOpen(false);
-    });
-    // 从窄屏转到宽屏时，别把抽屉状态留着
-    window.addEventListener('resize', function () {
-      if (window.innerWidth > 736) setOpen(false);
-    });
-  })();
-
-  window.addEventListener('hashchange', route);
-
-  /* ---------- 侧栏链接 ---------- */
-
-  document.addEventListener('click', function (e) {
-    var a = e.target.closest && e.target.closest('a[data-ref]');
-    if (!a) return;
-    e.preventDefault();
-    var href = a.getAttribute('href');
-    current = href;
-    view.src = resolveSrc(href);
-    crumb.textContent = a.textContent;
-    Array.prototype.forEach.call(toc.querySelectorAll('.toc-item'), function (x) { x.classList.remove('is-active'); });
-  });
-
-  document.getElementById('resume').addEventListener('click', function () {
-    var L = firstIncomplete();
-    location.hash = '#/' + (L ? L.file : manifest.lessons[0].file);
-  });
-
-  /* ---------- 与课程页通信 ---------- */
-
-  window.addEventListener('message', function (e) {
-    var d = e.data;
-    if (!d || !d.rl) return;
-
-    if (d.rl === 'ping') {
-      e.source.postMessage({ rl: 'pong' }, '*');
-      return;
-    }
-
-    if (d.rl === 'run') {
-      window.RLRunner.executeLocal(d.code, d.tests).then(function (result) {
-        e.source.postMessage({ rl: 'result', id: d.id, result: result }, '*');
-      }).catch(function (err) {
-        e.source.postMessage({
-          rl: 'result', id: d.id, error: (err && err.message) ? err.message : String(err),
-        }, '*');
-      });
-      return;
-    }
-
-    if (d.rl === 'lesson-ready') {
-      if (d.number && d.mcq != null && d.code != null) {
-        window.RLStore.set('counts.' + d.number, { mcq: d.mcq, code: d.code });
-      }
-      renderAll();
-      return;
-    }
-
-    if (d.rl === 'progress') { renderAll(); return; }
-
-    if (d.rl === 'navigate') {
-      var href = d.href || '';
-      if (/^\d{4}-[a-z0-9-]+\.html$/.test(href)) location.hash = '#/' + href;
-      else if (href === '../index.html') location.hash = '#/';
-      return;
-    }
-  });
-
-  /* ---------- 启动 ---------- */
-
-  Promise.all(SOURCES.map(function (src) {
-    return fetch(src.url)
-      .then(function (r) { if (!r.ok) throw new Error(src.url + ' HTTP ' + r.status); return r.json(); })
-      .then(function (m) { return { src: src, m: m }; })
-      .catch(function () { return { src: src, m: null }; });   // 一侧缺失不拖垮整体
-  }))
-    .then(function (items) {
-      var lessons = [], parts = [], title = '', counts = [];
-      items.forEach(function (it) {
-        if (!it.m) return;
-        if (!title) title = it.m.title;
-        counts.push(it.m.lessonCount + ' 课');
-        (it.m.lessons || []).forEach(function (L) {
-          L.dir = it.src.dir; L.section = it.src.name; lessons.push(L);
-        });
-        (it.m.parts || []).forEach(function (p) {
-          p.section = it.src.name; parts.push(p);
-        });
-      });
-      var m = { title: title, lessons: lessons, parts: parts,
-                subtitle: counts.join(' + '), lessonCount: lessons.length };
-      manifest = m;
-      document.getElementById('course-title').textContent = m.title;
-      document.getElementById('course-sub').textContent =
-        m.subtitle + '（共 ' + m.lessonCount + ' 课） ｜ 对齐赵世钰《Mathematical Foundations of Reinforcement Learning》';
-      renderAll();
-      route();
-      probeLessons();
-
-      // 后台预热 Python，等用户真正点"运行"时就不用等了
-      window.RLRunner.onStatus(function (state, detail) {
-        pyStatus.className = 'pystatus' + (state === 'ready' ? ' is-ready' : state === 'error' ? ' is-error' : '');
-        pyStatus.textContent = 'Python 运行时：' + (detail || state);
-      });
-      // 不在这里预热 Pyodide。
-      // 它的运行时约 25MB，而主线 31 课一道代码题都没有；部署到公网后
-      // 手机上光是打开课程就会白下这 25MB。改成点「运行」时再按需加载
-      // （executeLocal 内部会调 ensurePyodide）。
-    })
-    .catch(function (err) {
-      document.body.innerHTML =
-        '<div class="boot-error"><h2>课程目录载入失败</h2>' +
-        '<p>不能读取课程目录（' + (err && err.message ? err.message : err) + '）。</p>' +
-        '<p>如果你是用 <code>file://</code> 直接打开这个 HTML，浏览器会因同源策略拒绝读取本地文件。' +
-        '请在项目目录下起一个本地服务器：</p>' +
-        '<pre><code>cd ' + '/Volumes/RAZOR/Mac/Projects/RL_Learn' + '\npython3 -m http.server 8777</code></pre>' +
-        '<p>然后访问 <a href="http://127.0.0.1:8777/">http://127.0.0.1:8777/</a>。' +
-        '也可以直接运行项目里的 <code>./start.sh</code>。</p></div>';
-    });
-})();
-</script>
+<script src="assets/app.js"></script>
 </body>
 </html>

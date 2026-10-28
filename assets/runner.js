@@ -97,6 +97,12 @@
     if (url.charAt(url.length - 1) !== '/') url += '/';
 
     loading = (async function () {
+      // file:// 下浏览器拒绝 fetch 本地 wasm/whl。早点说清楚，别让用户等 26 MB 后
+      // 看到一句看不懂的 TypeError。
+      if (location.protocol === 'file:') {
+        throw new Error('直接打开 HTML 时浏览器禁止加载 Python 运行时。' +
+          '请用 ./start.sh 起本地服务，或访问 GitHub Pages 上的版本。');
+      }
       emit('loading', '正在加载 Python 运行时（内置 Pyodide，约 26 MB，只需一次）…');
       await loadScript(url + 'pyodide.js');
       if (typeof window.loadPyodide !== 'function') {

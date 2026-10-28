@@ -746,3 +746,22 @@ th { font-weight: 600; color: var(--ink-soft); font-size: .82rem; letter-spacing
   padding: 0 .4rem;
   white-space: nowrap;
 }
+
+/* ---------- 代码题：file:// 直接打开时的降级说明 ----------
+   双击 HTML 时浏览器不许加载 Pyodide（fetch 本地 wasm 被拒）。
+   这里不是报错，而是告诉用户「怎么才能跑」，并允许自评完成。 */
+.code-offline {
+  margin: 0;
+  padding: .8rem 1.15rem;
+  font-family: var(--sans);
+  font-size: .84rem;
+  line-height: 1.65;
+  color: var(--ink-soft);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-top: 1px solid var(--rule);
+}
+.code-offline code {
+  font-family: var(--mono);
+  font-size: .92em;
+  color: var(--accent);
+}

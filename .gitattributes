@@ -1,0 +1,6 @@
+# 脚本必须是 LF。Windows 上 core.autocrlf 会把检出转成 CRLF，
+# 于是 #!/usr/bin/env bash 变成 "bash\r" —— WSL / Git Bash / macOS 下直接报
+#   /usr/bin/env: 'bash\r': No such file or directory
+# （这个坑在 Windows 上真的踩到了，见 README「几个踩过的坑」。）
+*.sh text eol=lf
+.gitattributes text eol=lf
